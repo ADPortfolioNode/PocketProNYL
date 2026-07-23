@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euxo pipefail
+set -euo pipefail
 
 # cspell:ignore BUILDKIT BuildKit gtimeout healthcheck
 # === Mensa Project Robust Start Script ===
@@ -7,16 +7,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/resolve_host_ports.sh
 . "${SCRIPT_DIR}/scripts/resolve_host_ports.sh"
 # shellcheck source=scripts/verify_windows_ports.sh
-. "${SCRIPT_DIR}/scripts/verify_windows_ports.sh"
 # Performs a safe reset and robust startup for development.
-# Usage: ./start.sh [--prune|--purge] [--yes] [--no-ingest-wait] [--build] [--diag]
-#   --prune|--purge  : run `docker system prune -a -f` and `docker volume prune -f` before starting
-#   --yes            : auto-confirm prune (implies --prune)
-#   --no-ingest-wait : start containers but do not wait for data ingestion to complete.
-#   --build          : force a rebuild of the docker images
-#   --diag           : run a diagnostic-only startup, logging all output to 'diag_output.log'
+# Usage: ./start.sh [--build] [--down]
+#   --build  : Force a rebuild of the docker images (--no-cache).
+#   --down   : Stop and remove containers, networks, and volumes.
 
 # --- Helper Functions ---
+export DOCKER_BUILDKIT=1
 
 choose_compose_command() {
     # Prefer 'docker compose' (v2) but fall back to 'docker-compose' (v1)
@@ -29,7 +26,6 @@ choose_compose_command() {
         echo "Install Docker Compose (v2 is recommended) or ensure it's on PATH." >&2
         exit 1
     fi
-    echo "Using compose command: ${COMPOSE_CMD}"
 }
 
 compose_cmd() {
@@ -40,174 +36,11 @@ compose_cmd() {
     fi
 }
 
-emit_startup_failure_bundle() {
-    echo ""
-    echo "--- STARTUP FAILURE SNAPSHOT ---" >&2
-    echo "compose command: ${COMPOSE_CMD}" >&2
-    echo "" >&2
-    echo "[compose ps]" >&2
-    compose_cmd ps >&2 || true
-    echo "" >&2
-    echo "[docker info top]" >&2
-    docker info 2>&1 | sed -n '1,60p' >&2 || true
-    echo "" >&2
-    echo "[service logs tail]" >&2
-    compose_cmd logs --tail 80 backend frontend chroma >&2 || true
-    echo "--- END SNAPSHOT ---" >&2
-}
-
-build_images_windows_direct() {
-    local node_version
-    node_version="${NODE_VERSION:-22.13.1}"
-
-    echo "Building backend image directly (Windows stability path)..."
-    if ! run_compose_with_timeout "${START_BUILD_TIMEOUT}" env DOCKER_BUILDKIT=1 docker build --progress=plain -t mensa_project-backend:latest --build-arg "CACHE_BUSTER=${BACKEND_CACHE_BUSTER}" -f backend/Dockerfile backend; then
-        return 1
-    fi
-
-    echo "Building frontend image directly (Windows stability path)..."
-    if ! run_compose_with_timeout "${START_BUILD_TIMEOUT}" env DOCKER_BUILDKIT=1 docker build --progress=plain -t mensa_project-frontend:latest \
-        --build-arg "NODE_VERSION=${node_version}" \
-        --build-arg "REACT_APP_API_BASE=" \
-        --build-arg "CACHE_BUSTER=${FRONTEND_CACHE_BUSTER:-${BACKEND_CACHE_BUSTER}}" \
-        -f frontend/Dockerfile frontend; then
-        return 1
-    fi
-
-    return 0
-}
-
 is_windows_shell() {
     case "$(uname -s 2>/dev/null || echo unknown)" in
         MINGW*|MSYS*|CYGWIN*) return 0 ;;
         *) return 1 ;;
     esac
-}
-
-configure_windows_runtime() {
-    if ! is_windows_shell; then
-        return 0
-    fi
-
-    if [ -z "${DOCKER_BIND_HOST:-}" ]; then
-        export DOCKER_BIND_HOST=127.0.0.1
-        echo "Windows: using DOCKER_BIND_HOST=${DOCKER_BIND_HOST} (avoids localhost/IPv6 wslrelay conflicts)"
-    else
-        echo "Windows: DOCKER_BIND_HOST=${DOCKER_BIND_HOST}"
-    fi
-
-    if [ "${START_UP_ATTEMPTS}" -eq 1 ]; then
-        START_UP_ATTEMPTS=2
-    fi
-}
-
-app_bind_host() {
-    if is_windows_shell; then
-        echo "${DOCKER_BIND_HOST:-127.0.0.1}"
-    else
-        echo "127.0.0.1"
-    fi
-}
-
-run_compose_up_staged() {
-    echo "Staged compose up (chroma -> backend -> frontend)..."
-    compose_cmd up -d --force-recreate chroma || return 1
-    sleep 8
-    compose_cmd up -d --force-recreate backend || return 1
-    sleep 15
-    compose_cmd up -d --force-recreate frontend || return 1
-    return 0
-}
-
-configure_build_backend() {
-    # BuildKit can intermittently fail on some Docker Desktop setups with:
-    # "failed to receive status ... EOF" during large layer operations.
-    # Default to classic builder for stability unless explicitly opted in.
-    if [ "${FORCE_BUILDKIT:-false}" = "true" ]; then
-        export DOCKER_BUILDKIT=1
-        export COMPOSE_DOCKER_CLI_BUILD=1
-        echo "Build mode: BuildKit enabled (FORCE_BUILDKIT=true)."
-    else
-        export DOCKER_BUILDKIT=0
-        export COMPOSE_DOCKER_CLI_BUILD=0
-        echo "Build mode: BuildKit disabled for stability (set FORCE_BUILDKIT=true to enable)."
-    fi
-}
-
-configure_backend_cache_buster() {
-    if [ "${BUILD}" = true ]; then
-        local ts
-        ts=$(date +%s)
-        export BACKEND_CACHE_BUSTER="${ts}-${RANDOM}"
-        echo "Backend cache-buster enabled: ${BACKEND_CACHE_BUSTER}"
-    else
-        export BACKEND_CACHE_BUSTER="stable"
-    fi
-}
-
-verify_backend_source_sync() {
-    local files=("main.py" "services/trainer.py" "services/predictor.py")
-    local mismatch=0
-
-    if ! docker ps --filter "name=mensa_backend" --format "{{.Names}}" | grep -q "^mensa_backend$"; then
-        echo "WARNING: backend container is not running; cannot verify source sync."
-        return 1
-    fi
-
-    for rel_path in "${files[@]}"; do
-        local host_file="backend/${rel_path}"
-        if [ ! -f "${host_file}" ]; then
-            echo "WARNING: expected host file missing: ${host_file}"
-            mismatch=1
-            continue
-        fi
-
-        local host_hash container_hash
-        host_hash=$(sha256sum "${host_file}" | awk '{print $1}')
-        container_hash=$(docker exec mensa_backend sh -lc "sha256sum /app/${rel_path} 2>/dev/null | awk '{print \\\$1}'" 2>/dev/null || true)
-
-        if [ -z "${container_hash}" ] || [ "${host_hash}" != "${container_hash}" ]; then
-            echo "WARNING: backend source mismatch detected for ${rel_path}"
-            mismatch=1
-        fi
-    done
-
-    if [ ${mismatch} -eq 0 ]; then
-        echo "✓ Backend source verification passed."
-        return 0
-    fi
-
-    return 1
-}
-
-repair_backend_source_sync_once() {
-    local ts
-    ts=$(date +%s)
-    export BACKEND_CACHE_BUSTER="repair-${ts}-${RANDOM}"
-    echo "Attempting one-time backend rebuild/repair with cache-buster: ${BACKEND_CACHE_BUSTER}"
-
-    if ! eval "${COMPOSE_CMD} build --no-cache backend"; then
-        echo "ERROR: backend repair build failed." >&2
-        return 1
-    fi
-
-    if ! eval "${COMPOSE_CMD} up -d --force-recreate backend"; then
-        echo "ERROR: backend repair recreate failed." >&2
-        return 1
-    fi
-
-    if ! wait_for_service "backend" 12 5; then
-        echo "ERROR: backend failed readiness check after repair." >&2
-        return 1
-    fi
-
-    if ! verify_backend_source_sync; then
-        echo "ERROR: backend source still mismatched after repair." >&2
-        return 1
-    fi
-
-    echo "✓ Backend source repair successful."
-    return 0
 }
 
 check_docker_version() {
@@ -253,289 +86,76 @@ check_docker_version() {
     echo "✓ Docker version check passed (Client: $client_ver, Server: $server_ver)."
 }
 
-run_compose_up_with_retries() {
-    local attempts=${START_UP_ATTEMPTS}
-    local delay=${START_RETRY_DELAY}
-
-    if [ "${attempts}" -lt 1 ]; then
-        attempts=1
-    fi
-
-    for i in $(seq 1 ${attempts}); do
-        echo "Attempt ${i}/${attempts}: bring up compose stack"
-
-        # If BUILD requested, run an explicit build step first (supports --no-cache)
-        if [ "${BUILD}" = true ]; then
-            if is_windows_shell; then
-                echo "Building images via direct docker build on Windows shell for stability..."
-                if ! build_images_windows_direct; then
-                    echo "Compose build failed; retrying in ${delay}s..."
-                    sleep ${delay}
-                    delay=$((delay * 2))
-                    continue
-                fi
-            else
-                echo "Building images (no-cache)..."
-                if ! run_compose_with_timeout "${START_BUILD_TIMEOUT}" compose_cmd build --no-cache; then
-                    echo "Compose build failed; retrying in ${delay}s..."
-                    sleep ${delay}
-                    delay=$((delay * 2))
-                    continue
-                fi
-            fi
-        fi
-
-        echo "Starting services..."
-        if is_windows_shell; then
-            if run_compose_up_staged; then
-                return 0
-            fi
-        elif run_compose_with_timeout "${START_UP_TIMEOUT}" compose_cmd up -d --force-recreate; then
-            return 0
-        fi
-
-        if [ "${i}" -lt "${attempts}" ]; then
-            echo "Compose up failed; retrying in ${delay}s..."
-            sleep ${delay}
-            delay=$((delay * 2))
-        fi
-    done
-    return 1
-}
-
-run_compose_with_timeout() {
-    local seconds="$1"
-    shift
-    local cmd_preview="$*"
-
-    "$@" &
-    local cmd_pid=$!
-    local elapsed=0
-
-    while kill -0 "${cmd_pid}" 2>/dev/null; do
-        if [ "${elapsed}" -gt 0 ] && [ $((elapsed % 10)) -eq 0 ]; then
-            echo "... still waiting (${elapsed}s/${seconds}s): ${cmd_preview}"
-        fi
-        if [ "${elapsed}" -ge "${seconds}" ]; then
-            kill -TERM "-${cmd_pid}" 2>/dev/null || kill -TERM "${cmd_pid}" 2>/dev/null || true
-            sleep 2
-            kill -KILL "-${cmd_pid}" 2>/dev/null || kill -KILL "${cmd_pid}" 2>/dev/null || true
-            wait "${cmd_pid}" 2>/dev/null || true
-            echo "TIMEOUT: command exceeded ${seconds}s: ${cmd_preview}" >&2
-            return 124
-        fi
-        sleep 1
-        elapsed=$((elapsed + 1))
-    done
-
-    wait "${cmd_pid}"
-}
-
-confirm_prune() {
-    if [ "${AUTOMATIC_YES}" = true ]; then
-        return 0
-    fi
-    read -r -p "This will remove ALL unused containers, networks, images, and volumes. Continue? [y/N] " answer
-    case "${answer}" in
-        [Yy]*) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
-run_prune() {
-    echo "Pruning system images and volumes..."
-    if ! docker system prune -a -f; then
-        echo "WARNING: 'docker system prune' failed. This might be due to a Docker API error."
-        echo "See TROUBLESHOOTING_DOCKER_ERROR.txt for help."
-        echo "Continuing with startup..."
-    fi
-    if ! docker volume prune -f; then
-        echo "WARNING: 'docker volume prune' failed. This might be due to a Docker API error."
-        echo "See TROUBLESHOOTING_DOCKER_ERROR.txt for help."
-        echo "Continuing with startup..."
-    fi
-}
-
-force_cleanup_mensa_runtime_once() {
-    echo "Attempting one-time forced cleanup for stuck Mensa containers..."
-
-    run_compose_with_timeout 30 docker rm -f mensa_frontend mensa_backend mensa_chroma >/dev/null 2>&1 || true
-    run_compose_with_timeout 20 docker network rm mensa_project_default >/dev/null 2>&1 || true
-    run_compose_with_timeout 20 docker network rm mensa_project_mensa-net >/dev/null 2>&1 || true
-    if ! is_windows_shell; then
-        run_compose_with_timeout 30 docker network prune -f >/dev/null 2>&1 || true
-    fi
-
-    echo "Forced cleanup pass completed."
-}
-
-kill_stale_cleanup_jobs() {
-    if command -v pkill >/dev/null 2>&1; then
-        pkill -f "docker compose down --remove-orphans" >/dev/null 2>&1 || true
-        pkill -f "sh -lc docker compose down --remove-orphans" >/dev/null 2>&1 || true
-        pkill -f "docker compose up -d --force-recreate" >/dev/null 2>&1 || true
-        pkill -f "docker compose up -d --build --force-recreate" >/dev/null 2>&1 || true
-        pkill -f "sh -lc docker compose up -d --force-recreate" >/dev/null 2>&1 || true
-        pkill -f "sh -lc docker compose up -d --build --force-recreate" >/dev/null 2>&1 || true
-        pkill -f "docker-compose up -d --force-recreate" >/dev/null 2>&1 || true
-        pkill -f "docker-compose up -d --build --force-recreate" >/dev/null 2>&1 || true
-        pkill -f "docker rm -f mensa_frontend mensa_backend mensa_chroma" >/dev/null 2>&1 || true
-        pkill -f "docker network prune -f" >/dev/null 2>&1 || true
-        pkill -f "docker network rm mensa_project_default" >/dev/null 2>&1 || true
-    fi
-
-    if is_windows_shell && command -v powershell.exe >/dev/null 2>&1; then
-        powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { \
-            \$_.CommandLine -match 'docker compose down --remove-orphans|sh -lc docker compose down --remove-orphans|docker compose up -d --force-recreate|docker compose up -d --build --force-recreate|sh -lc docker compose up -d --force-recreate|sh -lc docker compose up -d --build --force-recreate|docker-compose up -d --force-recreate|docker-compose up -d --build --force-recreate|docker rm -f mensa_frontend mensa_backend mensa_chroma|docker network prune -f|docker network rm mensa_project_default' \
-        } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }" >/dev/null 2>&1 || true
-    fi
-}
-
 # --- Main Script ---
 
-PRUNE=false
-AUTOMATIC_YES=false
-WAIT_FOR_INGEST=true
 BUILD=false
-DIAG_RUN=false
-START_BUILD_TIMEOUT=${START_BUILD_TIMEOUT:-900}
-START_UP_TIMEOUT=${START_UP_TIMEOUT:-600}
-START_UP_ATTEMPTS=${START_UP_ATTEMPTS:-1}
-START_RETRY_DELAY=${START_RETRY_DELAY:-15}
+DOWN=false
 
 while [[ ${#} -gt 0 ]]; do
     case "$1" in
-        --prune|--purge) PRUNE=true; shift ;;
-        --yes) PRUNE=true; AUTOMATIC_YES=true; shift ;;
-        --no-ingest-wait) WAIT_FOR_INGEST=false; shift ;;
         --build) BUILD=true; shift ;;
-        --diag) DIAG_RUN=true; shift ;;
-        -h|--help) echo "Usage: $0 [--prune|--purge] [--yes] [--no-ingest-wait] [--build] [--diag]"; exit 0 ;;
-        *) echo "Unknown arg: $1"; echo "Usage: $0 [--prune|--purge] [--yes] [--no-ingest-wait] [--build] [--diag]"; exit 2 ;;
+        --down) DOWN=true; shift ;;
+        -h|--help) echo "Usage: $0 [--build] [--down]"; exit 0 ;;
+        *) echo "Unknown arg: $1"; echo "Usage: $0 [--build] [--down]"; exit 2 ;;
     esac
 done
 
 # --- Execution Flow ---
 
-if [ "${DIAG_RUN}" = true ]; then
-    if is_windows_shell && command -v powershell.exe >/dev/null 2>&1; then
-        powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { \
-            \$_.CommandLine -match 'bash.exe\" \"/e/.*/diag_start.sh' \
-        } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }" >/dev/null 2>&1 || true
-    fi
-    if [ -f "./diag_start.sh" ]; then
-        exec ./diag_start.sh
-    else
-        echo "ERROR: diag_start.sh not found. Cannot run diagnostics." >&2
-        exit 1
-    fi
-fi
-
-echo "Starting Mensa Project (robust mode)..."
+echo "Starting Mensa Project..."
 echo ""
-
-if [ -f "./diag_output.log" ]; then
-    echo "NOTE: A 'diag_output.log' file was found. If you are having issues,"
-    echo "check this file for errors from the last diagnostic run."
-    echo ""
-fi
 
 # 1. Check Docker environment first
 check_docker_version
 choose_compose_command
-configure_build_backend
-configure_backend_cache_buster
 echo ""
 
-# 2. Prune if requested
-if [ "${PRUNE}" = true ]; then
-    if confirm_prune; then
-        run_prune
-    else
-        echo "Skipping prune.";
-    fi
+# 2. Stop if requested
+if [ "${DOWN}" = true ]; then
+    echo "Stopping and removing containers, networks, and volumes..."
+    compose_cmd down -v
+    echo "✓ Stack is down."
+    exit 0
+fi
+
+# 3. Stop existing containers before starting
+echo "Stopping any running services..."
+compose_cmd down
     echo ""
-fi
-
-# 3. Install frontend dependencies on the host (only when useful)
-echo "Checking frontend build status..."
-if [ -d "frontend" ]; then
-    # If we are rebuilding images, the Docker build will handle frontend; skip host npm install.
-    if [ "${BUILD}" = true ]; then
-        echo "BUILD requested: skipping host 'npm' install; Docker build will handle frontend.";
-    else
-        if [ -d "frontend/build" ]; then
-            echo "Frontend build exists (frontend/build). Skipping host 'npm' install."
-        else
-            echo "No frontend build found — running 'npm ci' in frontend/ to speed local dev iteration."
-            if (cd frontend && npm ci); then
-                echo "✓ Frontend dependencies installed (host)."
-            else
-                echo "WARNING: 'npm ci' in frontend/ failed. Continuing; you can run 'npm ci' manually." >&2
-            fi
-        fi
-    fi
-fi
-echo ""
-
-# 4. Stop and remove old containers and orphans
-echo "Stopping and removing any old containers..."
-kill_stale_cleanup_jobs
-if is_windows_shell; then
-    echo "Windows shell detected; using direct container cleanup (skipping compose down)."
-    force_cleanup_mensa_runtime_once
-else
-    if [ "${PRUNE}" = true ]; then
-        echo "Purge volumes requested: adding -v flag to compose down."
-        if ! run_compose_with_timeout 60 compose_cmd down -v --remove-orphans --timeout 25; then
-            echo "WARNING: compose down timed out/failed; running one-time forced cleanup." >&2
-            force_cleanup_mensa_runtime_once
-        fi
-    else
-        if ! run_compose_with_timeout 60 compose_cmd down --remove-orphans --timeout 25; then
-            echo "WARNING: compose down timed out/failed; running one-time forced cleanup." >&2
-            force_cleanup_mensa_runtime_once
-        fi
-    fi
-fi
-echo ""
 
 # 4. Build and start services
-echo "Building and starting services (this may take a few minutes on first run)..."
-if [ -f "${SCRIPT_DIR}/.env" ]; then
-    set -a
-    # shellcheck source=/dev/null
-    . "${SCRIPT_DIR}/.env"
-    set +a
+UP_ARGS=("-d" "--wait")
+
+if [ "${BUILD}" = true ]; then
+    echo "Building images with --no-cache..."
+    if ! compose_cmd build --no-cache; then
+        echo "ERROR: Build failed." >&2
+        exit 1
+    fi
 fi
-configure_windows_runtime
-if ! resolve_compose_host_ports; then
-    echo "ERROR: could not resolve free host ports for docker compose." >&2
-    exit 1
-fi
-echo "Using host ports: backend=${BACKEND_HOST_PORT:-5000}, chroma=${CHROMA_HOST_PORT:-8000}, frontend=${FRONTEND_HOST_PORT:-3000}"
-if is_windows_shell; then
-    echo "Windows app URL: http://$(app_bind_host):${FRONTEND_HOST_PORT:-3000}/"
-fi
-if ! run_compose_up_with_retries; then
-    echo "ERROR: docker-compose failed after retries. This is often a Docker environment issue." >&2
-    emit_startup_failure_bundle
-    echo "Suggestion: Restart Docker Desktop and try again." >&2
-    echo "For a detailed error log, run this script with the --diag flag: ./start.sh --diag" >&2
+
+echo "Starting services..."
+if ! compose_cmd up "${UP_ARGS[@]}"; then
+    echo "ERROR: 'docker compose up' failed." >&2
+    echo "---" >&2
+    compose_cmd ps >&2
+    echo "---" >&2
+    compose_cmd logs --tail 50 >&2
+    echo "---" >&2
     exit 1
 fi
 
 # Helper to check a service readiness
 wait_for_service() {
     local svc_name="$1"
-    local container_name="mensa_${svc_name}"
+    local container_name="mensa_${svc_name}" # Keep this for fallback search
     local max_checks=${2:-30}
     local interval=${3:-5}
     echo "Waiting for ${svc_name} to be running/healthy (timeout ${max_checks}*${interval}s)..."
     
     for i in $(seq 1 ${max_checks}); do
         local container_id container
-        container_id=$(eval "${COMPOSE_CMD} ps -q ${svc_name}" 2>/dev/null || true)
+        container_id=$(compose_cmd ps -q "${svc_name}" 2>/dev/null || true)
         container=""
 
         if [ -n "${container_id}" ]; then
@@ -571,6 +191,13 @@ wait_for_service() {
                 echo "✓ ${svc_name} -> ${container} is healthy."
                 return 0
             fi
+            if [ "${health}" = "unhealthy" ]; then
+                echo "✗ ERROR: ${svc_name} container (${container}) has become unhealthy." >&2
+                echo "--- LOGS FOR ${container} ---" >&2
+                docker logs "${container}" --tail 100 || true
+                echo "--------------------------------" >&2
+                return 1
+            fi
             echo "  ${svc_name} -> ${container} health is '${health}'..."
             sleep ${interval}
             continue
@@ -587,201 +214,29 @@ wait_for_service() {
     done
 
     echo "✗ ERROR: Timed out waiting for ${svc_name} to become ready." >&2
-    echo "--- STATUS OF ${container_name} ---" >&2
-    docker ps -a --filter "name=${container_name}" >&2
+    echo "--- STATUS OF ${svc_name} ---" >&2
+    compose_cmd ps "${svc_name}" >&2
     echo "--- LOGS FOR ${svc_name} ---" >&2
-    eval "${COMPOSE_CMD} logs --tail 100 ${svc_name}" || true
+    compose_cmd logs --tail 100 "${svc_name}" >&2
     echo "------------------------------------" >&2
     return 1
 }
 
-
-# --- Ingestion Monitoring ---
-
-# Prints a progress bar. Args: progress, total
-_print_progress_bar() {
-    local progress=$1
-    local total=$2
-    local width=40
-    
-    if (( total <= 0 )); then
-        local percentage=0
-        local filled=0
-    else
-        local percentage=$((progress * 100 / total))
-        local filled=$((progress * width / total))
-    fi
-    
-    local empty=$((width - filled))
-    printf "["
-    local i
-    for ((i=0; i<filled; i++)); do printf "█"; done
-    for ((i=0; i<empty; i++)); do printf "░"; done
-    printf "] %d/%d (%d%%)\n" "$progress" "$total" "$percentage"
-}
-
-# Polls the backend API for ingestion status
-monitor_ingestion_progress() {
-    local bind_host
-    bind_host="$(app_bind_host)"
-    local api_endpoint="http://${bind_host}:${FRONTEND_HOST_PORT:-3000}/api/startup_status"
-    local max_retries=15 # wait for ~30s for API to appear
-    local retries=0
-    echo ""
-    echo "---"
-    echo "Waiting for backend API..."
-
-    # 1. Wait for the API to be available
-    while ! curl -s -f "${api_endpoint}" > /dev/null; do
-        if [[ ${retries} -ge ${max_retries} ]]; then
-            echo "✗ ERROR: Timed out waiting for backend API at ${api_endpoint}" >&2
-            echo "Run '${COMPOSE_CMD} logs backend' to investigate." >&2
-            return 1
-        fi
-        retries=$((retries+1))
-        sleep 2
-    done
-    echo "✓ Backend API is responsive. Starting ingestion monitoring."
-    echo ""
-
-    # 2. Poll for ingestion status
-    local start_time
-    start_time=$(date +%s)
-    local printed_lines=0
-    while true; do
-        local response
-        response=$(curl -s "${api_endpoint}" || true)
-        local status
-        status=$(echo "${response}" | grep -o '"status":"[^"]*"' | cut -d'"' -f4 || true)
-
-        if [ -z "${status}" ]; then
-            echo "WARNING: Could not parse status from API response. Retrying..."
-            sleep 3
-            continue
-        fi
-
-        # Clear previous lines and print new status
-        if [[ ${printed_lines} -gt 0 ]]; then
-          for i in $(seq 1 ${printed_lines}); do echo -e -n "\033[F\033[K"; done
-        fi
-        
-        local progress total current_game current_task
-        progress=$(echo "${response}" | grep -o '"progress":[0-9]*' | cut -d':' -f2 | sed 's/,//g' || echo 0)
-        total=$(echo "${response}" | grep -o '"total":[0-9]*' | cut -d':' -f2 | sed 's/,//g' || echo 1)
-        current_game=$(echo "${response}" | grep -o '"current_game":"[^"]*"' | cut -d'"' -f4 || true)
-        current_task=$(echo "${response}" | grep -o '"current_task":"[^"]*"' | cut -d'"' -f4 || true)
-
-        [ -n "${current_game}" ] || current_game="n/a"
-        [ -n "${current_task}" ] || current_task="n/a"
-
-        echo "Data Ingestion Status: [${status}]"
-        _print_progress_bar "${progress:-0}" "${total:-1}"
-        echo "Current Task: ${current_game} - ${current_task}"
-        echo "(Use Ctrl+C to stop waiting. The app will continue in the background.)"
-        printed_lines=4
-
-        if [ "${status}" = "completed" ]; then
-            local end_time
-            end_time=$(date +%s)
-            local elapsed=$((end_time - start_time))
-            echo ""
-            echo "✓ Data ingestion complete! (took ${elapsed}s)"
-            return 0
-        fi
-
-        if [ "${status}" = "failed" ]; then
-            echo "✗ ERROR: Data ingestion failed. Check backend logs for details." >&2
-            echo "  docker-compose logs backend" >&2
-            return 1
-        fi
-
-        sleep 2
-    done
-}
-
-
-# --- Startup Sequence ---
-
-# 5. Wait for key services
-echo ""
-echo "Verifying service readiness..."
-SERVICES_TO_WAIT=(chroma backend frontend)
-FAILED=0
-for svc in "${SERVICES_TO_WAIT[@]}"; do
-    if ! wait_for_service "${svc}" 12 5; then
-        echo ""
-        echo "ERROR: Service '${svc}' failed to start." >&2
-        FAILED=1
-    fi
-done
-
-if [ ${FAILED} -ne 0 ]; then
-    echo ""
-    echo "One or more services failed to become healthy. Check logs above." >&2
-    echo "For a more detailed log, try running with the --diag flag: ./start.sh --diag" >&2
-    echo "Then inspect the generated 'diag_output.log' file." >&2
-    exit 2
-fi
-echo "✓ All services are running."
-
-if is_windows_shell; then
-    if ! verify_windows_host_connectivity; then
-        repair_windows_port_forwarding
-        if ! verify_windows_host_connectivity; then
-            echo "ERROR: Windows host still cannot reach published Docker ports." >&2
-            echo "Restart Docker Desktop, then re-run: ./start.sh" >&2
-            echo "Or run: powershell.exe -File ./start-windows.ps1 -Recreate" >&2
-            exit 2
-        fi
-    fi
-fi
-
-if [ "${BUILD}" = true ]; then
-    echo ""
-    echo "Verifying backend source sync..."
-    if ! verify_backend_source_sync; then
-        if ! repair_backend_source_sync_once; then
-            echo "ERROR: deterministic backend source sync check failed." >&2
-            exit 2
-        fi
-    fi
-fi
-
-
-# 6. Monitor ingestion or print next steps
-if [ "${WAIT_FOR_INGEST}" = true ]; then
-    if ! monitor_ingestion_progress; then
-        exit 1
-    fi
-else
-    echo ""
-    echo "---"
-    echo "✓ Services are running. Not waiting for data ingestion due to --no-ingest-wait flag."
-    echo "The application may not be fully functional until ingestion completes."
-    echo "To monitor progress, run: ./monitor_progress.sh"
-fi
-
-
-# 7. Show final status and next steps
 echo ""
 echo "================================================="
 echo "✓ Mensa Project Started Successfully"
 echo "================================================="
 echo ""
 echo "Container Status:"
-eval "${COMPOSE_CMD} ps"
+compose_cmd ps
+
+FRONTEND_PORT=$(resolve_host_port "FRONTEND_HOST_PORT" "3000")
+BACKEND_PORT=$(resolve_host_port "BACKEND_HOST_PORT" "5000")
+
 echo ""
 echo "Access your application:"
-if is_windows_shell; then
-    echo "  Frontend: http://$(app_bind_host):${FRONTEND_HOST_PORT:-3000}/"
-    echo "  Backend API: http://$(app_bind_host):${BACKEND_HOST_PORT:-5001}/api"
-    echo "  (Use 127.0.0.1 — not localhost — if you see API timeouts on Windows)"
-else
-    echo "  Frontend: http://localhost:${FRONTEND_HOST_PORT:-3000}"
-    echo "  Backend API: http://localhost:${BACKEND_HOST_PORT:-5000}/api"
-fi
+echo "  Frontend: http://localhost:${FRONTEND_PORT}"
+echo "  Backend API: http://localhost:${BACKEND_PORT}/api"
 echo ""
 echo "To view live logs from all services, run:" 
 echo "  ${COMPOSE_CMD} logs -f"
-echo ""
-
