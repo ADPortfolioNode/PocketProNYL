@@ -1075,32 +1075,6 @@ class TrainerService:
         used_previous_training = previous_predictions is not None
         floor_accuracy = float(baseline_accuracy) if baseline_accuracy is not None else None
 
-        def _apply_previous_artifact():
-            nonlocal selected_strategy, selected_model, selected_secondary_model
-            nonlocal selected_blend_weight, selected_top_models, selected_ensemble_weights
-            nonlocal selected_top_k_accuracies, selected_accuracy, selected_mae, retained_previous_model
-            if previous_model is None:
-                return
-            selected_strategy = str((previous_artifact or {}).get("model_strategy", "single"))
-            selected_model = (previous_artifact or {}).get("model")
-            selected_secondary_model = (previous_artifact or {}).get("secondary_model")
-            selected_blend_weight = (previous_artifact or {}).get("blend_weight")
-            selected_top_models = (previous_artifact or {}).get("top_models")
-            selected_ensemble_weights = (previous_artifact or {}).get("ensemble_weights")
-            selected_top_k_accuracies = ((previous_artifact or {}).get("metrics") or {}).get(
-                "top_k_accuracies"
-            )
-            selected_accuracy = float(
-                baseline_accuracy if baseline_accuracy is not None else previous_accuracy
-            )
-            selected_mae = float(previous_mae) if previous_mae is not None else selected_mae
-            retained_previous_model = True
-
-        if floor_accuracy is not None and selected_accuracy < floor_accuracy:
-            _apply_previous_artifact()
-        elif previous_accuracy is not None and previous_accuracy > selected_accuracy:
-            _apply_previous_artifact()
-
         blend_candidate = None
         if (
             candidate_strategy != "ensemble_top3"
@@ -1132,22 +1106,15 @@ class TrainerService:
             retained_previous_model = False
 
         if floor_accuracy is not None and selected_accuracy < floor_accuracy:
-            _apply_previous_artifact()
-
-        if (
-            floor_accuracy is not None
-            and float(candidate_accuracy) < float(floor_accuracy)
-            and not retained_previous_model
-        ):
             return {
                 "status": "error",
                 "message": (
                     f"Training accuracy {candidate_accuracy:.4f} is below the record floor "
                     f"{floor_accuracy:.4f}. Model was not saved to prevent regression."
                 ),
-                "accuracy": float(floor_accuracy),
-                "highest_accuracy": float(floor_accuracy),
-                "record_accuracy": float(floor_accuracy),
+                "accuracy": floor_accuracy,
+                "highest_accuracy": floor_accuracy,
+                "record_accuracy": floor_accuracy,
                 "baseline_accuracy": float(baseline_accuracy) if baseline_accuracy is not None else None,
                 "candidate_accuracy": float(candidate_accuracy),
                 "previous_accuracy": float(reported_previous_accuracy)
