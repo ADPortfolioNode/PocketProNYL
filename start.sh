@@ -12,6 +12,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #   --build  : Force a rebuild of the docker images (--no-cache).
 #   --down   : Stop and remove containers, networks, and volumes.
 
+# Keep the bash launcher aligned with the compose defaults and any .env overrides.
+resolve_compose_host_ports || {
+    echo "ERROR: Unable to resolve Docker host ports. Check your environment values." >&2
+    exit 1
+}
+
 # --- Helper Functions ---
 export DOCKER_BUILDKIT=1
 
@@ -230,13 +236,14 @@ echo ""
 echo "Container Status:"
 compose_cmd ps
 
-FRONTEND_PORT=$(resolve_host_port "FRONTEND_HOST_PORT" "3000")
-BACKEND_PORT=$(resolve_host_port "BACKEND_HOST_PORT" "5000")
+FRONTEND_PORT="$(resolve_host_port FRONTEND_HOST_PORT 3000)"
+BACKEND_PORT="$(resolve_host_port BACKEND_HOST_PORT 5000)"
 
+# Keep the final startup banner consistent with the same values compose is using.
 echo ""
 echo "Access your application:"
 echo "  Frontend: http://localhost:${FRONTEND_PORT}"
 echo "  Backend API: http://localhost:${BACKEND_PORT}/api"
 echo ""
-echo "To view live logs from all services, run:" 
+echo "To view live logs from all services, run:"
 echo "  ${COMPOSE_CMD} logs -f"

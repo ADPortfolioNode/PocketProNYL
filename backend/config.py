@@ -23,7 +23,11 @@ class Settings(BaseSettings):
     # Production: comma-separated origins, e.g. https://mensa.example.com
     CORS_ALLOWED_ORIGINS: str | None = None
     
-    model_config = SettingsConfigDict(env_file=".env", env_ignore_empty=True)
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_ignore_empty=True,
+        extra="ignore",
+    )
 
 settings = Settings()
 

@@ -56,8 +56,7 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 # Switch to non-root user
-# Temporarily running as root to fix permissions issues
-# USER appuser
+USER appuser
 
 # Add health check: verify API port is accepting connections
 HEALTHCHECK --interval=10s --timeout=8s --start-period=90s --retries=6 \

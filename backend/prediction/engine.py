@@ -21,7 +21,6 @@ class LotteryPredictionEngine:
     """Orchestrates strategies, agents, ensemble, NN, and weight learning."""
 
     def __init__(self, state_dir: str | None = None):
-        ensure_plugins_loaded()
         self.weight_store = WeightStore(state_dir)
         self.weight_updater = WeightUpdater(self.weight_store)
         self._nn_cache: dict[str, object] = {}

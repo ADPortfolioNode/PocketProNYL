@@ -5,6 +5,7 @@ Simplified main.py for application initialization and route registration.
 from typing import Any, Dict, Optional
 import requests
 import hashlib
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
@@ -97,6 +98,7 @@ async def lifespan(app: FastAPI):
     # Startup
     print("🚀 Mensa Project backend starting up...")
     asyncio.create_task(_deferred_lm_audit())
+    start_background_ingestion()
     
     yield
     
@@ -179,13 +181,6 @@ async def get_train_settings(game: str = None):
 async def get_train_settings_by_path(game: str):
     """Path-style alias for train settings."""
     return await get_train_settings(game=game)
-
-@app.on_event("startup")
-async def on_startup():
-    """
-    Background task runner for post-startup initialization.
-    """
-    start_background_ingestion()
 
 
 if __name__ == "__main__":

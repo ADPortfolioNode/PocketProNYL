@@ -77,6 +77,40 @@ resolve_compose_host_port() {
     return 0
 }
 
+resolve_host_port() {
+    local var_name="$1"
+    local preferred="${2:-}"
+    local value="${!var_name:-}"
+
+    if [ -n "${value}" ]; then
+        echo "${value}"
+        return 0
+    fi
+
+    if [ -f ".env" ]; then
+        while IFS= read -r line; do
+            case "${line}" in
+                "${var_name}="*)
+                    value="${line#*=}"
+                    value="${value%\"}"
+                    value="${value#\"}"
+                    value="${value%\'}"
+                    value="${value#\'}"
+                    echo "${value}"
+                    return 0
+                    ;;
+            esac
+        done < .env
+    fi
+
+    if [ -n "${preferred}" ]; then
+        echo "${preferred}"
+        return 0
+    fi
+
+    return 1
+}
+
 resolve_compose_host_ports() {
     resolve_compose_host_port BACKEND_HOST_PORT 5000 || return 1
     resolve_compose_host_port CHROMA_HOST_PORT 8000 || return 1

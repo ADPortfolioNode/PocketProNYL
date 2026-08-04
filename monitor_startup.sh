@@ -5,16 +5,31 @@ set -euo pipefail
 # Provides real-time startup timing and status visibility
 # Includes progress tracking for background ingestion
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/resolve_host_ports.sh
+. "${SCRIPT_DIR}/scripts/resolve_host_ports.sh"
+
 RESET='\033[0m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 
+resolve_compose_host_ports || {
+    echo "ERROR: Unable to resolve Docker host ports. Check your environment values." >&2
+    exit 1
+}
+
+FRONTEND_PORT="$(resolve_host_port FRONTEND_HOST_PORT 3000)"
+BACKEND_PORT="$(resolve_host_port BACKEND_HOST_PORT 5000)"
+BIND_HOST="${DOCKER_BIND_HOST:-127.0.0.1}"
+
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo -e "${CYAN}Mensa Project - Startup Monitor${RESET}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo ""
+
+echo -e "${CYAN}[startup]${RESET} Frontend=${BIND_HOST}:${FRONTEND_PORT} Backend=${BIND_HOST}:${BACKEND_PORT}"
 
 if docker compose version >/dev/null 2>&1; then
     COMPOSE_CMD="docker compose"
@@ -85,8 +100,8 @@ max_wait=300
 elapsed=0
 
 while [ $elapsed -lt $max_wait ]; do
-    status=$(curl -s http://127.0.0.1:5000/api/startup_status 2>/dev/null || echo "{}")
-    
+    status=$(curl -s "http://${BIND_HOST}:${BACKEND_PORT}/api/startup_status" 2>/dev/null || echo "{}")
+
     if echo "$status" | grep -q '"status":"completed"'; then
         phase4_duration=$(($(date +%s) - start_time))
         echo -e "${GREEN}✓${RESET} Ingestion completed in ${phase4_duration}s"
@@ -126,9 +141,9 @@ echo -e "  ${CYAN}────────────────${RESET}"
 echo -e "  Total elapsed:        ${total_duration}s"
 echo ""
 echo -e "Access your application:"
-echo -e "  Frontend: ${CYAN}http://localhost:3000${RESET}"
-echo -e "  Backend:  ${CYAN}http://localhost:5000/api${RESET}"
-echo -e "  Chroma:   ${CYAN}http://localhost:8000/api/v1/heartbeat${RESET}"
+echo -e "  Frontend: ${CYAN}http://${BIND_HOST}:${FRONTEND_PORT}${RESET}"
+echo -e "  Backend:  ${CYAN}http://${BIND_HOST}:${BACKEND_PORT}/api${RESET}"
+echo -e "  Chroma:   ${CYAN}http://${BIND_HOST}:${CHROMA_HOST_PORT:-8000}/api/v1/heartbeat${RESET}"
 echo ""
 echo -e "View logs:"
 echo -e "  Backend:  ${CYAN}${COMPOSE_CMD} logs -f backend${RESET}"
