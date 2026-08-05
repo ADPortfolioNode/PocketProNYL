@@ -7,6 +7,8 @@ import re
 from functools import wraps
 from config import DATASET_ENDPOINTS, GAME_TITLES, GAME_ALIASES, resolve_game_key
 from chromadb.utils import embedding_functions
+from routes.chroma_repository import chroma_repository # Import the new repository
+from utils.game_data_parser import _parse_pick3_digits # Import for consistency
 
 class TimeoutError(Exception):
     """Raised when an operation exceeds the time limit."""
@@ -193,14 +195,9 @@ class IngestService:
         return ordered
 
     def _pick3_digit_string(self, raw_value) -> str | None:
-        digits = "".join(ch for ch in str(raw_value or "").strip() if ch.isdigit())
-        if not digits:
-            return None
-        if len(digits) < 3:
-            digits = digits.zfill(3)
-        if len(digits) != 3:
-            return None
-        return digits
+        # Use the centralized pick3 parser to get digits, then join to string
+        parsed_digits = _parse_pick3_digits(raw_value)
+        return "".join(str(d) for d in parsed_digits) if len(parsed_digits) == 3 else None
 
     def _normalize_game_records(self, game: str, metadata_item: dict, row_id_base: str) -> list[tuple[str, dict]]:
         """Expand/normalize source rows into one Chroma record per draw."""
@@ -213,7 +210,7 @@ class IngestService:
             digits = self._pick3_digit_string(metadata_item.get(field))
             if not digits:
                 continue
-            record = {
+            record: dict[str, Any] = {
                 **metadata_item,
                 "draw_session": session,
                 "winning_numbers": digits,
@@ -221,6 +218,10 @@ class IngestService:
             }
             row_id = hashlib.md5(f"{game}|{draw_date}|{session}|{digits}".encode()).hexdigest()
             expanded.append((row_id, record))
+
+        # If pick3, ensure winning_numbers is stored as a list of integers for modular engine compatibility
+        for _, rec in expanded:
+            rec["winning_numbers"] = [int(d) for d in str(rec.get("winning_numbers"))]
 
         return expanded if expanded else [(row_id_base, metadata_item)]
 
@@ -336,7 +337,7 @@ class IngestService:
                                         ids=ids
                                     )
                                 else:
-                                    collection.add(
+                                    chroma_repository.add_documents(collection_name,
                                         documents=documents,
                                         metadatas=metadatas,
                                         ids=ids
@@ -454,20 +455,15 @@ class IngestService:
                 pass
         # Use default embedding function to avoid dimension mismatch
         default_ef = embedding_functions.DefaultEmbeddingFunction()
-        
-        # Lazy import to avoid ChromaDB connection during module import
-        from .chroma_client import chroma_client
-        
+
         try:
-            collection = chroma_client.client.get_or_create_collection(
-                name=collection_name,
-                embedding_function=default_ef
-            )
+            # Use the repository to get or create the collection
+            collection = chroma_repository.get_or_create_collection(collection_name)
             print(f"✓ Connected to collection '{collection_name}'")
         except Exception as conn_error:
             raise Exception(f"Failed to connect to ChromaDB collection '{collection_name}': {str(conn_error)}")
 
-        existing_count = chroma_client.count_documents(collection_name, allow_refresh=False)
+        existing_count = chroma_repository.count_documents(collection_name)
         existing_ids: set[str] = set()
 
         if existing_count > 0 and not force:
@@ -558,7 +554,7 @@ class IngestService:
         )
         if total_rows_added > 0 and os.environ.get("PREDICTION_ENGINE", "modular").lower() != "legacy":
             try:
-                latest = collection.get(limit=1, include=["metadatas", "ids"])
+                latest = chroma_repository.get_documents(collection_name, limit=1, include=["metadatas", "ids"])
                 metas = latest.get("metadatas") or []
                 ids = latest.get("ids") or []
                 if metas:

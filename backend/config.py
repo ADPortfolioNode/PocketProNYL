@@ -41,7 +41,7 @@ GAME_CONFIGS = {
         "bonus_count": 1,
         "bonus_min": 1,
         "bonus_max": 39,
-        "bonus_keys": ["midday_bonus", "evening_bonus", "bonus"],
+        "bonus_keys": ["bonus"], # Common key for bonus number
     },
     "pick3": {
         "primary_count": 3,

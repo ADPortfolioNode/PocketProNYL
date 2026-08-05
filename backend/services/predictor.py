@@ -1,5 +1,4 @@
 import os
-import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import numpy as np
@@ -9,6 +8,11 @@ from utils.model_utils import (
     build_prediction_model_metadata,
     load_model_artifact,
     resolve_highest_accuracy,
+)
+from utils.game_data_parser import (
+    _get_rules,
+    _parse_numbers,
+    _clamp_primary,
 )
 
 
@@ -64,22 +68,6 @@ class PredictorService:
             return datetime(candidate.year, candidate.month, candidate.day)
 
         return base
-
-    def _parse_numbers(self, raw_value):
-        return [int(token) for token in re.findall(r"\d+", str(raw_value or ""))]
-
-    def _get_rules(self, game: str):
-        base = {
-            "primary_count": 5,
-            "primary_min": 1,
-            "primary_max": 99,
-            "primary_unique": True,
-            "bonus_count": 0,
-            "bonus_min": 1,
-            "bonus_max": 99,
-        }
-        configured = GAME_CONFIGS.get(game, {}) or {}
-        return {**base, **configured}
 
     def _normalize_primary_predictions(self, values, rules):
         primary_count = int(rules["primary_count"])
@@ -140,34 +128,6 @@ class PredictorService:
 
         return normalized[:bonus_count]
 
-    def _extract_sequence(self, metadata, game: str | None = None):
-        if not isinstance(metadata, dict):
-            return []
-
-        from services.trainer import TrainerService
-
-        return TrainerService()._extract_primary_candidate(metadata, game=game)
-
-    def _clamp_number(self, value, minimum, maximum):
-        parsed = int(np.round(value))
-        return max(minimum, min(maximum, parsed))
-
-    def _ensure_unique(self, values, minimum, maximum):
-        used = set()
-        unique_values = []
-        span = (maximum - minimum) + 1
-
-        for value in values:
-            candidate = value
-            for _ in range(span):
-                if candidate not in used:
-                    break
-                candidate = minimum + ((candidate - minimum + 1) % span)
-            used.add(candidate)
-            unique_values.append(candidate)
-
-        return unique_values
-
     def _format_prediction(self, game: str, raw_numbers):
         format_spec = GAME_PREDICTION_FORMATS.get(game, {})
         main_count = int(format_spec.get("main_count", len(raw_numbers) or 0))
@@ -185,14 +145,14 @@ class PredictorService:
         bonus_min = int(format_spec.get("bonus_min", main_min))
         bonus_max = int(format_spec.get("bonus_max", main_max))
 
-        main_values = [self._clamp_number(value, main_min, main_max) for value in normalized[:main_count]]
+        main_values = [max(main_min, min(main_max, int(np.round(value)))) for value in normalized[:main_count]]
         if format_spec.get("unique_main", False):
-            main_values = self._ensure_unique(main_values, main_min, main_max)
+            main_values = list(np.unique(main_values)) # Simpler way to ensure uniqueness
         if format_spec.get("sort_main", False):
             main_values = sorted(main_values)
 
         bonus_values = [
-            self._clamp_number(value, bonus_min, bonus_max)
+            max(bonus_min, min(bonus_max, int(np.round(value))))
             for value in normalized[main_count:main_count + bonus_count]
         ]
 
@@ -328,7 +288,7 @@ class PredictorService:
         feature_len = int(artifact.get("feature_len", 10))
         output_len = int(artifact.get("output_len", 6))
         window_size = int(artifact.get("window_size", 1))
-        rules = artifact.get("rules") or self._get_rules(game_key)
+        rules = artifact.get("rules") or _get_rules(game_key)
 
         # Fetch recent draws from ChromaDB for prediction input
         collection = chroma_client.client.get_collection(game_key)
@@ -338,7 +298,7 @@ class PredictorService:
         if not data or not data["metadatas"]:
             return {"status": "error", "message": "Not enough data to make a suggestion."}
 
-        metadatas = TrainerService()._sort_metadatas_chronologically(data["metadatas"])
+        metadatas = TrainerService()._sort_metadatas_chronologically(data["metadatas"]) # TrainerService still has this sort
         sequences = [self._extract_sequence(meta, game_key) for meta in metadatas]
         sequences = [seq for seq in sequences if seq]
 

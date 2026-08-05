@@ -5,7 +5,7 @@ import time
 import numpy as np
 import joblib
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_absolute_error
+from sklearn.metrics import mean_absolute_error, accuracy_score
 from config import GAME_CONFIGS
 from utils.training_params import (
     extract_training_params,
@@ -14,6 +14,16 @@ from utils.training_params import (
     params_to_defaults,
     snapshot_from_trainer,
     top_scored_params,
+)
+
+from utils.game_data_parser import (
+    _get_rules,
+    _parse_numbers,
+    _parse_pick3_digits,
+    _clamp_primary,
+    _extract_bonus_values,
+    _extract_primary_candidate,
+    _extract_record_sequence,
 )
 
 
@@ -165,10 +175,14 @@ class TrainerService:
         text = str(raw_value or "").strip()
         if not text:
             return []
-        if text.isdigit():
-            padded = text.zfill(3)[-3:]
-            return [int(digit) for digit in padded]
-        return self._parse_numbers(text)
+        # Extract all digits, then pad/truncate to exactly 3
+        all_digits = re.findall(r"\d", text) # Find individual digits
+        if not all_digits:
+            return []
+        
+        # Join, pad/truncate, and convert to int list
+        padded = "".join(all_digits).zfill(3)[-3:]
+        return [int(digit) for digit in padded]
 
     def _get_rules(self, game: str):
         base = {
@@ -233,7 +247,7 @@ class TrainerService:
     def _extract_primary_candidate(self, metadata, game: str | None = None):
         preferred = []
         fallback = []
-        daily_fields = []
+        pick3_specific_fields = []
 
         for key, value in (metadata or {}).items():
             key_lower = str(key).lower()
@@ -243,17 +257,37 @@ class TrainerService:
             if key_lower in ("winning_numbers", "winningnumbers"):
                 preferred.append(value)
             elif key_lower in ("midday_daily", "evening_daily"):
-                daily_fields.append(value)
+                pick3_specific_fields.append(value)
             elif "winning" in key_lower and "number" in key_lower:
                 fallback.append(value)
             elif "numbers" in key_lower or "result" in key_lower:
                 fallback.append(value)
 
         parse_value = self._parse_pick3_digits if str(game or "").lower() == "pick3" else self._parse_numbers
-        for candidate in preferred + daily_fields + fallback:
-            numbers = parse_value(candidate)
-            if numbers:
-                return numbers
+
+        # For pick3, prioritize specific daily fields if winning_numbers is not immediately parsable
+        if str(game or "").lower() == "pick3":
+            # Try preferred (winning_numbers) first, ensuring it yields 3 digits
+            for candidate in preferred:
+                numbers = parse_value(candidate)
+                if len(numbers) == 3: # Ensure exactly 3 digits for pick3
+                    return numbers
+            # Then try pick3 specific daily fields
+            for candidate in pick3_specific_fields:
+                numbers = parse_value(candidate)
+                if len(numbers) == 3:
+                    return numbers
+            # Finally, try generic fallback fields
+            for candidate in fallback:
+                numbers = parse_value(candidate)
+                if len(numbers) == 3:
+                    return numbers
+        else:
+            # For other games, just take the first valid candidate
+            for candidate in preferred + pick3_specific_fields + fallback:
+                numbers = parse_value(candidate)
+                if numbers:
+                    return numbers
 
         return []
 
@@ -264,13 +298,13 @@ class TrainerService:
             return []
 
         if str(game or "").lower() == "pick3":
-            if len(winning_numbers) == 1 and int(winning_numbers[0]) > 9:
-                winning_numbers = self._parse_pick3_digits(str(winning_numbers[0]))
-            elif len(winning_numbers) > 3:
-                flattened = []
-                for value in winning_numbers:
-                    flattened.extend(self._parse_pick3_digits(str(value)))
-                winning_numbers = flattened
+            # The _extract_primary_candidate for pick3 should already ensure len == 3
+            # This block becomes a final safeguard/normalization
+            if len(winning_numbers) != 3:
+                logging.debug(f"[{game}] _extract_record_sequence: Pick3 primary numbers length mismatch after candidate extraction. Expected 3, got {len(winning_numbers)}. Metadata: {metadata}")
+                return []
+            # Ensure all numbers are single digits (0-9)
+            winning_numbers = [n % 10 for n in winning_numbers] # Ensure single digit
 
         primary_count = int(rules["primary_count"])
         bonus_count = int(rules.get("bonus_count", 0) or 0)
@@ -282,6 +316,7 @@ class TrainerService:
 
         primary_numbers = self._clamp_primary(winning_numbers, rules)
         if len(primary_numbers) != primary_count:
+            logging.debug(f"[{game}] _extract_record_sequence: Clamped primary numbers length mismatch. Expected {primary_count}, got {len(primary_numbers)}. Metadata: {metadata}")
             return []
 
         bonus_numbers = self._extract_bonus_values(metadata, rules)
@@ -292,6 +327,7 @@ class TrainerService:
 
         if bonus_count > 0 and bonus_numbers:
             return primary_numbers + bonus_numbers[:bonus_count]
+        logging.debug(f"[{game}] _extract_record_sequence: Successfully extracted primary numbers: {primary_numbers}. Metadata: {metadata}")
         return primary_numbers
 
     def _metadata_sort_key(self, metadata):
@@ -343,22 +379,7 @@ class TrainerService:
             if not isinstance(meta, dict):
                 continue
 
-            if game_key == "pick3" and not str(meta.get("winning_numbers") or "").strip():
-                for session, field in (("midday", "midday_daily"), ("evening", "evening_daily")):
-                    digits = self._parse_pick3_digits(meta.get(field))
-                    if len(digits) != 3:
-                        continue
-                    session_meta = {
-                        **meta,
-                        "draw_session": session,
-                        "winning_numbers": "".join(str(d) for d in digits),
-                    }
-                    numbers = self._extract_record_sequence(session_meta, game)
-                    if numbers:
-                        sequences.append(numbers)
-                continue
-
-            numbers = self._extract_record_sequence(meta, game)
+            numbers = _extract_record_sequence(meta, game)
             if numbers:
                 sequences.append(numbers)
 

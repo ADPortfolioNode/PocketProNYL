@@ -15,12 +15,15 @@ class ChatGPTClient:
         self.client = None
         self.init_error = None
 
+    def is_available(self) -> bool:
+        # Attempt to get client to check if it can be initialized without error
+        return self._get_client() is not None
+
     def _get_client(self):
         if self.client is not None:
             return self.client
         if not self.api_key:
             return None
-
         try:
             self.client = OpenAI(api_key=self.api_key)
             self.init_error = None
@@ -28,12 +31,10 @@ class ChatGPTClient:
         except Exception as e:
             self.init_error = str(e)
             print(f"Error initializing OpenAI client: {e}")
-            return None
+            self.client = None # Ensure client is reset if init fails
+            return None # Return None on failure
 
     async def generate_text(self, prompt: str) -> str:
-        if not self.api_key:
-            return f"{LM_UNAVAILABLE_PREFIX}:missing_key:ChatGPT API key not configured"
-
         client = self._get_client()
         if not client:
             error_text = self.init_error or "ChatGPT client initialization failed"

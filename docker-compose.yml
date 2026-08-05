@@ -30,6 +30,7 @@ services:
       - GROK_API_BASE=${GROK_API_BASE:-https://api.x.ai/v1}
       - GROK_MODEL=${GROK_MODEL:-grok-3-mini-beta}
       - CHROMA_HOST=mensa_chroma
+      - HF_HOME=/root/.cache/chroma # For ChromaDB client embedding models, mounted to volume
       - CHROMA_PORT=8000
       - INGEST_BATCH_SIZE=6000
       - INGEST_REQUEST_TIMEOUT=30
@@ -77,7 +78,7 @@ services:
       interval: 15s
       timeout: 10s
       retries: 8
-      start_period: 120s
+      start_period: 120s # Reverted to 120s to allow more time for backend initialization
     deploy:
       resources:
         limits:
@@ -103,14 +104,14 @@ services:
     networks:
       - mensa-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 5s
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80"] # More robust than curl -f
+      interval: 15s # Check more frequently
+      timeout: 5s   # Fail faster
+      retries: 5    # Allow more transient failures before marking unhealthy
+      start_period: 10s # Frontend should be quick to serve static files
     restart: unless-stopped
   chroma:
-    image: chromadb/chroma:0.4.24
+    image: chromadb/chroma:0.5.3
     container_name: mensa_chroma
     environment:
       - IS_PERSISTENT=TRUE
@@ -122,9 +123,9 @@ services:
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
       interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+      timeout: 30s
+      retries: 10
+      start_period: 30s # Reduced from 120s, ChromaDB should start quickly
     networks:
       - mensa-net
     restart: on-failure

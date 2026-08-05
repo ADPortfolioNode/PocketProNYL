@@ -14,15 +14,18 @@ class GeminiClient:
         self.grok_api_key = settings.GROK_API_KEY
         self.grok_api_base = settings.GROK_API_BASE.rstrip("/")
         self.grok_model = settings.GROK_MODEL
+        self._gemini_model = None
         self.last_error = None
-        if self.api_key:
+
+    def _get_gemini_model(self):
+        if self._gemini_model is None and self.api_key:
             genai.configure(api_key=self.api_key)
-            self.model = genai.GenerativeModel(self.model_name)
-        else:
-            self.model = None
+            self._gemini_model = genai.GenerativeModel(self.model_name)
+        return self._gemini_model
 
     def is_available(self) -> bool:
-        return bool((self.api_key and self.model) or self.grok_api_key)
+        # Check if Gemini model can be initialized or Grok is available
+        return bool((self.api_key and self._get_gemini_model()) or self.grok_api_key)
 
     def _generate_with_grok(self, prompt: str) -> str:
         if not self.grok_api_key:
@@ -57,10 +60,11 @@ class GeminiClient:
         if not self.is_available():
             return f"{LM_UNAVAILABLE_PREFIX}:missing_key:No LM provider configured. Set GEMINI_API_KEY or GROK_API_KEY."
 
-        gemini_error_text = ""
-        if self.api_key and self.model:
+        gemini_model = self._get_gemini_model()
+        gemini_error_text = "" # Initialize here to ensure it's always defined
+        if self.api_key and gemini_model:
             try:
-                response = self.model.generate_content(prompt)
+                response = gemini_model.generate_content(prompt)
                 self.last_error = None
                 return response.text
             except Exception as e:

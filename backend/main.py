@@ -2,6 +2,7 @@
 Mensa Project - FastAPI Application Bootstrap
 Simplified main.py for application initialization and route registration.
 """
+import logging
 from typing import Any, Dict, Optional
 import requests
 import hashlib
@@ -18,6 +19,8 @@ from state.ingestion_worker import start_background_ingestion
 
 from services.chroma_client import chroma_client
 from config import GAME_CONFIGS
+
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
 def _require_game_key(game: str) -> str:
@@ -97,11 +100,13 @@ async def lifespan(app: FastAPI):
 
     # Startup
     print("🚀 Mensa Project backend starting up...")
-    asyncio.create_task(_deferred_lm_audit())
-    start_background_ingestion()
-    
+
     yield
     
+    # Tasks to run after the application has started and is ready to serve requests
+    asyncio.create_task(_deferred_lm_audit())
+    start_background_ingestion()
+
     # Shutdown
     print("👋 Mensa Project backend shutting down...")
 

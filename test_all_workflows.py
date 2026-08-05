@@ -8,7 +8,7 @@ import urllib.request
 
 import os
 
-BASE = os.environ.get("MENSA_API_BASE", "http://127.0.0.1:5001").rstrip("/")
+BASE = os.environ.get("MENSA_API_BASE", "http://127.0.0.1:5000").rstrip("/")
 GAME = os.environ.get("WORKFLOW_GAME", "pick3")
 TRAIN_TIMEOUT = int(os.environ.get("WORKFLOW_TRAIN_TIMEOUT", "900"))
 RESULTS = []
@@ -59,6 +59,17 @@ def _safe_request_impl(method, path, body=None, timeout=30):
     except Exception as exc:
         return None, {"error": str(exc)}
 
+
+def get_accuracy_from_payload(payload: dict) -> float | None:
+    """Extracts the most relevant accuracy score from a training payload."""
+    for key in ("highest_accuracy", "accuracy", "baseline_accuracy"):
+        val = payload.get(key)
+        if val is not None:
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                pass
+    return None
 
 def test_health():
     code, data = safe_request("GET", "/api/health", timeout=10)
@@ -153,14 +164,20 @@ def test_train():
         timeout=TRAIN_TIMEOUT,
     )
     status = str(data.get("status", "")).lower()
+    
     if code == 200 and status in ("completed", "success"):
-        acc = data.get("accuracy") or data.get("highest_accuracy")
-        record("8. Train Model", "PASS", f"accuracy={acc}")
-    elif code == 200 and data.get("retained_previous_model"):
-        record("8. Train Model", "PASS", f"retained record (no regression): {str(data.get('message', ''))[:80]}")
-    elif code == 200 and is_record_floor_response(data):
-        floor = data.get("highest_accuracy") or data.get("record_accuracy")
-        record("8. Train Model", "PASS", f"record floor protected best={floor}")
+        acc = get_accuracy_from_payload(data)
+        if acc is not None and acc > 0:
+            record("8. Train Model", "PASS", f"accuracy={acc:.4f}")
+        elif acc == 0.0:
+            record("8. Train Model", "WARN", f"training completed with 0.0 accuracy: {data.get('message', '')[:80]}")
+        elif data.get("retained_previous_model"):
+            record("8. Train Model", "PASS", f"retained record (no regression): {str(data.get('message', ''))[:80]}")
+        elif is_record_floor_response(data):
+            floor = data.get("highest_accuracy") or data.get("record_accuracy")
+            record("8. Train Model", "PASS", f"record floor protected best={floor:.4f}")
+        else:
+            record("8. Train Model", "FAIL", f"training completed but no valid accuracy found: {str(data)[:160]}")
     elif code is None and "timed out" in str(data.get("error", "")).lower():
         record("8. Train Model", "WARN", "client timeout — training may still be running on server")
     elif "no attribute 'train'" in str(data.get("message", "")).lower():
@@ -195,13 +212,13 @@ def test_experiments():
 
 
 def test_chroma():
-    code, data = safe_request("GET", "/api/chroma/status", timeout=25)
+    code, data = safe_request("GET", "/api/chroma_io/heartbeat", timeout=25)
     if code == 200:
         record("11. Chroma Status", "PASS", data.get("status", "ok"))
     else:
         record("11. Chroma Status", "FAIL", str(data)[:120])
 
-    code, data = safe_request("GET", "/api/chroma/collections", timeout=30)
+    code, data = safe_request("GET", "/api/chroma_io/collections", timeout=30)
     cols = data.get("collections", [])
     if code == 200 and len(cols) >= 8:
         record("12. Chroma Collections", "PASS", f"{len(cols)} collections")
