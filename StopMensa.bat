@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions
-title Mensa Lottery AI - Stopping
+title PocketPro:NYL Lottery AI - Stopping
 
 REM ============================================================================
 REM  Stop Mensa.bat - One-click shutdown for Windows
@@ -17,7 +17,7 @@ if not exist "docker-compose.yml" (
 
 echo.
 echo ============================================================
-echo   Mensa Lottery AI - Stopping
+echo   PocketPro:NYL Lottery AI - Stopping
 echo ============================================================
 echo.
 
@@ -35,7 +35,7 @@ if errorlevel 1 (
 )
 
 echo [STOP] Shutting down Mensa containers ...
-docker compose down --timeout 30
+docker compose down --timeout 30 --project-name pocketpro_nyl
 if errorlevel 1 (
     echo [ERROR] docker compose down failed.
     echo Make sure Docker Desktop is running and try again.
@@ -44,7 +44,7 @@ if errorlevel 1 (
 
 :done
 echo.
-echo [OK] Mensa has been stopped.
+echo [OK] PocketPro:NYL has been stopped.
 echo      Data is saved in Docker volumes. Use StartMensa.bat to run again.
 echo.
 pause

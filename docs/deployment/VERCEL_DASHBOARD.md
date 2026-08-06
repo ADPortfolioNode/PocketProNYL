@@ -2,7 +2,7 @@ Vercel Dashboard Setup — Recommended Settings
 
 1) Project import
 - Choose the repo and branch `cleanup/remove-debug-scripts` (or `main`).
-- Project Name: `mensa-project-frontend` (or any friendly name).
+- Project Name: `pocketpro-nyl-frontend` (or any friendly name).
 
 2) Build & Output
 - Root Directory: leave blank (repo root).

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # cspell:ignore BUILDKIT BuildKit gtimeout healthcheck
-# === Mensa Project Robust Start Script ===
+# === PocketPro:NYL Project Robust Start Script ===
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/resolve_host_ports.sh
 . "${SCRIPT_DIR}/scripts/resolve_host_ports.sh"
@@ -109,7 +109,7 @@ done
 # --- Execution Flow ---
 
 echo "Starting Mensa Project..."
-echo ""
+echo "Starting PocketPro:NYL Project..."
 
 # 1. Check Docker environment first
 check_docker_version
@@ -126,8 +126,10 @@ fi
 
 # 3. Stop existing containers before starting
 echo "Stopping any running services..."
-compose_cmd down
-    echo ""
+compose_cmd down --remove-orphans 2>/dev/null || true # Stop and remove containers/networks, including orphans
+echo "Pruning dangling Docker resources to ensure ports are clear..."
+docker system prune -f 2>/dev/null || true # Clear dangling images, build cache, etc.
+echo ""
 
 # 4. Build and start services
 UP_ARGS=("-d" "--wait")
@@ -154,7 +156,7 @@ fi
 # Helper to check a service readiness
 wait_for_service() {
     local svc_name="$1"
-    local container_name="mensa_${svc_name}" # Keep this for fallback search
+    local container_name="pocketpro_nyl_${svc_name}" # Use new project prefix for fallback search
     local max_checks=${2:-30}
     local interval=${3:-5}
     echo "Waiting for ${svc_name} to be running/healthy (timeout ${max_checks}*${interval}s)..."
@@ -230,7 +232,7 @@ wait_for_service() {
 
 echo ""
 echo "================================================="
-echo "✓ Mensa Project Started Successfully"
+echo "✓ PocketPro:NYL Project Started Successfully"
 echo "================================================="
 echo ""
 echo "Container Status:"

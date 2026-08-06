@@ -2,10 +2,10 @@
 set -euo pipefail
 
 # === Mensa Project Startup Monitor ===
-# Provides real-time startup timing and status visibility
+# === PocketPro:NYL Project Startup Monitor ===
 # Includes progress tracking for background ingestion
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" # PocketPro:NYL Project
 # shellcheck source=scripts/resolve_host_ports.sh
 . "${SCRIPT_DIR}/scripts/resolve_host_ports.sh"
 
@@ -84,9 +84,9 @@ check_service_health() {
     return 1
 }
 
-check_service_health "chroma" || true
-check_service_health "backend" || true
-check_service_health "frontend" || true
+check_service_health "chroma"
+check_service_health "backend"
+check_service_health "frontend"
 
 phase3_duration=$(($(date +%s) - start_time))
 echo -e "${GREEN}✓${RESET} Services ready in ${phase3_duration}s"

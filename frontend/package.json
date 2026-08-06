@@ -30,12 +30,12 @@
       "last 1 safari version"
     ]
   },
-  "description": "Mensa Suggestion RAG",
+  "description": "PocketPro:NYL Suggestion RAG",
   "main": "index.js",
   "devDependencies": {},
   "repository": {
     "type": "git",
-    "url": "Mensa Suggestion RAG"
+    "url": "PocketPro:NYL  Suggestion RAG"
   },
   "author": "deoism",
   "license": "ISC"

@@ -46,6 +46,20 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
   console.debug('API base:', API_BASE || '(same-origin via nginx proxy)');
   const [ingestStatus, setIngestStatus] = useState('idle');
   const [ingestErrorMessage, setIngestErrorMessage] = useState('');
+
+  // A ref to ensure the auto-ingestion check runs only once per component mount
+  const hasCheckedForAutoIngestion = useRef(false);
+
+  // Function to fetch startup status directly from the backend for the auto-ingestion check
+  const getBackendStartupStatus = useCallback(async () => {
+    try {
+      const response = await axios.get(`${API_BASE}/api/startup_status`);
+      return response.data;
+    } catch (err) {
+      console.error("Failed to fetch backend startup status for auto-ingestion:", err);
+      return null;
+    }
+  }, [API_BASE]);
   const [ingestingGame, setIngestingGame] = useState(null);
   const [ingestStartTime, setIngestStartTime] = useState(null);
   const [trainStatus, setTrainStatus] = useState('idle');
@@ -64,6 +78,19 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
   const [selectedTrainingExperimentId, setSelectedTrainingExperimentId] = useState('');
   const [expandedCard, setExpandedCard] = useState(null);
   const [chatIsActive, setChatIsActive] = useState(false);
+
+  // Function to trigger backend startup initialization
+  const triggerBackendStartupInit = useCallback(async () => {
+    try {
+      console.log("Attempting to trigger backend startup initialization via /api/startup_init...");
+      await axios.post(`${API_BASE}/api/startup_init`, {});
+      console.log("Backend startup initialization triggered successfully.");
+      // The parent component should eventually update the startupStatus prop via its own polling
+    } catch (err) {
+      console.error("Failed to trigger backend startup initialization:", err);
+      // Optionally, set a local error state or show a notification
+    }
+  }, [API_BASE]);
   const [summaryRefreshKey, setSummaryRefreshKey] = useState(0);
   const [allGamesProgress, setAllGamesProgress] = useState({});
 
@@ -283,15 +310,6 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
           }
         }
         setGameContents(contents);
-        // If no games or all draw counts are zero, prompt for auto-ingestion
-        if (gameList.length === 0 || Object.values(contents).every(c => c === 0)) {
-          if (window.confirm('No game data found. Would you like to auto-ingest the full spread?')) {
-            for (const game of gameList) {
-              await axios.post(`${API_BASE}/api/ingest`, { game });
-            }
-            window.location.reload();
-          }
-        }
       } catch (e) {
         setGameContentsErrorMessage(e?.response?.data?.detail || e.message || 'Failed to fetch game contents.');
       }
@@ -326,6 +344,37 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
       },
     });
   }, [API_BASE, trainStatus, ingestStatus]);
+
+  // Effect to check for auto-ingestion conditions and trigger if necessary on initial load
+  useEffect(() => {
+    // Only run if API_BASE is available and we haven't checked yet for this component instance
+    if (!API_BASE || hasCheckedForAutoIngestion.current) {
+      return;
+    }
+
+    const performAutoIngestionCheck = async () => {
+      hasCheckedForAutoIngestion.current = true; // Mark as checked
+
+      // First, check the overall startup status from the backend
+      const currentBackendStatus = await getBackendStartupStatus();
+
+      if (!currentBackendStatus) {
+        console.warn("Could not get backend startup status. Skipping auto-ingestion check.");
+        return;
+      }
+
+      // Condition for auto-ingestion: overall system status is 'ready' AND all games are 'not_started'
+      const allGamesNotStarted = Object.values(currentBackendStatus.games || {}).every(
+        (gameStatus) => gameStatus.status === 'not_started'
+      );
+
+      if (currentBackendStatus.status === 'ready' && allGamesNotStarted) {
+        console.log("Detected all games require ingestion. Auto-triggering backend startup initialization.");
+        triggerBackendStartupInit();
+      }
+    };
+    performAutoIngestionCheck();
+  }, [API_BASE, getBackendStartupStatus, triggerBackendStartupInit]); // Dependencies
 
   const startIngest = useCallback(async () => {
     if (!selectedGame) return;

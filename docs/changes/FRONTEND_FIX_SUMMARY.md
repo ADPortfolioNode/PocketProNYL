@@ -40,10 +40,10 @@ Status: ✅ BUILD COMPLETE - Ready for Browser Testing
 ## Current System State
 
 ### Containers (All Running)
-```
-mensa_frontend (port 3000) ✓ Running
-mensa_backend  (port 5000) Running (health check may lag)
-mensa_chroma   (port 8000) ✓ Running
+```diff
+pocketpro_nyl_frontend (port 3000) ✓ Running
+pocketpro_nyl_backend  (port 5000) Running (health check may lag)
+pocketpro_nyl_chroma   (port 8000) ✓ Running
 ```
 
 ### API Routes (Default Behavior)

@@ -1,17 +1,17 @@
 # =============================================================================
-# Mensa Project - Local development Docker Compose
-# =============================================================================
+# PocketPro:NYL Project - Local development Docker Compose
+# ============================================================================= # PocketPro:NYL Project
 # Public web-server / subscriber deployment:
 #   cp .env.production.example .env && ./scripts/deploy-production.sh
 #   See docs/deployment/PUBLIC_DISTRIBUTION.md
 #
-# Safer local bind (loopback only):
+# Safer local bind (loopback only): 
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 # =============================================================================
 
 services:
-  backend:
-    container_name: mensa_backend
+  backend: 
+    container_name: pocketpro_nyl_backend
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -26,30 +26,30 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - CHAT_GPT_API_KEY=${CHAT_GPT_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - GROK_API_KEY=${GROK_API_KEY}
+      - GROK_API_KEY=${GROK_API_KEY} 
       - GROK_API_BASE=${GROK_API_BASE:-https://api.x.ai/v1}
       - GROK_MODEL=${GROK_MODEL:-grok-3-mini-beta}
       - CHROMA_HOST=mensa_chroma
       - HF_HOME=/root/.cache/chroma # For ChromaDB client embedding models, mounted to volume
       - CHROMA_PORT=8000
-      - INGEST_BATCH_SIZE=6000
-      - INGEST_REQUEST_TIMEOUT=30
+      - INGEST_BATCH_SIZE=6000 # Keep this for manual ingestion
+      - INGEST_REQUEST_TIMEOUT=30 # Keep this for manual ingestion
       - INGEST_MAX_RETRIES=3
       - INGEST_RETRY_DELAY=1
       - INGEST_BATCH_MAX_RETRIES=2
       - INGEST_PROGRESS_INTERVAL_S=0.5
       - INGEST_STATE_SAVE_INTERVAL_S=2
-      - INGEST_STARTUP_COUNT_WORKERS=4
-      - INGEST_STARTUP_PARALLEL=1
+      - INGEST_STARTUP_COUNT_WORKERS=0 # Temporarily disable startup ingestion
+      - INGEST_STARTUP_PARALLEL=0 # Temporarily disable startup ingestion
       - INGEST_ENABLE_CATALOG_FALLBACK=0
       - INGEST_MAX_CATALOG_CANDIDATES=3
       - INGEST_SKIP_FETCH_THRESHOLD=50000
       - INGEST_FAST_COMPLETE_POPULATED=1
-      - PREDICTION_ENGINE=modular
+      - PREDICTION_ENGINE=modular # PocketPro:NYL Project
       - PREDICTION_STATE_DIR=/data/prediction
-      - TRAIN_TARGET_ACCURACY=0.90
+      - TRAIN_TARGET_ACCURACY=0.99
       - TRAIN_MAX_ATTEMPTS=40
-      - TRAIN_SIZE=0.25
+      - TRAIN_SIZE=0.33
       - TRAIN_N_ESTIMATORS=250
       - TRAIN_MAX_DEPTH=18
       - TRAIN_RANDOM_STATE=42
@@ -68,13 +68,8 @@ services:
       - chroma_model_cache:/root/.cache/chroma
     networks:
       - mensa-net
-    healthcheck:
-      # Use HTTP probe (not TCP) so 'healthy' truly means the API is serving.
-      # TCP becomes available before Hypercorn finishes startup; HTTP does not.
-      test: [
-        "CMD", "python", "-c",
-        "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/api/health', timeout=5)"
-      ]
+    healthcheck: # Temporarily simplify to TCP check for faster diagnosis # PocketPro:NYL Project
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 5000), timeout=2).close()"]
       interval: 15s
       timeout: 10s
       retries: 8
@@ -82,25 +77,25 @@ services:
     deploy:
       resources:
         limits:
-          memory: 6G
+          memory: 12G # Increased from 8G to further mitigate OutOfMemoryException during prediction
     restart: unless-stopped
   frontend:
-    build:
+    build: 
       context: ./frontend
       dockerfile: Dockerfile
       args:
         NODE_VERSION: 22.13.1
-        REACT_APP_API_BASE: ""
+        REACT_APP_API_BASE: "" # PocketPro:NYL Project
         CACHE_BUSTER: ${FRONTEND_CACHE_BUSTER:-20260703b}
     container_name: mensa_frontend
-    ports:
+    ports: 
       - "${DOCKER_BIND_HOST:-0.0.0.0}:${FRONTEND_HOST_PORT:-3000}:80"
     depends_on:
       backend:
         condition: service_healthy
     environment:
       - HOME=/app
-      - CHOKIDAR_USEPOLLING=true
+      - CHOKIDAR_USEPOLLING=true # PocketPro:NYL Project
     networks:
       - mensa-net
     healthcheck:
@@ -111,8 +106,8 @@ services:
       start_period: 10s # Frontend should be quick to serve static files
     restart: unless-stopped
   chroma:
-    image: chromadb/chroma:0.5.3
-    container_name: mensa_chroma
+    image: chromadb/chroma:0.5.3 # PocketPro:NYL Project
+    container_name: pocketpro_nyl_chroma
     environment:
       - IS_PERSISTENT=TRUE
       - ANONYMIZED_TELEMETRY=FALSE
@@ -128,7 +123,7 @@ services:
       start_period: 30s # Reduced from 120s, ChromaDB should start quickly
     networks:
       - mensa-net
-    restart: on-failure
+    restart: on-failure # PocketPro:NYL Project
 
 networks:
   mensa-net:

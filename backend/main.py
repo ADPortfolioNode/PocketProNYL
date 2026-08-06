@@ -1,5 +1,5 @@
 """
-Mensa Project - FastAPI Application Bootstrap
+PocketPro:NYL Project - FastAPI Application Bootstrap
 Simplified main.py for application initialization and route registration.
 """
 import logging
@@ -96,11 +96,11 @@ async def _deferred_lm_audit():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager for startup/shutdown events."""
-    import asyncio
+    import asyncio 
 
     # Startup
-    print("🚀 Mensa Project backend starting up...")
-
+    print("🚀 PocketPro:NYL Project backend starting up...")
+    
     yield
     
     # Tasks to run after the application has started and is ready to serve requests
@@ -108,7 +108,7 @@ async def lifespan(app: FastAPI):
     start_background_ingestion()
 
     # Shutdown
-    print("👋 Mensa Project backend shutting down...")
+    print("👋 PocketPro:NYL Project backend shutting down...")
 
 
 # Create FastAPI application
@@ -157,7 +157,7 @@ async def get_train_settings(game: str = None):
         from services.trainer import trainer_service
 
         defaults = {
-            "target_accuracy": float(getattr(trainer_service, "target_accuracy", 0.98)),
+            "target_accuracy": float(getattr(trainer_service, "target_accuracy", 0.99)),
             "max_train_attempts": int(getattr(trainer_service, "max_train_attempts", 12)),
             "blend_step": float(getattr(trainer_service, "blend_step", 0.1)),
             # Sampling / model knobs (mirror Trainer defaults or sensible fallbacks)
