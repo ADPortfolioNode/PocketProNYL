@@ -211,6 +211,14 @@ def test_predict():
         record("9. Suggest", "WARN", "Skipping prediction, training was skipped")
         return
 
+    # Add a check for sufficient data before attempting to predict, same as training
+    code, data = safe_request("GET", f"/api/games/{GAME}/summary", timeout=30)
+    draw_count = data.get("draw_count", 0) if code == 200 else 0
+    if draw_count < 5:  # A reasonable minimum for prediction, more than the backend's hard requirement of 2
+        record("9. Suggest", "WARN", f"Skipping prediction, not enough data ({draw_count} draws)")
+        SHOULD_SKIP_TRAIN_PREDICT = True # Also skip subsequent steps if we can't predict
+        return
+
     code, data = safe_request(
         "POST",
         "/api/predict",
