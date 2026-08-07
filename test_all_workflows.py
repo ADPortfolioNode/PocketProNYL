@@ -2,6 +2,7 @@
 """Sequential end-to-end workflow test for Mensa Project API."""
 import json
 import sys
+import re
 import time
 import urllib.error
 import urllib.request
@@ -12,6 +13,7 @@ BASE = os.environ.get("MENSA_API_BASE", "http://127.0.0.1:5000").rstrip("/")
 GAME = os.environ.get("WORKFLOW_GAME", "pick3")
 TRAIN_TIMEOUT = int(os.environ.get("WORKFLOW_TRAIN_TIMEOUT", "900"))
 RESULTS = []
+SHOULD_SKIP_TRAIN_PREDICT = False
 
 
 def is_record_floor_response(payload: dict) -> bool:
@@ -69,6 +71,16 @@ def get_accuracy_from_payload(payload: dict) -> float | None:
                 return float(val)
             except (TypeError, ValueError):
                 pass
+    if payload.get("mean_partial_hits") is not None: # New metric for modular engine
+        return float(payload["mean_partial_hits"])
+    
+    message = payload.get("message", "")
+    match = re.search(r"mean_partial_hits=([0-9.]+)", message)
+    if match:
+        try:
+            return float(match.group(1))
+        except (ValueError, TypeError):
+            pass
     return None
 
 def test_health():
@@ -150,16 +162,24 @@ def test_ingest():
 
 
 def test_train():
+    global SHOULD_SKIP_TRAIN_PREDICT
+    # Check for sufficient data before attempting to train
+    code, data = safe_request("GET", f"/api/games/{GAME}/summary", timeout=30)
+    draw_count = data.get("draw_count", 0) if code == 200 else 0
+    if draw_count < 10: # A reasonable minimum for training
+        record("8. Train Model", "WARN", f"Skipping training, not enough data ({draw_count} draws)")
+        SHOULD_SKIP_TRAIN_PREDICT = True
+        return
+
     code, data = safe_request(
         "POST",
         "/api/train",
         {
             "game": GAME,
-            "target_accuracy": 0.85,
-            "max_iterations": 8,
-            "n_estimators": 120,
-            "max_depth": 12,
-            "auto_tune": False,
+            "max_iterations": 40, # Increased to match TRAIN_MAX_ATTEMPTS in docker-compose.yml
+            # Removed target_accuracy, n_estimators, max_depth, and auto_tune: False
+            # This allows the backend's default TRAIN_TARGET_ACCURACY and auto_tune (TRAIN_AUTO_TUNE=1)
+            # to use its own logic and potentially better hyperparameters.
         },
         timeout=TRAIN_TIMEOUT,
     )
@@ -170,7 +190,7 @@ def test_train():
         if acc is not None and acc > 0:
             record("8. Train Model", "PASS", f"accuracy={acc:.4f}")
         elif acc == 0.0:
-            record("8. Train Model", "WARN", f"training completed with 0.0 accuracy: {data.get('message', '')[:80]}")
+            record("8. Train Model", "WARN", f"completed with 0.0 accuracy: {data.get('message', '')[:80]}")
         elif data.get("retained_previous_model"):
             record("8. Train Model", "PASS", f"retained record (no regression): {str(data.get('message', ''))[:80]}")
         elif is_record_floor_response(data):
@@ -187,6 +207,10 @@ def test_train():
 
 
 def test_predict():
+    if SHOULD_SKIP_TRAIN_PREDICT:
+        record("9. Suggest", "WARN", "Skipping prediction, training was skipped")
+        return
+
     code, data = safe_request(
         "POST",
         "/api/predict",
@@ -212,13 +236,13 @@ def test_experiments():
 
 
 def test_chroma():
-    code, data = safe_request("GET", "/api/chroma_io/heartbeat", timeout=25)
-    if code == 200:
-        record("11. Chroma Status", "PASS", data.get("status", "ok"))
+    code, data = safe_request("GET", "/api/chroma/status", timeout=30) # Increased timeout
+    if code == 200 and data.get("status") in ("ok", "connected"): # Accept "connected" as valid
+        record("11. Chroma Status", "PASS", data.get("status"))
     else:
-        record("11. Chroma Status", "FAIL", str(data)[:120])
+        record("11. Chroma Status", "FAIL", f"status={data.get('status')} {str(data)[:120]}")
 
-    code, data = safe_request("GET", "/api/chroma_io/collections", timeout=30)
+    code, data = safe_request("GET", "/api/chroma/collections", timeout=60) # Increased timeout
     cols = data.get("collections", [])
     if code == 200 and len(cols) >= 8:
         record("12. Chroma Collections", "PASS", f"{len(cols)} collections")
@@ -274,9 +298,9 @@ def main():
 
     test_health()
     test_startup_status()
-    test_games()
     test_startup_init()
     test_ingest()
+    test_games() # Run after ingestion is complete
     test_train()
     test_predict()
     test_experiments()

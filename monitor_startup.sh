@@ -2,10 +2,9 @@
 set -euo pipefail
 
 # === Mensa Project Startup Monitor ===
-# === PocketPro:NYL Project Startup Monitor ===
 # Includes progress tracking for background ingestion
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" # PocketPro:NYL Project
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/resolve_host_ports.sh
 . "${SCRIPT_DIR}/scripts/resolve_host_ports.sh"
 

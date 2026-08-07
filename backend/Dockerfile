@@ -12,16 +12,19 @@ COPY ${REQUIREMENTS_FILE} requirements.txt
 # Install dependencies and validate ASGI server import
 RUN pip --default-timeout=300 --retries 5 install --no-cache-dir -r requirements.txt \
     && python -c "from hypercorn.config import Config; print(f'hypercorn install verified: {Config.__module__}')"
+ENV HF_HOME=/app/.cache/chroma
 
 # Pre-download the ChromaDB ONNX embedding model at build time so it is baked
 # into the image. Without this, the 79 MB all-MiniLM-L6-v2 download happens
 # synchronously on the first request and blocks the single Hypercorn worker,
-# causing every HTTP endpoint to time out for ~30+ seconds on cold start.
+# causing every HTTP endpoint to time out for ~30+ seconds on cold start. # PocketPro:NYL Project
 RUN python -c "\
 import os; \
+os.makedirs('/app/.cache/chroma', exist_ok=True); \
 os.environ.setdefault('ANONYMIZED_TELEMETRY', 'FALSE'); \
+os.environ['HF_HOME'] = '/app/.cache/chroma'; \
 from chromadb.utils.embedding_functions import ONNXMiniLM_L6_V2; \
-print('Downloading ONNX embedding model...'); \
+print('Downloading ONNX embedding model to ' + os.environ['HF_HOME'] + '...'); \
 ef = ONNXMiniLM_L6_V2(); \
 ef(['warmup']); \
 print('ONNX model pre-download complete.')" \
@@ -35,11 +38,18 @@ WORKDIR /app
 # Create non-root user for security
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
+# Create home directory for appuser and set permissions
+# Rely on docker-entrypoint.sh for /home/appuser permissions
+
+# Set HOME environment variable for appuser to match WORKDIR
+ENV HOME=/app
+
 # Copy Python dependencies from builder (includes cached ONNX model)
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 # Copy pre-downloaded ONNX model cache from builder stage
-COPY --from=builder /root/.cache/chroma /root/.cache/chroma
+COPY --from=builder /app/.cache/chroma /app/.cache/chroma
+
 
 # Copy application code
 ARG CACHE_BUSTER=1
@@ -59,7 +69,7 @@ ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 USER appuser
 
 # Add health check: verify API port is accepting connections
-HEALTHCHECK --interval=10s --timeout=8s --start-period=90s --retries=6 \
+HEALTHCHECK --interval=10s --timeout=8s --start-period=120s --retries=6 \
     CMD python -c "import socket; socket.create_connection(('127.0.0.1', 5000), timeout=2).close()" || exit 1
 
 # Run ASGI app with a single worker so in-memory startup/progress state remains consistent

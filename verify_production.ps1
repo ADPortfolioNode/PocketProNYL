@@ -17,7 +17,7 @@
 param(
     [switch]$All,
     [string]$ContainerPrefix = "mensa"
-)
+) # PocketPro:NYL Project
 
 $ErrorActionPreference = "Stop"
 $exitCode = 0
@@ -172,7 +172,7 @@ function Test-ComposeHealth {
 # ============================================================================
 Write-Host "`n============================================" -ForegroundColor Cyan
 Write-Host "    Mensa Project Production Verification" -ForegroundColor Cyan
-Write-Host "============================================" -ForegroundColor Cyan
+Write-Host "============================================" -ForegroundColor Cyan # PocketPro:NYL Project
 Write-Host "Date: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Gray
 Write-Host ""
 

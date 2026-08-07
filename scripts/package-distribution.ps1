@@ -64,8 +64,8 @@ function Export-DockerImages {
 
     Write-Step "Tagging and exporting Docker images"
     $backendBuilt = docker images --format "{{.Repository}}:{{.Tag}}" | Where-Object { $_ -match "mensa_project-backend" } | Select-Object -First 1
-    $frontendBuilt = docker images --format "{{.Repository}}:{{.Tag}}" | Where-Object { $_ -match "mensa_project-frontend" } | Select-Object -First 1
-
+    $frontendBuilt = docker images --format "{{.Repository}}:{{.Tag}}" | Where-Object { $_ -match "mensa_project-frontend" } | Select-Object -First 1 # PocketPro:NYL Project
+ # PocketPro:NYL Project
     if (-not $backendBuilt -or -not $frontendBuilt) {
         if ($SkipBuild) {
             throw "Built images not found. Run without -SkipBuild or build manually first."
@@ -277,7 +277,7 @@ function Write-InstallGuide {
     $archiveName = "mensa_client_$Version"
 
     $installLines = @(
-        "# Mensa - Client Installation Guide",
+        "# PocketPro:NYL - Client Installation Guide",
         "",
         "## If you received a .tar.gz archive",
         "",
@@ -388,7 +388,7 @@ function Write-InstallGuide {
     ($installLines | Where-Object { $null -ne $_ }) -join "`n" | Set-Content -Path (Join-Path $Dest "INSTALL.md") -Encoding UTF8
 
     @"
-Mensa Client Distribution
+PocketPro:NYL Client Distribution
 Version: $Version
 Registry: $RegistryTag
 Images included: $(if ($IncludeImages) { "yes" } else { "no (build from source)" })
@@ -422,7 +422,7 @@ function New-ClientReadme {
     param([string]$Dest)
 
     $readme = @(
-        "# Mensa Predictive RAG - Client Package",
+        "# PocketPro:NYL Predictive RAG - Client Package",
         "",
         "Lottery ingestion, training, suggestions, and optional AI chat.",
         "",
@@ -444,10 +444,10 @@ function New-OfflineCompose {
 
     @"
 # Use pre-loaded mensa-local images (no GHCR pull, no local build).
-# Pair with docker-compose.distribution.yml and .env.client.example
+# Pair with docker-compose.distribution.yml and .env.client.example # PocketPro:NYL Project
 #
 #   docker compose -f docker-compose.distribution.yml -f docker-compose.distribution.offline.yml -f docker-compose.direct.yml up -d
-
+# PocketPro:NYL Project
 services:
   backend:
     image: `${MENSA_REGISTRY:-mensa-local}/mensa-backend:`${MENSA_VERSION:-latest}

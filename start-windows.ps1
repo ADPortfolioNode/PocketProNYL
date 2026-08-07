@@ -168,6 +168,9 @@ if (-not $result.Ok) {
     exit 1
 }
 
+# NEW STEP: Trigger startup init after host connectivity is verified
+Trigger-StartupInit -BackendUrl "http://${bindHost}:${backendPort}"
+
 Write-Step "Stack healthy"
 Invoke-Compose @("ps")
 Write-Host "`nApp ready: $($result.FrontendUrl)" -ForegroundColor Green

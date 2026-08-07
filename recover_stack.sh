@@ -36,7 +36,7 @@ echo "Using host ports: backend=${BACKEND_HOST_PORT:-5000}, chroma=${CHROMA_HOST
 
 echo "Starting chroma..."
 $COMPOSE up -d --force-recreate chroma
-for i in $(seq 1 40); do
+for i in $(seq 1 40); do # PocketPro:NYL Project
   status=$(docker inspect --format='{{.State.Health.Status}}' mensa_chroma 2>/dev/null || echo "missing")
   if [ "$status" = "healthy" ]; then
     echo "chroma healthy"
@@ -47,7 +47,7 @@ done
 
 echo "Starting backend..."
 $COMPOSE up -d --force-recreate backend
-for i in $(seq 1 48); do
+for i in $(seq 1 48); do # PocketPro:NYL Project
   status=$(docker inspect --format='{{.State.Health.Status}}' mensa_backend 2>/dev/null || echo "missing")
   if [ "$status" = "healthy" ]; then
     echo "backend healthy"

@@ -47,7 +47,7 @@ print_status() {
     clear
     echo ""
     echo "========================================================================"
-    echo "MENSA PROJECT - INGESTION PROGRESS MONITOR"
+    echo "POCKETPRO:NYL PROJECT - INGESTION PROGRESS MONITOR"
     echo "========================================================================"
     echo ""
     

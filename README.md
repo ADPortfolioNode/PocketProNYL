@@ -1,22 +1,22 @@
-# Mensa Predictive RAG
+# PocketPro:NYL Predictive RAG
 
 Lottery data pipeline with ingestion, model training, suggestions, and optional AI chat (Gemini, OpenAI, Grok). Stack: **React** frontend, **FastAPI** backend, **ChromaDB** vector store — all orchestrated with Docker Compose.
 
 ## Quick start (Windows)
 
-1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and wait until it is running.
-2. Open the `mensa_project` folder.
-3. Double-click **`StartMensa.bat`**
+1. Install Docker Desktop and wait until it is running. # PocketPro:NYL Project
+2. Open the `pocketpro_nyl_project` folder.
+3. Double-click **`StartPocketProNYL.bat`** # Renamed start script
    - First run: creates `.env` from `.env.example` (optional API keys for chat).
    - Builds images, starts containers, opens the dashboard in your browser.
-4. Double-click **`StopMensa.bat`** when finished (data volumes are kept).
+4. Double-click **`StopPocketProNYL.bat`** when finished (data volumes are kept). # Renamed stop script
 
 First build can take 10–20 minutes. Later starts are faster.
 
 | Launcher | Purpose |
-|----------|---------|
-| `StartMensa.bat` (or `Start Mensa.bat`) | Build + start stack, open app |
-| `StopMensa.bat` (or `Stop Mensa.bat`) | Stop containers cleanly |
+|----------|---------| # PocketPro:NYL Project
+| `StartPocketProNYL.bat` (or `Start PocketPro:NYL.bat`) | Build + start stack, open app |
+| `StopPocketProNYL.bat` (or `Stop PocketPro:NYL.bat`) | Stop containers cleanly | # Renamed stop script
 | `start-windows.ps1` | PowerShell launcher used by the `.bat` file |
 | `recover_stack.ps1` | Recovery when Docker port-forwarding fails |
 | `rebuild.ps1` | Rebuild frontend/backend and restart |
@@ -32,8 +32,8 @@ First build can take 10–20 minutes. Later starts are faster.
 ## Quick start (Mac / Linux)
 
 ```bash
-git clone https://github.com/ADPortfolioNode/mensa_project.git
-cd mensa_project
+git clone https://github.com/ADPortfolioNode/pocketpro_nyl_project.git
+cd pocketpro_nyl_project
 cp .env.example .env   # add API keys if you want AI chat
 docker compose up --build -d
 ```

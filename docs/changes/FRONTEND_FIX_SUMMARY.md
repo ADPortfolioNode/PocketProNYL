@@ -106,7 +106,7 @@ fetch('/api/startup_status').then(r => r.json()).then(d => console.log('Status:'
 ### Error: `ERR_CONNECTION_RESET`
 - Container may have crashed
 - Run: `docker logs mensa_backend --tail 50`
-- Restart if needed: `docker restart mensa_backend`
+- Restart if needed: `docker restart pocketpro_nyl_backend`
 
 ### Error: `/api/api/startup_status` in Network tab
 - Old version still cached

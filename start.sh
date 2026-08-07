@@ -18,6 +18,12 @@ resolve_compose_host_ports || {
     exit 1
 }
 
+# Assign resolved host ports to shorter variables for consistent use
+FRONTEND_PORT="${FRONTEND_HOST_PORT}"
+BACKEND_PORT="${BACKEND_HOST_PORT}"
+CHROMA_PORT="${CHROMA_HOST_PORT}"
+BIND_HOST="${DOCKER_BIND_HOST:-127.0.0.1}" # Define BIND_HOST for consistency
+
 # --- Helper Functions ---
 export DOCKER_BUILDKIT=1
 
@@ -47,6 +53,82 @@ is_windows_shell() {
         MINGW*|MSYS*|CYGWIN*) return 0 ;;
         *) return 1 ;;
     esac
+}
+
+wait_for_service() {
+    local svc_name="$1"
+    local container_name="pocketpro_nyl_${svc_name}"
+    local max_checks=${2:-30}
+    local interval=${3:-5}
+    echo "Waiting for ${svc_name} to be running/healthy (timeout ${max_checks}*${interval}s)..."
+    
+    for i in $(seq 1 ${max_checks}); do
+        local container_id container
+        container_id=$(compose_cmd ps -q "${svc_name}" 2>/dev/null || true)
+        container=""
+
+        if [ -n "${container_id}" ]; then
+            container=$(docker inspect --format '{{.Name}}' "${container_id}" 2>/dev/null | sed 's#^/##' || true)
+        fi
+
+        if [ -z "${container}" ]; then
+            container=$(docker ps -a --filter "name=${container_name}" --format "{{.Names}}" | head -n1 || true)
+        fi
+
+        if [ -z "${container}" ]; then
+            echo "  ${svc_name} -> container not found yet..."
+            sleep ${interval}
+            continue
+        fi
+
+        local status
+        status=$(docker ps -a --filter "name=${container}" --format "{{.Status}}" | head -n1 || true)
+
+        if echo "${status}" | grep -qE "Exited|Dead"; then
+            echo "✗ ERROR: ${svc_name} container (${container}) has exited unexpectedly." >&2
+            echo "--- LOGS FOR ${container} ---" >&2
+            docker logs "${container}" --tail 100 || true
+            echo "--------------------------------" >&2
+            return 1
+        fi
+
+        # Check health if present
+        local health
+        health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "${container}" 2>/dev/null || true)
+        if [ -n "${health}" ]; then
+            if [ "${health}" = "healthy" ]; then
+                echo "✓ ${svc_name} -> ${container} is healthy."
+                return 0
+            fi
+            if [ "${health}" = "unhealthy" ]; then
+                echo "✗ ERROR: ${svc_name} container (${container}) has become unhealthy." >&2
+                echo "--- LOGS FOR ${svc_name} ---" >&2
+                docker logs "${container}" --tail 100 || true
+                echo "--------------------------------" >&2
+                return 1
+            fi
+            echo "  ${svc_name} -> ${container} health is '${health}'..."
+            sleep ${interval}
+            continue
+        fi
+
+        # Fallback: consider 'Up' status as ready if no healthcheck
+        if echo "${status}" | grep -iq "Up"; then
+            echo "✓ ${svc_name} -> ${container} is Up (no healthcheck)."
+            return 0
+        fi
+
+        echo "  ${svc_name} -> ${container} status is '${status}'..."
+        sleep ${interval}
+    done
+
+    echo "✗ ERROR: Timed out waiting for ${svc_name} to become ready." >&2
+    echo "--- STATUS OF ${svc_name} ---" >&2
+    compose_cmd ps "${svc_name}" >&2
+    echo "--- LOGS FOR ${svc_name} ---" >&2
+    compose_cmd logs --tail 100 "${svc_name}" >&2
+    echo "------------------------------------" >&2
+    return 1
 }
 
 check_docker_version() {
@@ -92,6 +174,28 @@ check_docker_version() {
     echo "✓ Docker version check passed (Client: $client_ver, Server: $server_ver)."
 }
 
+trigger_startup_init() {
+    local backend_url="http://${BIND_HOST}:${BACKEND_PORT}"
+    echo "==> Triggering backend startup initialization at ${backend_url}/api/startup_init"
+
+    # Use curl to send the POST request
+    # -s: silent (don't show progress meter or error messages)
+    # -X POST: specify POST method
+    # -H "Content-Type: application/json": set header for JSON body
+    # -d "{}": send an empty JSON object as the request body
+    # -w "%{http_code}": print only the HTTP status code to stdout
+    # -o /dev/null: discard the response body
+    # --max-time 15: set a timeout for the request
+    http_code=$(curl -s -X POST -H "Content-Type: application/json" -d "{}" "${backend_url}/api/startup_init" -w "%{http_code}" -o /dev/null --max-time 15)
+
+    if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then
+        echo "  ✓ Backend startup init triggered successfully (HTTP $http_code)"
+    else
+        echo "  ✗ Failed to trigger backend startup init (HTTP $http_code). This might be expected if ingestion is already running or completed." >&2
+        echo "    Check backend logs for details: ${COMPOSE_CMD} logs backend" >&2
+    fi
+}
+
 # --- Main Script ---
 
 BUILD=false
@@ -108,7 +212,6 @@ done
 
 # --- Execution Flow ---
 
-echo "Starting Mensa Project..."
 echo "Starting PocketPro:NYL Project..."
 
 # 1. Check Docker environment first
@@ -125,13 +228,15 @@ if [ "${DOWN}" = true ]; then
 fi
 
 # 3. Stop existing containers before starting
-echo "Stopping any running services..."
+echo "Stopping any running Docker services and clearing ports..."
 compose_cmd down --remove-orphans 2>/dev/null || true # Stop and remove containers/networks, including orphans
-echo "Pruning dangling Docker resources to ensure ports are clear..."
-docker system prune -f 2>/dev/null || true # Clear dangling images, build cache, etc.
-echo ""
 
-# 4. Build and start services
+# Explicitly state which ports are being targeted for cleanup (from .env or defaults)
+echo "Targeting ports for cleanup: Frontend=${FRONTEND_PORT}, Backend=${BACKEND_PORT}, Chroma=${CHROMA_PORT}"
+
+echo "Pruning dangling Docker resources to ensure ports are fully released..."
+docker system prune -f 2>/dev/null || true # Clear dangling images, build cache, etc.
+sleep 2 # Give the OS a moment to release ports
 UP_ARGS=("-d" "--wait")
 
 if [ "${BUILD}" = true ]; then
@@ -142,8 +247,50 @@ if [ "${BUILD}" = true ]; then
     fi
 fi
 
-echo "Starting services..."
-if ! compose_cmd up "${UP_ARGS[@]}"; then
+# 4. Staged Start services
+echo "Starting services in dependency order..."
+
+echo "  Starting chroma..."
+if ! compose_cmd up -d chroma; then
+    echo "ERROR: 'docker compose up chroma' failed." >&2
+    exit 1
+fi
+wait_for_service chroma || exit 1
+
+echo "  Starting backend..."
+if ! compose_cmd up -d backend; then
+    echo "ERROR: 'docker compose up backend' failed." >&2
+    exit 1
+fi
+wait_for_service backend || exit 1
+
+echo "  Starting frontend..."
+if ! compose_cmd up -d frontend; then
+    echo "ERROR: 'docker compose up frontend' failed." >&2
+    exit 1
+fi
+
+# Wait for frontend healthcheck, but if it fails, try HTTP accessibility as a fallback.
+# This addresses the finding: "Frontend shows unhealthy in docker compose but returns HTTP 200 and serves content correctly."
+if ! wait_for_service frontend 90; then # Increased max_checks to 90 (450s) for frontend
+    echo "WARNING: Frontend healthcheck failed or timed out. Attempting HTTP accessibility check as fallback..." >&2
+    frontend_url="http://${BIND_HOST}:${FRONTEND_PORT}"
+    if curl -s -f "${frontend_url}" >/dev/null; then
+        echo "✓ Frontend is accessible via HTTP at ${frontend_url} despite Docker healthcheck status."
+    else
+        echo "✗ ERROR: Frontend is not accessible via HTTP at ${frontend_url} after healthcheck failure." >&2
+        echo "--- LOGS FOR frontend ---" >&2
+        compose_cmd logs --tail 100 frontend >&2
+        echo "--------------------------------" >&2
+        exit 1
+    fi
+fi
+
+
+
+
+
+if ! compose_cmd ps >/dev/null; then # Check if any service is actually running
     echo "ERROR: 'docker compose up' failed." >&2
     echo "---" >&2
     compose_cmd ps >&2
@@ -153,83 +300,6 @@ if ! compose_cmd up "${UP_ARGS[@]}"; then
     exit 1
 fi
 
-# Helper to check a service readiness
-wait_for_service() {
-    local svc_name="$1"
-    local container_name="pocketpro_nyl_${svc_name}" # Use new project prefix for fallback search
-    local max_checks=${2:-30}
-    local interval=${3:-5}
-    echo "Waiting for ${svc_name} to be running/healthy (timeout ${max_checks}*${interval}s)..."
-    
-    for i in $(seq 1 ${max_checks}); do
-        local container_id container
-        container_id=$(compose_cmd ps -q "${svc_name}" 2>/dev/null || true)
-        container=""
-
-        if [ -n "${container_id}" ]; then
-            container=$(docker inspect --format '{{.Name}}' "${container_id}" 2>/dev/null | sed 's#^/##' || true)
-        fi
-
-        if [ -z "${container}" ]; then
-            container=$(docker ps -a --filter "name=${container_name}" --format "{{.Names}}" | head -n1 || true)
-        fi
-
-        if [ -z "${container}" ]; then
-            echo "  ${svc_name} -> container not found yet..."
-            sleep ${interval}
-            continue
-        fi
-
-        local status
-        status=$(docker ps -a --filter "name=${container}" --format "{{.Status}}" | head -n1 || true)
-
-        if echo "${status}" | grep -qE "Exited|Dead"; then
-            echo "✗ ERROR: ${svc_name} container (${container}) has exited unexpectedly." >&2
-            echo "--- LOGS FOR ${container} ---" >&2
-            docker logs "${container}" --tail 100 || true
-            echo "--------------------------------" >&2
-            return 1
-        fi
-
-        # Check health if present
-        local health
-        health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "${container}" 2>/dev/null || true)
-        if [ -n "${health}" ]; then
-            if [ "${health}" = "healthy" ]; then
-                echo "✓ ${svc_name} -> ${container} is healthy."
-                return 0
-            fi
-            if [ "${health}" = "unhealthy" ]; then
-                echo "✗ ERROR: ${svc_name} container (${container}) has become unhealthy." >&2
-                echo "--- LOGS FOR ${container} ---" >&2
-                docker logs "${container}" --tail 100 || true
-                echo "--------------------------------" >&2
-                return 1
-            fi
-            echo "  ${svc_name} -> ${container} health is '${health}'..."
-            sleep ${interval}
-            continue
-        fi
-
-        # Fallback: consider 'Up' status as ready if no healthcheck
-        if echo "${status}" | grep -iq "Up"; then
-            echo "✓ ${svc_name} -> ${container} is Up (no healthcheck)."
-            return 0
-        fi
-
-        echo "  ${svc_name} -> ${container} status is '${status}'..."
-        sleep ${interval}
-    done
-
-    echo "✗ ERROR: Timed out waiting for ${svc_name} to become ready." >&2
-    echo "--- STATUS OF ${svc_name} ---" >&2
-    compose_cmd ps "${svc_name}" >&2
-    echo "--- LOGS FOR ${svc_name} ---" >&2
-    compose_cmd logs --tail 100 "${svc_name}" >&2
-    echo "------------------------------------" >&2
-    return 1
-}
-
 echo ""
 echo "================================================="
 echo "✓ PocketPro:NYL Project Started Successfully"
@@ -238,8 +308,8 @@ echo ""
 echo "Container Status:"
 compose_cmd ps
 
-FRONTEND_PORT="$(resolve_host_port FRONTEND_HOST_PORT 3000)"
-BACKEND_PORT="$(resolve_host_port BACKEND_HOST_PORT 5000)"
+# Trigger backend startup ingestion after all services are up and healthy
+trigger_startup_init
 
 # Keep the final startup banner consistent with the same values compose is using.
 echo ""

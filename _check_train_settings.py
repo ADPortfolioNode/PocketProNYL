@@ -1,6 +1,6 @@
 import requests
-b = "http://127.0.0.1:5001"
-r = requests.get(f"{b}/api/train_settings", timeout=60)
+BASE = "http://127.0.0.1:5000" # Use default backend port
+r = requests.get(f"{BASE}/api/train_settings", timeout=60)
 d = r.json()
 pg = d.get("per_game", {})
 print(f"HTTP {r.status_code}")

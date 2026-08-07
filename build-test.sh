@@ -23,11 +23,11 @@ echo "🧪 Running tests..."
 
 # Test frontend build
 echo "Testing frontend container..."
-docker run --rm mensa_frontend:latest wget -O- http://localhost/ || echo "Frontend test skipped (needs running container)"
+docker run --rm pocketpro_nyl_frontend:latest wget -O- http://localhost/ || echo "Frontend test skipped (needs running container)"
 
 # Test backend build
 echo "Testing backend container..."
-docker run --rm mensa_backend:latest python -c "import fastapi; print('FastAPI installed')" || echo "Backend test skipped"
+docker run --rm pocketpro_nyl_backend:latest python -c "import fastapi; print('FastAPI installed')" || echo "Backend test skipped"
 
 echo "✅ Tests complete!"
 echo ""

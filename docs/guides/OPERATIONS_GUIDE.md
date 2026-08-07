@@ -1,4 +1,4 @@
-# Mensa Project - Operations & Maintenance Guide
+# PocketPro:NYL Project - Operations & Maintenance Guide
 
 **Version:** 1.0  
 **Date:** January 16, 2026  

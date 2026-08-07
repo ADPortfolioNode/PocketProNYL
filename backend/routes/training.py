@@ -1,6 +1,7 @@
 """
 Training API routes.
 """
+import logging
 import asyncio
 import hashlib
 import json
@@ -18,6 +19,8 @@ from utils.timestamps import normalize_experiment_record, runtime_timestamp_fiel
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
 exp_store = ExperimentStore("/data/experiments/experiments.json")
 
 
@@ -62,7 +65,8 @@ def _dataset_snapshot(game: str) -> dict:
             "dataset_hash": hashlib.md5(f"{game}|{count}".encode("utf-8")).hexdigest(),
             "record_count": int(count or 0),
         }
-    except Exception:
+    except Exception as exc:
+        logger.error("Error getting dataset snapshot for game %s: %s", game, exc)
         return {"dataset_hash": None, "record_count": 0}
 
 
