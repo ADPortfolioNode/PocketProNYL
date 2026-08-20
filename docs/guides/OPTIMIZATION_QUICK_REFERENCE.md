@@ -1,4 +1,4 @@
-# Mensa Project - Quick Reference
+# PocketPro:NYL Project - Quick Reference
 
 ## Startup Options
 

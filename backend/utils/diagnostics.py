@@ -63,7 +63,7 @@ async def collect_runtime_diagnostics() -> Dict[str, Any]:
     from services.lm_router import lm_router
 
     data_dir = os.environ.get("DATA_DIR", "/data")
-    chroma_host = os.environ.get("CHROMA_HOST", "mensa_chroma")
+    chroma_host = os.environ.get("CHROMA_HOST", "pocketpro_nyl_chroma")
     chroma_port = int(os.environ.get("CHROMA_PORT", "8000"))
     experiments_path = Path(data_dir) / "experiments" / "experiments.json"
     models_dir = Path(data_dir) / "models"
@@ -81,7 +81,7 @@ async def collect_runtime_diagnostics() -> Dict[str, Any]:
 
     gateway_hints = []
     if not chroma_probe.get("ok"):
-        gateway_hints.append("Chroma heartbeat failed — check mensa_chroma container.")
+        gateway_hints.append("Chroma heartbeat failed — check pocketpro_nyl_chroma container.")
     if not local_health.get("ok"):
         gateway_hints.append("Backend /api/health not responding on port 5000.")
     if not experiments_path.is_file():
@@ -117,7 +117,7 @@ def format_diagnostics_summary(payload: Dict[str, Any]) -> str:
     provider_text = ", ".join(providers) if providers else "none"
 
     lines = [
-        "**Mensa runtime diagnostics**",
+        "**PocketPro:NYL runtime diagnostics**",
         f"- Backend health (local): {'OK' if local_ok else 'FAIL'}",
         f"- Chroma ({chroma.get('host')}:{chroma.get('port')}): {'OK' if chroma_ok else 'FAIL'}",
         f"- Models on disk: {models.get('count', 0)} under `{models.get('path', 'n/a')}`",

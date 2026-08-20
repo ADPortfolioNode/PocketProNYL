@@ -1,4 +1,4 @@
-Vercel Desktop Full Walkthrough — Mensa Project
+Vercel Desktop Full Walkthrough — PocketPro:NYL Project
 
 Goal
 - Deploy the frontend (`frontend/`) to Vercel with minimal code changes and no regression; host the backend separately on a container-friendly platform and connect via an environment secret.
@@ -17,7 +17,7 @@ Pre-reqs (local)
 
 Step 1 — Import repo in Vercel (Desktop)
 1. Open Vercel Dashboard → New Project → Import Git Repository.
-2. Select this repository and branch `feat/vercel-setup` (or `main`).
+2. Select this repository and branch `main`.
 3. In Import Settings:
    - Root Directory: leave blank
    - Framework Preset: "Create React App" or "Other"

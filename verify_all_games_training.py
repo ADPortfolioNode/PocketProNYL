@@ -7,7 +7,7 @@ import time
 import urllib.error
 import urllib.request
 
-BASE = os.environ.get("MENSA_API_BASE", "http://127.0.0.1:5001")
+BASE = os.environ.get("POCKETPRO_API_BASE", "http://127.0.0.1:5001")
 TRAIN_TIMEOUT = int(os.environ.get("VERIFY_TRAIN_TIMEOUT", "900"))
 GAMES = [
     "take5", "pick3", "powerball", "megamillions",

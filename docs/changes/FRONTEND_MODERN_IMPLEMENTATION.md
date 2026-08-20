@@ -167,7 +167,7 @@ export default function App() {
 ### 2. Backend Integration
 In `backend/main.py`, when collections reach 200+ rows:
 ```python
-from frontend.utils.chromaStateManager import chromaStateManager
+from state.chromaStateManager import chromaStateManager
 
 # After successful batch insert
 if rows_inserted >= 200:

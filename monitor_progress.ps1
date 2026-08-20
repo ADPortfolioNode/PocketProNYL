@@ -1,5 +1,5 @@
 #!/usr/bin/env pwsh
-# Mensa Project - Ingestion Progress Monitor (PowerShell version)
+# PocketPro:NYL Project - Ingestion Progress Monitor (PowerShell version)
 # Real-time display of game data ingestion
 
 param(
@@ -61,7 +61,7 @@ function Print-Status {
     # Print header
     Write-Host "`n" -NoNewline
     Write-Host ("=" * 70) -ForegroundColor Cyan
-    Write-Host "MENSA PROJECT - INGESTION PROGRESS MONITOR" -ForegroundColor Cyan -NoNewline
+    Write-Host "POCKETPRO:NYL - INGESTION PROGRESS MONITOR" -ForegroundColor Cyan -NoNewline
     Write-Host ""
     Write-Host ("=" * 70) -ForegroundColor Cyan
     Write-Host ""

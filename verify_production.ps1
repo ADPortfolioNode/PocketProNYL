@@ -1,7 +1,7 @@
 #!/usr/bin/env powershell
 <#
 .SYNOPSIS
-  Production readiness verification script for Mensa Project.
+  Production readiness verification script for PocketPro:NYL Project.
   Checks Docker images, environment, API endpoints, and security headers.
 
 .DESCRIPTION
@@ -11,13 +11,13 @@
 .PARAMETER All
   Run all checks including optional ones (default: critical only).
 .PARAMETER ContainerName
-  Base name for containers (default: mensa).
+  Base name for containers (default: pocketpro_nyl). # PocketPro:NYL Project
 #>
 
 param(
     [switch]$All,
-    [string]$ContainerPrefix = "mensa"
-) # PocketPro:NYL Project
+    [string]$ContainerPrefix = "pocketpro_nyl"
+)
 
 $ErrorActionPreference = "Stop"
 $exitCode = 0
@@ -171,8 +171,8 @@ function Test-ComposeHealth {
 # Main Checks
 # ============================================================================
 Write-Host "`n============================================" -ForegroundColor Cyan
-Write-Host "    Mensa Project Production Verification" -ForegroundColor Cyan
-Write-Host "============================================" -ForegroundColor Cyan # PocketPro:NYL Project
+Write-Host "    PocketPro:NYL Production Verification" -ForegroundColor Cyan
+Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "Date: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Gray
 Write-Host ""
 
@@ -195,7 +195,7 @@ Test-ComposeHealth "backend"
 # Retry frontend health check since it may still be starting
 $frontendHealthy = $false
 for ($attempt = 1; $attempt -le 5; $attempt++) {
-    $health = docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}N/A{{end}}' mensa_frontend 2>$null
+    $health = docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}N/A{{end}}' "${ContainerPrefix}_frontend" 2>$null
     if ($health -eq "healthy") {
         Write-Check "Health check: frontend" "PASS" "Status: healthy"
         $frontendHealthy = $true
@@ -229,8 +229,8 @@ if ($frontendResponse -and $All) {
 
 # 6. Docker image existence
 Write-Host "`n--- Docker Images ---" -ForegroundColor Yellow
-$backendImage = docker images --format "{{.Repository}}:{{.Tag}}" | Where-Object { $_ -match "$($ContainerPrefix).*backend" } | Select-Object -First 1
-$frontendImage = docker images --format "{{.Repository}}:{{.Tag}}" | Where-Object { $_ -match "$($ContainerPrefix).*frontend" } | Select-Object -First 1
+$backendImage = docker images --format "{{.Repository}}:{{.Tag}}" | Where-Object { $_ -match "pocketpronyl.*backend" } | Select-Object -First 1
+$frontendImage = docker images --format "{{.Repository}}:{{.Tag}}" | Where-Object { $_ -match "pocketpronyl.*frontend" } | Select-Object -First 1
 
 if ($backendImage) { Write-Check "Backend Docker image exists" "PASS" $backendImage }
 else { Write-Check "Backend Docker image exists" "FAIL" "No matching image found" }

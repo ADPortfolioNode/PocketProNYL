@@ -1,7 +1,7 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-  Reliable Windows startup for the Mensa Docker stack.
+  Reliable Windows startup for the PocketPro:NYL Docker stack.
 
 .DESCRIPTION
   - Binds published ports to 127.0.0.1 (see DOCKER_BIND_HOST in .env)
@@ -58,9 +58,9 @@ function Wait-DockerDaemon([int]$MaxSeconds = 180) {
 }
 
 function Test-OfflineClientMode {
-    $registry = Read-DotEnvValue "MENSA_REGISTRY" ""
-    $version = Read-DotEnvValue "MENSA_VERSION" ""
-    if ($registry -eq "mensa-local" -and -not [string]::IsNullOrWhiteSpace($version)) {
+    $registry = Read-DotEnvValue "POCKETPRO_NYL_REGISTRY" ""
+    $version = Read-DotEnvValue "POCKETPRO_NYL_VERSION" ""
+    if ($registry -eq "pocketpro-nyl-local" -and -not [string]::IsNullOrWhiteSpace($version)) {
         return $true
     }
     $buildLocal = Read-DotEnvValue "BUILD_LOCAL" ""
@@ -118,7 +118,7 @@ $chromaPort = [int](Read-DotEnvValue "CHROMA_HOST_PORT" "8001")
 
 if ([string]::IsNullOrWhiteSpace($bindHost)) { $bindHost = "127.0.0.1" }
 
-Write-Host "Mensa Windows Start" -ForegroundColor White
+Write-Host "PocketPro:NYL Windows Start" -ForegroundColor White
 if ($offlineClientMode) {
     Write-Host "  mode      : offline (pre-built images)" -ForegroundColor Cyan
 }
@@ -126,7 +126,7 @@ Write-Host "  bind host : $bindHost"
 Write-Host "  ports     : frontend=$frontendPort backend=$backendPort chroma=$chromaPort"
 Write-Host "  app URL   : http://${bindHost}:${frontendPort}/" -ForegroundColor Green
 
-. (Join-Path $PSScriptRoot "scripts\Wait-MensaPorts.ps1")
+. (Join-Path $PSScriptRoot "scripts\Wait-PocketProNYLPorts.ps1")
 
 Wait-DockerDaemon | Out-Null
 
@@ -151,11 +151,11 @@ Start-Sleep -Seconds 15
 Invoke-Compose @("up", "-d", "--force-recreate", "frontend")
 
 Write-Step "Verifying host connectivity"
-$result = Wait-MensaPorts -FrontendPort $frontendPort -BackendPort $backendPort -BindHost $bindHost -MaxWaitSec $MaxPortWaitSec
+$result = Wait-PocketProNYLPorts -FrontendPort $frontendPort -BackendPort $backendPort -BindHost $bindHost -MaxWaitSec $MaxPortWaitSec
 
 if (-not $result.Ok) {
     Repair-PortForwarding
-    $result = Wait-MensaPorts -FrontendPort $frontendPort -BackendPort $backendPort -BindHost $bindHost -MaxWaitSec 60
+    $result = Wait-PocketProNYLPorts -FrontendPort $frontendPort -BackendPort $backendPort -BindHost $bindHost -MaxWaitSec 60
 }
 
 if (-not $result.Ok) {

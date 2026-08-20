@@ -1,135 +1,154 @@
 #!/bin/bash
-# Mensa Project - Ingestion Progress Monitor
+# PocketPro:NYL Project - Ingestion Progress Monitor
 # Real-time display of game data ingestion progress
 
 API_BASE="http://127.0.0.1:5000"
 STATUS_ENDPOINT="$API_BASE/api/startup_status"
+PROGRESS_ENDPOINT="$API_BASE/api/ingest_progress"
 REFRESH_INTERVAL=2
 START_TIME=$(date +%s)
+
+# ANSI color codes
+RESET='\033[0m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+CYAN='\033[0;36m'
+GRAY='\033[0;90m'
 
 format_time() {
     local seconds=$1
     if (( seconds < 60 )); then
         echo "${seconds}s"
     elif (( seconds < 3600 )); then
-        echo "$((seconds / 60))m $((seconds % 60))s"
+        printf "%dm %ds" "$((seconds / 60))" "$((seconds % 60))"
     else
-        echo "$((seconds / 3600))h $((( seconds % 3600 ) / 60))m"
+        printf "%dh %dm" "$((seconds / 3600))" "$(((seconds % 3600) / 60))"
     fi
 }
 
 print_progress_bar() {
     local progress=$1
     local total=$2
-    local width=40
+    local label="$3"
+    local width=30
     
     if (( total == 0 )); then
         local percentage=0
         local filled=0
     else
-        local percentage=$((progress * 100 / total))
-        local filled=$((progress * width / total))
+        # Use awk for floating point arithmetic
+        local percentage
+        percentage=$(awk -v p="$progress" -v t="$total" 'BEGIN {if (t>0) printf "%.0f", (p/t)*100; else print 0}')
+        local filled
+        filled=$(awk -v p="$progress" -v w="$width" -v t="$total" 'BEGIN {if (t>0) printf "%.0f", (p/t)*w; else print 0}')
     fi
     
     local empty=$((width - filled))
-    printf "["
-    printf "%.0s█" $(seq 1 $filled)
-    printf "%.0s░" $(seq 1 $empty)
-    printf "] %d/%d (%d%%)\n" "$progress" "$total" "$percentage"
+    
+    # Build the bar string
+    local bar=""
+    for ((i=0; i<filled; i++)); do bar+="█"; done
+    for ((i=0; i<empty; i++)); do bar+="░"; done
+
+    printf "${label}%-32s ${YELLOW}[%s]${RESET} %'d/%'d (${percentage}%%)\n" "" "${bar}" "${progress}" "${total}"
 }
 
 print_status() {
     local json=$1
+    local draw_json=$2
     local current_time=$(date +%s)
     local elapsed=$((current_time - START_TIME))
     local elapsed_str=$(format_time $elapsed)
     
     clear
     echo ""
-    echo "========================================================================"
-    echo "POCKETPRO:NYL PROJECT - INGESTION PROGRESS MONITOR"
-    echo "========================================================================"
+    echo -e "${CYAN}========================================================================"
+    echo -e "          POCKETPRO:NYL - REAL-TIME INGESTION MONITOR"
+    echo -e "========================================================================${RESET}"
     echo ""
     
-    # Extract fields
-    local status=$(echo "$json" | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
-    local progress=$(echo "$json" | grep -o '"progress":[0-9]*' | cut -d':' -f2)
-    local total=$(echo "$json" | grep -o '"total":[0-9]*' | cut -d':' -f2)
-    local current_game=$(echo "$json" | grep -o '"current_game":"[^"]*"' | cut -d'"' -f4)
-    local current_task=$(echo "$json" | grep -o '"current_task":"[^"]*"' | cut -d'"' -f4)
+    # Use python for robust parsing
+    local parsed_status
+    parsed_status=$(echo "$json" | python -c 'import sys, json; data=json.load(sys.stdin); print(f"{data.get(\"status\", \"pending\")}|{data.get(\"progress\", 0)}|{data.get(\"total\", 0)}|{data.get(\"current_game\", \"N/A\")}|{data.get(\"current_task\", \"N/A\")}")' 2>/dev/null || echo "pending|0|0|N/A|N/A")
+    IFS='|' read -r status progress total current_game current_task <<< "$parsed_status"
+
+    local games_json
+    games_json=$(echo "$json" | python -c 'import sys, json; print(json.dumps(json.load(sys.stdin).get("games", {})))' 2>/dev/null || echo '{}')
     
-    # Status
-    echo "Status: $status"
-    echo "Elapsed: $elapsed_str"
+    # Overall Status
+    echo -e "  Overall Status: ${YELLOW}${status}${RESET}"
+    echo -e "  Elapsed Time:   ${elapsed_str}"
     echo ""
     
-    # Progress bar
-    echo "Overall Progress:"
-    print_progress_bar "$progress" "$total"
+    # Overall Progress Bar (Games)
+    print_progress_bar "$progress" "$total" "  Games Progress: "
     echo ""
     
-    # Current game
-    if [ -n "$current_game" ]; then
-        echo "Currently Processing:"
-        echo "  Game: $(echo $current_game | tr a-z A-Z)"
-        if [ -n "$current_task" ]; then
-            echo "  Task: $current_task"
+    # Current Game and Draw Progress
+    if [[ -n "$current_game" && "$current_game" != "N/A" ]]; then
+        echo -e "  ${CYAN}Currently Processing: ${YELLOW}$(echo "$current_game" | tr 'a-z' 'A-Z')${RESET} ${GRAY}(${current_task:-task unknown})${RESET}"
+        
+        local parsed_draw_progress
+        parsed_draw_progress=$(echo "$draw_json" | python -c 'import sys, json; data=json.load(sys.stdin); print(f"{data.get(\"rows_fetched\", 0)}|{data.get(\"total_rows\", 0)}")' 2>/dev/null || echo "0|0")
+        IFS='|' read -r rows_fetched total_rows <<< "$parsed_draw_progress"
+
+        if (( total_rows > 0 )); then
+            print_progress_bar "$rows_fetched" "$total_rows" "    Draws Fetched:"
+        else
+            echo -e "    ${GRAY}Draw progress not available...${RESET}"
         fi
         echo ""
     fi
     
-    # Game status details
-    echo "Game Status:"
-    echo "$json" | grep -o '"[a-z0-9]*":"[^"]*"' | while read -r item; do
-        local key=$(echo "$item" | cut -d'"' -f2)
-        local value=$(echo "$item" | cut -d'"' -f4)
+    # Game Status Details
+    echo -e "  ${CYAN}Game-by-Game Status:${RESET}"
+    # Use python to iterate and format, much more robust than bash loops + grep
+    echo "$games_json" | python -c '
+import sys, json
+games = json.load(sys.stdin)
+if not games:
+    print("    (no game status available yet)")
+else:
+    for game, g_status in sorted(games.items()):
+        symbol, color = "？", "\033[0;90m" # Gray
+        if g_status == "completed": symbol, color = "✓", "\033[0;32m" # Green
+        elif g_status == "pending": symbol, color = "⟳", "\033[1;33m" # Yellow
+        elif "fail" in g_status:    symbol, color = "✗", "\033[0;31m" # Red
         
-        # Skip system fields
-        case "$key" in
-            status|progress|total|current_game|current_task)
-                continue
-                ;;
-            *)
-                if [ -n "$value" ]; then
-                    local symbol="✓"
-                    [ "$value" = "pending" ] && symbol="⟳"
-                    [ "$value" = "failed" ] && symbol="✗"
-                    echo "  $symbol $key: $value"
-                fi
-                ;;
-        esac
-    done
-    
+        print(f"    {color}{symbol} {game.upper():<15}{g_status}{color}\033[0m")
+'
     echo ""
 }
 
 # Main loop
-echo "Connecting to API: $STATUS_ENDPOINT"
+echo -e "${CYAN}Connecting to API: ${API_BASE}${RESET}"
 echo ""
 
 retry_count=0
 max_retries=30
 
 while true; do
-    response=$(curl -s "$STATUS_ENDPOINT" 2>&1)
+    # Fetch overall status
+    response=$(curl -s -f "$STATUS_ENDPOINT" 2>&1)
+    curl_exit_code=$?
     
-    if [[ $response == *"error"* ]] || [[ -z "$response" ]]; then
+    if [[ $curl_exit_code -ne 0 ]]; then
         retry_count=$((retry_count + 1))
         clear
         echo ""
-        echo "========================================================================"
-        echo "WAITING FOR API..."
-        echo "========================================================================"
+        echo -e "${YELLOW}========================================================================"
+        echo -e "                          WAITING FOR API..."
+        echo -e "========================================================================${RESET}"
         echo ""
-        echo "⚠ Waiting for API to be ready ($retry_count/$max_retries)..."
+        echo -e "${YELLOW}⚠ Waiting for API to be ready ($retry_count/$max_retries)...${RESET}"
         echo ""
-        echo "Make sure services are running:"
-        echo "  docker-compose ps"
-        echo "  docker-compose up -d"
+        echo -e "  Make sure services are running:"
+        echo -e "  ${GRAY}./start.sh${RESET}"
         
         if (( retry_count >= max_retries )); then
             echo ""
-            echo "✗ Could not connect to API after $((max_retries * 2)) seconds"
+            echo -e "${RED}✗ Could not connect to API after $((max_retries * REFRESH_INTERVAL)) seconds.${RESET}"
             exit 1
         fi
         
@@ -138,16 +157,24 @@ while true; do
     fi
     
     retry_count=0
-    print_status "$response"
+    
+    # Fetch draw-level progress for the current game
+    current_game_for_url=$(echo "$response" | python -c 'import sys, json; print(json.load(sys.stdin).get("current_game", ""))' 2>/dev/null)
+    draw_response="{}"
+    if [[ -n "$current_game_for_url" && "$current_game_for_url" != "N/A" ]]; then
+        draw_response=$(curl -s -f "${PROGRESS_ENDPOINT}?game=${current_game_for_url}" 2>/dev/null || echo "{}")
+    fi
+
+    print_status "$response" "$draw_response"
     
     # Check if complete
     if echo "$response" | grep -q '"status":"completed"'; then
         current_time=$(date +%s)
         elapsed=$((current_time - START_TIME))
         elapsed_str=$(format_time $elapsed)
-        
-        echo "✓ Ingestion Complete!"
-        echo "  Total time: $elapsed_str"
+        echo ""
+        echo -e "${GREEN}✓ Ingestion Complete!${RESET}"
+        echo -e "  Total time: ${elapsed_str}"
         exit 0
     fi
     

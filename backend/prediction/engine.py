@@ -15,6 +15,7 @@ from prediction.metrics.evaluator import walk_forward_backtest
 from prediction.nn.feedforward import FeedforwardNN
 from prediction.nn.lstm import LSTMBackend
 from prediction.state.weight_store import WeightStore
+from services import statistical_strategies
 
 
 class LotteryPredictionEngine:
@@ -91,6 +92,7 @@ class LotteryPredictionEngine:
         game: str,
         history: list[Draw] | None = None,
         limit: int = 500,
+        strategy: str | None = None,
     ) -> PredictionTicket:
         config = self._load_config(game)
         rules = game_rules_from_config(game)
@@ -100,6 +102,30 @@ class LotteryPredictionEngine:
         if len(history) < 2:
             raise ValueError(f"Not enough history for game '{game}' (need >= 2 draws).")
 
+        strategy_name = strategy or "ensemble"
+
+        # Dispatch to statistical strategies if specified
+        if strategy_name in ["frequency", "overdue", "hybrid"]:
+            if strategy_name == "frequency":
+                scores = statistical_strategies.score_frequency(history, rules)
+            elif strategy_name == "overdue":
+                scores = statistical_strategies.score_overdue(history, rules)
+            else: # hybrid
+                scores = statistical_strategies.score_hybrid(history, rules)
+            
+            primary_numbers = statistical_strategies.select_top_numbers(scores, rules)
+            
+            return PredictionTicket(
+                game=game,
+                primary=primary_numbers,
+                bonus=[],
+                strategy_used=strategy_name,
+                weights_used={},
+                strategy_contributions={},
+                metrics={},
+            )
+
+        # Default to existing ensemble/RF logic
         outputs = self._collect_outputs(history, config)
         weights = self._resolve_weights(game, config)
 
@@ -116,7 +142,7 @@ class LotteryPredictionEngine:
                     nn_scores = None
                     nn_weight = 0.0
 
-        return build_ticket(
+        ticket = build_ticket(
             game=game,
             outputs=outputs,
             weights=weights,
@@ -124,6 +150,8 @@ class LotteryPredictionEngine:
             nn_scores=nn_scores,
             nn_weight=nn_weight,
         )
+        ticket.strategy_used = strategy_name
+        return ticket
 
     def update_weights(self, game: str, actual: Draw, history: list[Draw] | None = None) -> dict:
         """Update ensemble weights after a real draw result."""

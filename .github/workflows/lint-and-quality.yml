@@ -2,9 +2,9 @@ name: Lint & Code Quality
 
 on:
   push:
-    branches: [main, mensa]
+    branches: [main, pocketpro-nyl]
   pull_request:
-    branches: [main, mensa]
+    branches: [main, pocketpro-nyl]
 
 jobs:
   python-lint:

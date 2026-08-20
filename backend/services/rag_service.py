@@ -2,8 +2,10 @@
 RAG (Retrieval-Augmented Generation) Service
 Combines ChromaDB retrieval with Gemini LLM for context-aware responses
 """
+import asyncio
 
 from services.chroma_client import chroma_client
+from services.chroma_client import chroma_client # Import the chroma_client instance
 from services.gemini_client import gemini_client
 from config import settings
 
@@ -45,10 +47,15 @@ class RAGService:
         """
         
         # Step 1: Retrieve relevant documents from ChromaDB
-        retrieved_docs = self._retrieve_context(
-            user_query, 
-            game=game,
-            use_all_games=use_all_games
+        # Run synchronous retrieval in an executor to avoid blocking the event loop
+        loop = asyncio.get_running_loop()
+        retrieved_docs = await loop.run_in_executor(
+            None,
+            self._retrieve_context,
+            user_query,
+            game,
+            use_all_games,
+            None # top_k
         )
         
         # Step 2: Format retrieved context

@@ -1,3 +1,4 @@
+import asyncio
 from openai import OpenAI
 
 from config import settings
@@ -41,12 +42,18 @@ class ChatGPTClient:
             return f"{LM_UNAVAILABLE_PREFIX}:api_error:{error_text[:220]}"
 
         try:
-            response = client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.4,
+            # The 'create' method is synchronous.
+            # We need to run it in an executor to avoid blocking the event loop.
+            loop = asyncio.get_running_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: client.chat.completions.create(
+                    model=self.model_name,
+                    messages=[
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.4,
+                )
             )
             text = (response.choices[0].message.content or "").strip()
             return text

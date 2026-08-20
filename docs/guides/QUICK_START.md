@@ -1,4 +1,4 @@
-# 🚀 Mensa Project - Quick Start
+# 🚀 PocketPro:NYL Project - Quick Start
 
 **Status:** ✅ Optimized & Ready to Use
 

@@ -1,6 +1,6 @@
 # Docker Hub Deployment Guide
 
-This guide provides step-by-step instructions for deploying Mensa Predictive RAG to Docker Hub and running it with a single command.
+This guide provides step-by-step instructions for deploying PocketPro:NYL Predictive RAG to Docker Hub and running it with a single command.
 
 ## Prerequisites
 
@@ -34,19 +34,19 @@ docker login
 
 # Build frontend
 docker compose build frontend
-docker tag mensa_frontend:latest yourusername/mensa-frontend:latest
-docker tag mensa_frontend:latest yourusername/mensa-frontend:v1.0.0
+docker tag pocketpro_nyl_frontend:latest yourusername/pocketpro-nyl-frontend:latest
+docker tag pocketpro_nyl_frontend:latest yourusername/pocketpro-nyl-frontend:v1.0.0
 
 # Build backend
 docker compose build backend
-docker tag mensa_backend:latest yourusername/mensa-backend:latest
-docker tag mensa_backend:latest yourusername/mensa-backend:v1.0.0
+docker tag pocketpro_nyl_backend:latest yourusername/pocketpro-nyl-backend:latest
+docker tag pocketpro_nyl_backend:latest yourusername/pocketpro-nyl-backend:v1.0.0
 
 # Push images
-docker push yourusername/mensa-frontend:latest
-docker push yourusername/mensa-frontend:v1.0.0
-docker push yourusername/mensa-backend:latest
-docker push yourusername/mensa-backend:v1.0.0
+docker push yourusername/pocketpro-nyl-frontend:latest
+docker push yourusername/pocketpro-nyl-frontend:v1.0.0
+docker push yourusername/pocketpro-nyl-backend:latest
+docker push yourusername/pocketpro-nyl-backend:v1.0.0
 ```
 
 ### Automated Deployment via GitHub Actions

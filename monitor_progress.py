@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Mensa Project - Ingestion Progress Monitor
+ PocketPro:NYL Project - Ingestion Progress Monitor
 Real-time display of game data ingestion with expected vs actual progress
 """
 
@@ -34,7 +34,7 @@ def format_time(seconds):
 def print_header():
     """Print the monitor header"""
     print(f"\n{BOLD}{BLUE}{'='*70}{RESET}")
-    print(f"{BOLD}{BLUE}Mensa Project - Ingestion Progress Monitor{RESET}")
+    print(f"{BOLD}{BLUE}PocketPro:NYL - Ingestion Progress Monitor{RESET}")
     print(f"{BOLD}{BLUE}{'='*70}{RESET}\n")
 
 def print_progress_bar(progress, total, width=40):
@@ -60,10 +60,14 @@ def print_status(status_data, start_time):
     current_task = status_data.get('current_task')
     overall_status = status_data.get('status', 'unknown')
     games = status_data.get('games', {})
+    # Get detailed progress for the currently ingesting game
+    current_game_progress = status_data.get('current_game_progress', 0)
+    current_game_total = status_data.get('current_game_total', 0)
     
     # Calculate stats
-    completed = sum(1 for v in games.values() if v == 'completed')
-    failed = sum(1 for v in games.values() if 'failed' in str(v))
+    game_values = games.values()
+    completed = sum(1 for v in game_values if isinstance(v, dict) and v.get('status') == 'completed')
+    failed = sum(1 for v in game_values if isinstance(v, dict) and 'failed' in str(v.get('status')))
     pending = total_games - completed - failed
     
     # Print main status
@@ -82,7 +86,7 @@ def print_status(status_data, start_time):
     print()
     
     # Print progress bar
-    print(f"{BOLD}Overall Progress:{RESET}")
+    print(f"{BOLD}Overall Progress (Games):{RESET}")
     print(print_progress_bar(progress, total_games))
     print()
     
@@ -95,29 +99,36 @@ def print_status(status_data, start_time):
     print()
     
     # Print current game
-    if current_game:
+    if current_game and current_game != "N/A":
         print(f"{BOLD}Currently Processing:{RESET}")
         print(f"  Game: {YELLOW}{current_game.upper()}{RESET}")
         if current_task:
             print(f"  Task: {current_task}")
+        # Add a progress bar for the current game's rows
+        if current_game_total > 0:
+            print(f"  Rows: {print_progress_bar(current_game_progress, current_game_total)}")
     print()
     
     # Print game-by-game status
     if games:
         print(f"{BOLD}Game Status Details:{RESET}")
         for game_name in sorted(games.keys()):
-            game_status = games[game_name]
+            game_state = games.get(game_name, {})
+            game_status = game_state.get('status', 'unknown') if isinstance(game_state, dict) else game_state
+
             if game_status == 'completed':
                 symbol = f"{GREEN}✓{RESET}"
-            elif game_status == 'pending':
+            elif game_status in ('pending', 'queued'):
                 symbol = f"{YELLOW}⟳{RESET}"
             elif 'failed' in str(game_status):
                 symbol = f"{RED}✗{RESET}"
+            elif game_status == 'ingesting':
+                symbol = f"{YELLOW}→{RESET}"
             else:
                 symbol = "?"
             
             # Highlight current game
-            if game_name == current_game:
+            if game_name == current_game and overall_status == 'ingesting':
                 print(f"  {symbol} {BOLD}{game_name.upper()}{RESET} ({game_status})")
             else:
                 print(f"  {symbol} {game_name.upper()}")

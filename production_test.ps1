@@ -56,7 +56,7 @@ function Test-Endpoint {
 }
 
 Write-Report "`n============================================================" -Color Cyan
-Write-Report "MENSA PROJECT PRODUCTION TEST SUITE" -Color Cyan
+Write-Report "POCKETPRO:NYL PRODUCTION TEST SUITE" -Color Cyan
 Write-Report "Build: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -Color Cyan
 Write-Report "============================================================`n" -Color Cyan
 
@@ -65,12 +65,12 @@ Write-Report "------------------------------------------------------------"
 
 $containerCount = 0
 $healthyCount = 0
-$containerLines = docker ps --no-trunc --filter "name=mensa"
+$containerLines = docker ps --no-trunc --filter "name=pocketpro_nyl"
 
 $containerTargets = @(
-    @{ name = "mensa_frontend"; healthyKeyword = "Up" }
-    @{ name = "mensa_backend"; healthyKeyword = "healthy|Up" }
-    @{ name = "mensa_chroma"; healthyKeyword = "Up" }
+    @{ name = "pocketpro_nyl_frontend"; healthyKeyword = "Up" }
+    @{ name = "pocketpro_nyl_backend"; healthyKeyword = "healthy|Up" }
+    @{ name = "pocketpro_nyl_chroma"; healthyKeyword = "Up" }
 )
 
 foreach ($target in $containerTargets) {

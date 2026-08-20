@@ -1,107 +1,95 @@
-"""
-Health and status API routes.
-"""
-from fastapi import APIRouter
-import time
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+# The functions for startup status and queuing were moved to ingest_state
+from state.ingest_state import get_manual_ingest_state, enqueue_manual_ingest, set_manual_ingest_state
+from config import GAME_CONFIGS
 
 router = APIRouter()
 
+class StartupInitRequest(BaseModel):
+    force: bool = False
 
-@router.get("/api")
-async def api_root():
-    """Root API endpoint."""
-    return {"message": "Mensa Lottery Suggestion API", "version": "1.0.0"}
+# This global flag will be set to True by the lifespan startup event when ready.
+APP_IS_READY = False
 
+def get_ingestion_status():
+    """
+    Aggregates status from all games to produce a global startup status.
+    This replaces the old function that was removed from ingestion_worker.
+    """
+    all_games = list(GAME_CONFIGS.keys())
+    total = len(all_games)
+    completed_count = 0
+    current_game = "N/A"
+    current_task = "N/A"
+    overall_status = "pending"
+    current_game_progress = 0
+    current_game_total = 0
+    
+    game_statuses = {}
+    active_game_found = False
 
-@router.get("/api/health")
-async def health_check():
-    """Health check endpoint for container orchestration."""
+    for game in all_games:
+        state = get_manual_ingest_state(game)
+        game_status = state.get("status", "pending")
+        # Store the full state object for richer information in the response
+        game_statuses[game] = state
+        
+        if game_status == "completed":
+            completed_count += 1
+        elif game_status in ("ingesting", "running", "queued") and not active_game_found:
+            overall_status = "ingesting"
+            current_game = game
+            current_task = state.get("current_task", "fetching")
+            # Expose the detailed row-level progress for the active game
+            current_game_progress = state.get("rows_fetched", 0)
+            current_game_total = state.get("total_rows", 0)
+            active_game_found = True
+
+    if not active_game_found and completed_count == total:
+        overall_status = "completed"
+
+    return {
+        "status": overall_status,
+        "progress": completed_count,
+        "total": total,
+        "current_game": current_game,
+        "current_task": current_task,
+        "current_game_progress": current_game_progress,
+        "current_game_total": current_game_total,
+        "games": game_statuses,
+    }
+
+@router.get("/api/health", tags=["Health"])
+def get_health():
+    """
+    Checks if the application is healthy and ready to serve requests.
+    Returns 503 Service Unavailable until the application startup is complete.
+    """
+    if not APP_IS_READY:
+        raise HTTPException(status_code=503, detail="Service Unavailable: Initializing")
     return {"status": "healthy"}
 
+@router.get("/api/startup_status", tags=["Health"])
+def get_startup_status():
+    """Returns the current status of the background data ingestion process."""
+    return get_ingestion_status()
 
-@router.get("/api/diag")
-async def runtime_diagnostics():
-    """Structured runtime diagnostics for scripts and support tooling."""
-    from utils.diagnostics import collect_runtime_diagnostics
-
-    try:
-        return await collect_runtime_diagnostics()
-    except Exception as exc:
-        return {"status": "error", "message": str(exc)}
-
-
-@router.get("/api/startup_status")
-async def get_startup_status():
+@router.post("/api/startup_init", tags=["Health"])
+def trigger_startup_init(request: StartupInitRequest):
     """
-    Returns initialization status for UI progress tracking.
+    Initializes the background data ingestion for all configured games.
+    This is typically called once by the startup script.
     """
-    from state.ingest_state import get_startup_state
-    
-    startup_state = get_startup_state()
-    elapsed = None
-    if startup_state["started_at"]:
-        elapsed = (startup_state["completed_at"] or time.time()) - startup_state["started_at"]
 
-    games_snapshot = {
-        game: {
-            "status": game_data.get("status"),
-            "error": game_data.get("error"),
-        }
-        for game, game_data in (startup_state.get("games") or {}).items()
-    }
+    games_to_ingest = list(GAME_CONFIGS.keys())
+    for game_key in games_to_ingest:
+        seq = enqueue_manual_ingest(game_key, force=request.force)
+        # Set the initial state to 'queued'. This is critical for the startup
+        # monitor to detect that work has been scheduled.
+        set_manual_ingest_state(game_key, {
+            "status": "queued",
+            "seq": seq
+        })
 
-    return {
-        "status": startup_state.get("status"),
-        "progress": float(startup_state.get("progress") or 0),
-        "total": int(startup_state.get("total") or 0),
-        "current_game": startup_state.get("current_game"),
-        "current_task": startup_state.get("current_task"),
-        "current_game_rows_fetched": int(startup_state.get("current_game_rows_fetched") or 0),
-        "current_game_rows_total": int(startup_state.get("current_game_rows_total") or 0),
-        "games": games_snapshot,
-        "started_at": startup_state.get("started_at"),
-        "completed_at": startup_state.get("completed_at"),
-        "elapsed_s": elapsed,
-        "available_games": list(startup_state.get("games", {}).keys()),
-        "manual_mode": True,
-    }
-
-
-@router.post("/api/startup_init")
-async def start_initialization():
-    """
-    Trigger background initialization/ingestion.
-    """
-    from state.ingest_state import get_startup_state, reset_startup_state
-    from state.ingestion_worker import start_background_ingestion
-    
-    global _ingestion_started
-    startup_state = get_startup_state()
-    
-    if _ingestion_started and startup_state.get("status") == "ingesting":
-        return {
-            "status": startup_state["status"],
-            "message": "Initialization already running",
-            "available_games": list(startup_state.get("games", {}).keys()),
-        }
-
-    if startup_state.get("status") == "completed":
-        return {
-            "status": "completed",
-            "message": "Initialization already completed",
-            "available_games": list(startup_state.get("games", {}).keys()),
-        }
-
-    reset_startup_state()
-    _ingestion_started = True
-    start_background_ingestion()
-
-    return {
-        "status": startup_state["status"],
-        "message": "Initialization started",
-        "available_games": list(startup_state.get("games", {}).keys()),
-    }
-
-
-# Global flag for ingestion status
-_ingestion_started = False
+    return {"status": "started", "message": f"Queued ingestion for {len(games_to_ingest)} games."}

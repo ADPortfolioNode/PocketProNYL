@@ -1,13 +1,13 @@
-# Use pre-loaded mensa-local images (no GHCR pull, no local build).
-# Pair with docker-compose.distribution.yml and .env.client.example
+# Use pre-loaded pocketpro-nyl-local images (no GHCR pull, no local build).
+# Pair with docker-compose.distribution.yml and .env.client.example # PocketPro:NYL Project
 #
 #   docker compose -f docker-compose.distribution.yml -f docker-compose.distribution.offline.yml -f docker-compose.direct.yml up -d
-
+# PocketPro:NYL Project
 services:
   backend:
-    image: ${MENSA_REGISTRY:-mensa-local}/mensa-backend:${MENSA_VERSION:-latest}
+    image: ${POCKETPRO_NYL_REGISTRY:-pocketpro-nyl-local}/pocketpro-nyl-backend:${POCKETPRO_NYL_VERSION:-latest}
     pull_policy: never
 
   frontend:
-    image: ${MENSA_REGISTRY:-mensa-local}/mensa-frontend:${MENSA_VERSION:-latest}
+    image: ${POCKETPRO_NYL_REGISTRY:-pocketpro-nyl-local}/pocketpro-nyl-frontend:${POCKETPRO_NYL_VERSION:-latest}
     pull_policy: never

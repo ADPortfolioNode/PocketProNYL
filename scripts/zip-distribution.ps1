@@ -30,7 +30,7 @@ function Invoke-TarGz([string]$Destination, [string[]]$TarArgs) {
 }
 
 Write-Host "Creating app archive (source, no Docker tars)..."
-$stage = Join-Path $env:TEMP "mensa_tar_$label"
+$stage = Join-Path $env:TEMP "pocketpro_nyl_tar_$label"
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
 New-Item -ItemType Directory -Path $stage | Out-Null
 

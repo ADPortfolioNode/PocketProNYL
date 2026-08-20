@@ -16,4 +16,4 @@ fi
 export HOME=/app
 
 # Execute the main command
-exec "$@" # PocketPro:NYL Project
+exec "$@"

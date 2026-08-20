@@ -1,3 +1,4 @@
+import asyncio
 import google.generativeai as genai
 import requests
 from config import settings
@@ -64,7 +65,12 @@ class GeminiClient:
         gemini_error_text = "" # Initialize here to ensure it's always defined
         if self.api_key and gemini_model:
             try:
-                response = gemini_model.generate_content(prompt)
+                # Run synchronous SDK call in an executor to avoid blocking the event loop
+                loop = asyncio.get_running_loop()
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: gemini_model.generate_content(prompt)
+                )
                 self.last_error = None
                 return response.text
             except Exception as e:
@@ -74,7 +80,11 @@ class GeminiClient:
 
         if self.grok_api_key:
             try:
-                response_text = self._generate_with_grok(prompt)
+                # _generate_with_grok uses synchronous requests, run in executor
+                loop = asyncio.get_running_loop()
+                response_text = await loop.run_in_executor(
+                    None, self._generate_with_grok, prompt
+                )
                 self.last_error = None
                 return response_text
             except Exception as e:

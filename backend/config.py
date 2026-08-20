@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     GROK_MODEL: str = "grok-3-mini-beta"
     
     # ChromaDB
-    CHROMA_HOST: str = "pocketpro_nyl_chroma"
+    CHROMA_HOST: str = "pocketpro_nyl_chroma" # Ensure consistent naming
     CHROMA_PORT: int = 8000
 
     # Production: comma-separated origins, e.g. https://mensa.example.com

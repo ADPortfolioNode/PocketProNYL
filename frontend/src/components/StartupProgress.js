@@ -15,7 +15,7 @@ const StartupProgress = ({ onComplete }) => {
 
     const getStartupStatus = async () => {
         const apiBase = getApiBase();
-        return axios.get(`${apiBase}/api/startup_status`, { timeout: 45000 });
+        return axios.get(`${apiBase}/api/startup_status`, { timeout: 660000 }); // Increased timeout to 11 minutes (660s)
     };
 
     const postStartupInit = async () => {

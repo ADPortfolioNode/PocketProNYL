@@ -147,6 +147,35 @@ def _extract_primary_candidate(metadata: Dict[str, Any], game: str | None = None
 
     return []
 
+def _extract_rows_and_columns(data: Any) -> tuple[List[Dict[str, Any]] | List[List[Any]], List[str]]:
+    """Normalize Socrata responses to (rows, column_names) for ingestion."""
+    if isinstance(data, dict):
+        rows = data.get("data")
+        if isinstance(rows, list):
+            columns_meta = data.get("meta", {}).get("view", {}).get("columns", [])
+            column_names = [col.get("fieldName", f"col_{idx}") for idx, col in enumerate(columns_meta)]
+            return rows, column_names
+
+        # Fallback for flat-object payloads where records are under common keys
+        for key in ("results", "records", "rows"):
+            candidate = data.get(key)
+            if isinstance(candidate, list):
+                if candidate and isinstance(candidate[0], dict):
+                    all_keys = set()
+                    for item in candidate:
+                        all_keys.update(item.keys())
+                    return candidate, list(all_keys)
+                return candidate, []
+
+    if isinstance(data, list):
+        if data and isinstance(data[0], dict):
+            all_keys = set()
+            for item in data:
+                all_keys.update(item.keys())
+            return data, list(all_keys)
+        return data, [] # If data is a list but not of dicts, return it with empty column names
+    return [], []
+
 def _extract_record_sequence(metadata: Dict[str, Any], game: str) -> List[int]:
     """Extracts the full winning number sequence (primary + bonus) from metadata."""
     rules = _get_rules(game)

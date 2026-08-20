@@ -24,7 +24,7 @@ class ChromaClient:
     @property
     def rest_base(self) -> str:
         return f"http://{settings.CHROMA_HOST}:{settings.CHROMA_PORT}"
-
+ 
     @property
     def client(self):
         if self._client is None:

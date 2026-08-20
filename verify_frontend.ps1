@@ -17,11 +17,11 @@ if ([string]::IsNullOrWhiteSpace($bindHost)) { $bindHost = "127.0.0.1" }
 $frontendPort = [int](Read-DotEnvValue "FRONTEND_HOST_PORT" "3000")
 $frontendBase = "http://${bindHost}:${frontendPort}"
 
-Write-Host "`n=== MENSA PROJECT FRONTEND VERIFICATION ===" -ForegroundColor Cyan
+Write-Host "`n=== POCKETPRO:NYL FRONTEND VERIFICATION ===" -ForegroundColor Cyan
 Write-Host "Target: $frontendBase" -ForegroundColor Gray
 
 Write-Host "`n[1] Checking containers..." -ForegroundColor Yellow
-$containers = docker ps --filter "name=mensa" --format "{{.Names}}:{{.Status}}"
+$containers = docker ps --filter "name=pocketpro_nyl" --format "{{.Names}}:{{.Status}}"
 foreach ($c in $containers) {
     if ($c -match "unhealthy") {
         Write-Host "    [WARN] $c" -ForegroundColor Yellow
@@ -82,7 +82,7 @@ Test-FrontendEndpoint "[6] Frontend HTML" "$frontendBase" {
 }
 
 Write-Host "`n[7] Data volume writable..." -ForegroundColor Yellow
-docker exec mensa_backend sh -c "touch /data/experiments/permission_test.tmp && rm /data/experiments/permission_test.tmp" 2>$null | Out-Null
+docker exec pocketpro_nyl_backend sh -c "touch /data/experiments/permission_test.tmp && rm /data/experiments/permission_test.tmp" 2>$null | Out-Null
 if ($LASTEXITCODE -eq 0) {
     Write-Host "    [OK] /data/experiments is writable" -ForegroundColor Green
 } else {

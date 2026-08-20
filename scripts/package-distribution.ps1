@@ -1,11 +1,11 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Package Mensa for client delivery (zip-ready folder).
+  Package PocketPro:NYL for client delivery (zip-ready folder).
 
 .DESCRIPTION
-  Creates release/mensa_client_<version>/ with source, docs, launchers, and
-  optional pre-built Docker images (mensa-local/mensa-backend + frontend).
+  Creates release/pocketpro_nyl_client_<version>/ with source, docs, launchers, and
+  optional pre-built Docker images (pocketpro-nyl-local/pocketpro-nyl-backend + frontend).
 
 .EXAMPLE
   .\scripts\package-distribution.ps1
@@ -29,11 +29,11 @@ if (-not $Version) {
     $Version = (Get-Date -Format "yyyyMMdd")
 }
 
-$PackageName = "mensa_client_$Version"
+$PackageName = "pocketpro_nyl_client_$Version"
 $PackageDir = Join-Path $OutputRoot $PackageName
-$RegistryTag = "mensa-local"
-$BackendImage = "${RegistryTag}/mensa-backend:${Version}"
-$FrontendImage = "${RegistryTag}/mensa-frontend:${Version}"
+$RegistryTag = "pocketpro-nyl-local"
+$BackendImage = "${RegistryTag}/pocketpro-nyl-backend:${Version}"
+$FrontendImage = "${RegistryTag}/pocketpro-nyl-frontend:${Version}"
 $ChromaImage = "chromadb/chroma:0.5.3"
 
 function Write-Step([string]$Message) {
@@ -63,14 +63,14 @@ function Export-DockerImages {
     param([string]$DestDir)
 
     Write-Step "Tagging and exporting Docker images"
-    $backendBuilt = docker images --format "{{.Repository}}:{{.Tag}}" | Where-Object { $_ -match "mensa_project-backend" } | Select-Object -First 1
-    $frontendBuilt = docker images --format "{{.Repository}}:{{.Tag}}" | Where-Object { $_ -match "mensa_project-frontend" } | Select-Object -First 1 # PocketPro:NYL Project
+    $backendBuilt = docker images --format "{{.Repository}}:{{.Tag}}" | Where-Object { $_ -match "pocketpronyl-backend" } | Select-Object -First 1
+    $frontendBuilt = docker images --format "{{.Repository}}:{{.Tag}}" | Where-Object { $_ -match "pocketpronyl-frontend" } | Select-Object -First 1 # PocketPro:NYL Project
  # PocketPro:NYL Project
     if (-not $backendBuilt -or -not $frontendBuilt) {
         if ($SkipBuild) {
             throw "Built images not found. Run without -SkipBuild or build manually first."
         }
-        throw "Could not locate mensa_project-backend / mensa_project-frontend images after build."
+        throw "Could not locate pocketpronyl-backend / pocketpronyl-frontend images after build."
     }
 
     docker tag $backendBuilt $BackendImage
@@ -79,10 +79,10 @@ function Export-DockerImages {
 
     New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
 
-    docker save $BackendImage -o (Join-Path $DestDir "mensa-backend.tar")
+    docker save $BackendImage -o (Join-Path $DestDir "pocketpro-nyl-backend.tar")
     if ($LASTEXITCODE -ne 0) { throw "docker save backend failed" }
 
-    docker save $FrontendImage -o (Join-Path $DestDir "mensa-frontend.tar")
+    docker save $FrontendImage -o (Join-Path $DestDir "pocketpro-nyl-frontend.tar")
     if ($LASTEXITCODE -ne 0) { throw "docker save frontend failed" }
 
     if ($IncludeChromaImage) {
@@ -93,38 +93,38 @@ function Export-DockerImages {
     }
 
     @"
-# Load pre-built Mensa images (offline install)
+# Load pre-built PocketPro:NYL images (offline install)
 # Windows: .\images\load-images.ps1
 # Linux / Mac: chmod +x images/load-images.sh then ./images/load-images.sh
 
-MENSA_REGISTRY=$RegistryTag
-MENSA_VERSION=$Version
+POCKETPRO_NYL_REGISTRY=$RegistryTag
+POCKETPRO_NYL_VERSION=$Version
 "@ | Set-Content -Path (Join-Path $DestDir "images.env") -Encoding UTF8
 
     @"
 #Requires -Version 5.1
 `$ErrorActionPreference = "Stop"
 `$here = Split-Path -Parent `$MyInvocation.MyCommand.Path
-Write-Host "Loading Mensa Docker images..."
-docker load -i "`$here\mensa-backend.tar"
-docker load -i "`$here\mensa-frontend.tar"
+Write-Host "Loading PocketPro:NYL Docker images..."
+docker load -i "`$here\pocketpro-nyl-backend.tar"
+docker load -i "`$here\pocketpro-nyl-frontend.tar"
 if (Test-Path "`$here\chroma.tar") {
     docker load -i "`$here\chroma.tar"
 }
-Write-Host "Done. Images tagged as mensa-local/mensa-*:$Version"
+Write-Host "Done. Images tagged as pocketpro-nyl-local/pocketpro-nyl-*:$Version"
 "@ | Set-Content -Path (Join-Path $DestDir "load-images.ps1") -Encoding UTF8
 
     $loadSh = @'
 #!/usr/bin/env bash
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Loading Mensa Docker images..."
-docker load -i "$HERE/mensa-backend.tar"
-docker load -i "$HERE/mensa-frontend.tar"
+echo "Loading PocketPro:NYL Docker images..."
+docker load -i "$HERE/pocketpro-nyl-backend.tar"
+docker load -i "$HERE/pocketpro-nyl-frontend.tar"
 if [[ -f "$HERE/chroma.tar" ]]; then
   docker load -i "$HERE/chroma.tar"
 fi
-echo "Done. Images tagged as mensa-local/mensa-*:VERSION_TAG"
+echo "Done. Images tagged as pocketpro-nyl-local/pocketpro-nyl-*:VERSION_TAG"
 '@ -replace 'VERSION_TAG', $Version
     Set-Content -Path (Join-Path $DestDir "load-images.sh") -Value $loadSh -Encoding UTF8
 }
@@ -160,16 +160,14 @@ function Copy-PackageFiles {
         "docker-compose.yml",
         "docker-compose.prod.yml",
         "docker-compose.direct.yml",
-        "docker-compose.distribution.yml",
-        "docker-compose.distribution.build.yml",
-        "docker-compose.distribution.offline.yml",
         ".env.example",
         ".env.production.example",
-        "StartMensa.bat",
-        "Start Mensa.bat",
-        "StopMensa.bat",
-        "Stop Mensa.bat",
-        "_start_mensa_core.bat",
+        "start.sh",
+        "docker-compose.distribution.yml", # For distribution
+        "docker-compose.distribution.build.yml", # For distribution
+        "docker-compose.distribution.offline.yml", # For distribution
+        "StartPocketProNYL.bat",
+        "StopPocketProNYL.bat",
         "start-windows.ps1",
         "recover_stack.ps1",
         "rebuild.ps1",
@@ -236,11 +234,11 @@ function Write-InstallGuide {
     }
 
     $winStep3 = if ($IncludeImages) {
-        "Run images\load-images.ps1 once (PowerShell). StartMensa.bat creates .env from .env.client.example automatically."
+        "Run images\load-images.ps1 once (PowerShell). start.sh creates .env from .env.client.example automatically."
     } else {
-        "Double-click StartMensa.bat (creates .env on first run)."
+        "Run start.sh (creates .env on first run)."
     }
-
+    
     $imageSteps = if ($IncludeImages) {
         @(
             "### Load pre-built images (recommended)",
@@ -260,7 +258,7 @@ function Write-InstallGuide {
             "",
             "Images are built from source on the client machine (10-20 minutes first time).",
             "",
-            "**Windows:** double-click StartMensa.bat",
+            "**Windows:** run start.sh or start-windows.ps1",
             "",
             "**Linux / Mac:**",
             "    cp .env.example .env",
@@ -274,12 +272,12 @@ function Write-InstallGuide {
         ""
     }
 
-    $archiveName = "mensa_client_$Version"
+    $archiveName = "pocketpro_nyl_client_$Version"
 
     $installLines = @(
         "# PocketPro:NYL - Client Installation Guide",
         "",
-        "## If you received a .tar.gz archive",
+        "## If you received a .tar.gz archive", # PocketPro:NYL Project
         "",
         "Extract first, then open this file inside the extracted folder:",
         "",
@@ -307,11 +305,11 @@ function Write-InstallGuide {
         "## Option A - Windows desktop (easiest)",
         "",
         "1. Install Docker Desktop and wait until it shows Running.",
-        "2. Unzip this folder anywhere (e.g. C:\Mensa).",
+        "2. Unzip this folder anywhere (e.g. C:\PocketProNYL).",
         "3. $winStep3",
-        "4. Double-click StartMensa.bat.",
+        "4. Run start.sh (or start-windows.ps1).",
         "5. Open http://127.0.0.1:3000 when the startup window shows Stack healthy.",
-        "6. Use StopMensa.bat when finished (your data is kept).",
+        "6. Use 'docker compose down' when finished (your data is kept).",
         "",
         "**Tips:** Use 127.0.0.1 not localhost if you see timeouts. Hard-refresh with Ctrl+Shift+R after updates.",
         "",
@@ -330,7 +328,7 @@ function Write-InstallGuide {
         "## Option C - Public web server (HTTPS)",
         "",
         "1. Copy .env.production.example to .env and set DOMAIN, ACME_EMAIL,",
-        "   MENSA_REGISTRY=mensa-local and MENSA_VERSION=$Version (if using bundled images).",
+        "   POCKETPRO_NYL_REGISTRY=pocketpro-nyl-local and POCKETPRO_NYL_VERSION=$Version (if using bundled images).",
         "2. Load images: ./images/load-images.sh",
         "3. Deploy: chmod +x scripts/deploy-production.sh && ./scripts/deploy-production.sh",
         "4. App will be at https://your-domain",
@@ -372,7 +370,7 @@ function Write-InstallGuide {
         "",
         "- backend/, frontend/ - application source",
         "- docker-compose*.yml - stack definitions",
-        "- StartMensa.bat / StopMensa.bat - Windows launchers",
+        "- start.sh / start-windows.ps1 - launchers",
         "- scripts/deploy-production.sh - Linux server deploy",
         "- docs/ - deployment and operations guides",
         $imagesLine,
@@ -386,9 +384,9 @@ function Write-InstallGuide {
     ) | Where-Object { $_ -ne "" -or $_ -eq "" }
 
     ($installLines | Where-Object { $null -ne $_ }) -join "`n" | Set-Content -Path (Join-Path $Dest "INSTALL.md") -Encoding UTF8
-
+ # PocketPro:NYL Project
     @"
-PocketPro:NYL Client Distribution
+PocketPro:NYL Client Distribution # PocketPro:NYL Project
 Version: $Version
 Registry: $RegistryTag
 Images included: $(if ($IncludeImages) { "yes" } else { "no (build from source)" })
@@ -397,11 +395,11 @@ Chroma offline: $(if ($IncludeChromaImage) { "yes" } else { "no" })
 
     @"
 # Client .env for pre-built images (copy to .env)
-# Windows local: works with StartMensa.bat after loading images
+# Windows local: works with start.sh after loading images
 # Server: use with docker-compose.distribution.offline.yml
 
-MENSA_REGISTRY=$RegistryTag
-MENSA_VERSION=$Version
+POCKETPRO_NYL_REGISTRY=$RegistryTag
+POCKETPRO_NYL_VERSION=$Version
 BUILD_LOCAL=0
 
 DOCKER_BIND_HOST=127.0.0.1
@@ -411,7 +409,7 @@ CHROMA_HOST_PORT=8001
 
 GEMINI_API_KEY=
 OPENAI_API_KEY=
-CHAT_GPT_API_KEY=
+CHAT_GPT_API_KEY= # Deprecated, use OPENAI_API_KEY
 GROK_API_KEY=
 GROK_API_BASE=https://api.x.ai/v1
 GROK_MODEL=grok-3-mini-beta
@@ -424,13 +422,13 @@ function New-ClientReadme {
     $readme = @(
         "# PocketPro:NYL Predictive RAG - Client Package",
         "",
-        "Lottery ingestion, training, suggestions, and optional AI chat.",
+        "Lottery ingestion, training, suggestions, and optional AI chat.", # PocketPro:NYL Project
         "",
         "Start here: read INSTALL.md for step-by-step setup.",
         "",
         "| Platform | Quick start |",
         "|----------|-------------|",
-        "| Windows | StartMensa.bat |",
+        "| Windows | start-windows.ps1 or start.sh |",
         "| Linux server | scripts/deploy-production.sh |",
         "| Offline images | images/load-images.ps1 or images/load-images.sh |",
         "",
@@ -443,18 +441,18 @@ function New-OfflineCompose {
     param([string]$Dest)
 
     @"
-# Use pre-loaded mensa-local images (no GHCR pull, no local build).
+# Use pre-loaded pocketpro-nyl-local images (no GHCR pull, no local build).
 # Pair with docker-compose.distribution.yml and .env.client.example # PocketPro:NYL Project
 #
 #   docker compose -f docker-compose.distribution.yml -f docker-compose.distribution.offline.yml -f docker-compose.direct.yml up -d
 # PocketPro:NYL Project
 services:
   backend:
-    image: `${MENSA_REGISTRY:-mensa-local}/mensa-backend:`${MENSA_VERSION:-latest}
+    image: `${POCKETPRO_NYL_REGISTRY:-pocketpro-nyl-local}/pocketpro-nyl-backend:`${POCKETPRO_NYL_VERSION:-latest}
     pull_policy: never
 
   frontend:
-    image: `${MENSA_REGISTRY:-mensa-local}/mensa-frontend:`${MENSA_VERSION:-latest}
+    image: `${POCKETPRO_NYL_REGISTRY:-pocketpro-nyl-local}/pocketpro-nyl-frontend:`${POCKETPRO_NYL_VERSION:-latest}
     pull_policy: never
 "@ | Set-Content -Path (Join-Path $Dest "docker-compose.distribution.offline.yml") -Encoding UTF8
 }
@@ -481,7 +479,7 @@ function Write-SendToClientNote {
     param([string]$OutRoot, [string]$Label)
 
     $note = @(
-        "Mensa client delivery - $Version",
+        "PocketPro:NYL client delivery - $Version",
         "==================================",
         "",
         "READY TO SEND",
@@ -499,7 +497,7 @@ function Write-SendToClientNote {
         "------------------------------",
         "1. Install Docker Desktop",
         "2. images\load-images.ps1",
-        "3. StartMensa.bat  (auto-creates .env from .env.client.example)",
+        "3. start.sh (auto-creates .env from .env.client.example)",
         "4. http://127.0.0.1:3000",
         "",
         "REBUILD (for you)",
@@ -516,7 +514,7 @@ function Remove-StaleReleaseFolders {
     param([string]$OutRoot, [string]$KeepLabel)
 
     if (-not (Test-Path $OutRoot)) { return }
-    Get-ChildItem -Path $OutRoot -Directory -Filter "mensa_client_*" -ErrorAction SilentlyContinue | ForEach-Object {
+    Get-ChildItem -Path $OutRoot -Directory -Filter "pocketpro_nyl_client_*" -ErrorAction SilentlyContinue | ForEach-Object {
         if ($_.Name -ne $KeepLabel) {
             Write-Host "Removing stale release folder: $($_.Name)" -ForegroundColor DarkGray
             try {
@@ -529,7 +527,7 @@ function Remove-StaleReleaseFolders {
 }
 
 # --- Main ---
-Write-Host "Mensa distribution packager" -ForegroundColor Green
+Write-Host "PocketPro:NYL distribution packager" -ForegroundColor Green
 Write-Host "Version: $Version"
 Write-Host "Output:  $PackageDir"
 

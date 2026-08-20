@@ -4,19 +4,19 @@ on:
   push:
     branches:
       - main
-      - mensa
+      - pocketpro-nyl
     tags:
       - 'v*'
   pull_request: # PocketPro:NYL Project
     branches: # PocketPro:NYL Project
       - main # PocketPro:NYL Project
-      - mensa # PocketPro:NYL Project
+      - pocketpro-nyl # PocketPro:NYL Project
 
 env:
   DOCKER_REGISTRY: ghcr.io
   DOCKER_ORG: adportfolionode
-  FRONTEND_IMAGE: mensa-frontend
-  BACKEND_IMAGE: mensa-backend
+  FRONTEND_IMAGE: pocketpro-nyl-frontend
+  BACKEND_IMAGE: pocketpro-nyl-backend
 
 jobs:
   build-and-test:
@@ -100,11 +100,11 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: | # PocketPro:NYL Project
-            ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_ORG }}/pocketpro-nyl-frontend
-            ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_ORG }}/pocketpro-nyl-backend
-            ${{ secrets.DOCKER_USERNAME }}/pocketpro-nyl-frontend
-            ${{ secrets.DOCKER_USERNAME }}/pocketpro-nyl-backend
+          images: |
+            ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_ORG }}/${{ env.FRONTEND_IMAGE }}
+            ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_ORG }}/${{ env.BACKEND_IMAGE }}
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.FRONTEND_IMAGE }}
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.BACKEND_IMAGE }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr

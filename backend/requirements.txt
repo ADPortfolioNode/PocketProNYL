@@ -1,23 +1,45 @@
+# Core application
 fastapi==0.111.0
-hypercorn==0.17.3
+hypercorn[standard]>=0.17.3
 requests==2.31.0
 pydantic==2.7.4
 pydantic-settings==2.2.1
-chromadb==0.5.3
+python-dotenv==1.0.1
+python-multipart==0.0.9
+loguru==0.7.2
+
+# Data and ML
 pandas==2.2.2
 numpy==1.26.4
 scikit-learn==1.4.2
-aiohttp==3.13.3
-loguru==0.7.2
-python-multipart==0.0.9
-python-dotenv==1.0.1
 joblib==1.3.2
-PyYAML==6.0.2
-pytest==8.2.2
-pytest-asyncio==0.22.0
+
+# Vector DB
+chromadb==0.5.3
+
+# Pinning ChromaDB's dependencies to speed up resolution
+# This is the main fix for the slow build
+opentelemetry-api==1.27.0
+opentelemetry-sdk==1.27.0
+opentelemetry-instrumentation==0.48b0
+opentelemetry-instrumentation-asgi==0.48b0
+opentelemetry-instrumentation-fastapi==0.48b0
+opentelemetry-semantic-conventions==0.48b0
+opentelemetry-util-http==0.48b0
+opentelemetry-exporter-otlp-proto-common==1.27.0
+opentelemetry-exporter-otlp-proto-grpc==1.27.0
+packaging<24.0,>=23.2 # Pinned to resolve conflict with langchain-core
+
+# AI/LLM Clients
 openai==1.35.3
+google-generativeai==0.7.1
 langchain-community==0.0.38
+
+# Utilities
 docker==6.1.3
 boto3==1.34.0
-google-generativeai==0.7.1
-frozenlist==1.4.1
+PyYAML==6.0.2
+
+# Testing
+pytest==8.2.2
+pytest-asyncio>=0.23.0 # Use a non-yanked version

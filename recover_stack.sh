@@ -36,8 +36,8 @@ echo "Using host ports: backend=${BACKEND_HOST_PORT:-5000}, chroma=${CHROMA_HOST
 
 echo "Starting chroma..."
 $COMPOSE up -d --force-recreate chroma
-for i in $(seq 1 40); do # PocketPro:NYL Project
-  status=$(docker inspect --format='{{.State.Health.Status}}' mensa_chroma 2>/dev/null || echo "missing")
+for i in $(seq 1 40); do
+  status=$(docker inspect --format='{{.State.Health.Status}}' pocketpro_nyl_chroma 2>/dev/null || echo "missing")
   if [ "$status" = "healthy" ]; then
     echo "chroma healthy"
     break
@@ -47,8 +47,8 @@ done
 
 echo "Starting backend..."
 $COMPOSE up -d --force-recreate backend
-for i in $(seq 1 48); do # PocketPro:NYL Project
-  status=$(docker inspect --format='{{.State.Health.Status}}' mensa_backend 2>/dev/null || echo "missing")
+for i in $(seq 1 48); do
+  status=$(docker inspect --format='{{.State.Health.Status}}' pocketpro_nyl_backend 2>/dev/null || echo "missing")
   if [ "$status" = "healthy" ]; then
     echo "backend healthy"
     break
@@ -60,7 +60,7 @@ echo "Starting frontend..."
 $COMPOSE up -d --force-recreate frontend
 
 echo ""
-docker ps --filter "name=mensa" --format "table {{.Names}}\t{{.Status}}"
+docker ps --filter "name=pocketpro_nyl" --format "table {{.Names}}\t{{.Status}}"
 echo ""
 BIND_HOST="${DOCKER_BIND_HOST:-127.0.0.1}"
 FRONT_PORT="${FRONTEND_HOST_PORT:-3000}"

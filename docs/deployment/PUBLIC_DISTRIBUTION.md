@@ -1,6 +1,6 @@
 # Public distribution — Docker on your web server
 
-Deploy Mensa for **subscribing customers** on a VPS or dedicated server. Customers access the app over HTTPS; backend and ChromaDB stay on a private Docker network.
+Deploy PocketPro:NYL for **subscribing customers** on a VPS or dedicated server. Customers access the app over HTTPS; backend and ChromaDB stay on a private Docker network.
 
 ## Server requirements
 
@@ -15,8 +15,8 @@ Deploy Mensa for **subscribing customers** on a VPS or dedicated server. Custome
 
 ```bash
 # On your web server
-git clone https://github.com/ADPortfolioNode/mensa_project.git
-cd mensa_project
+git clone https://github.com/ADPortfolioNode/pocketpro_nyl_project.git
+cd pocketpro_nyl_project
 
 cp .env.production.example .env
 nano .env   # set DOMAIN, ACME_EMAIL, API keys
@@ -33,7 +33,7 @@ Your app will be at **https://your-domain** (after DNS points to the server).
 
 ```env
 CADDY_PROFILE=tls
-DOMAIN=mensa.yourdomain.com
+DOMAIN=pocketpro.yourdomain.com
 ACME_EMAIL=admin@yourdomain.com
 ```
 
@@ -56,7 +56,7 @@ docker run --rm caddy:2-alpine caddy hash-password --plaintext 'customer-passwor
 
 ```env
 CADDY_PROFILE=subscribers
-DOMAIN=mensa.yourdomain.com
+DOMAIN=pocketpro.yourdomain.com
 ACME_EMAIL=admin@yourdomain.com
 BASIC_AUTH_USER=customer
 BASIC_AUTH_HASH=<paste hash from above>
@@ -98,8 +98,8 @@ Proxy `https://yourdomain` → `http://127.0.0.1:3000` on the host.
 In `.env`:
 
 ```env
-MENSA_REGISTRY=ghcr.io/adportfolionode
-MENSA_VERSION=v1.0.0
+POCKETPRO_NYL_REGISTRY=ghcr.io/adportfolionode
+POCKETPRO_NYL_VERSION=v1.0.0
 ```
 
 Use tagged releases from GitHub (`git tag v1.0.0 && git push origin v1.0.0`) so CI publishes images.

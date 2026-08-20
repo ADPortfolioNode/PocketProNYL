@@ -11,7 +11,7 @@ services:
       dockerfile: Dockerfile
       args:
         CACHE_BUSTER: ${BACKEND_CACHE_BUSTER:-distribution}
-    image: ${MENSA_REGISTRY:-ghcr.io/adportfolionode}/mensa-backend:${MENSA_VERSION:-latest}
+    image: ${POCKETPRO_NYL_REGISTRY:-ghcr.io/adportfolionode}/pocketpro-nyl-backend:${POCKETPRO_NYL_VERSION:-latest}
 
   frontend:
     build:
@@ -21,4 +21,4 @@ services:
         NODE_VERSION: 22.13.1
         REACT_APP_API_BASE: ""
         CACHE_BUSTER: ${FRONTEND_CACHE_BUSTER:-distribution}
-    image: ${MENSA_REGISTRY:-ghcr.io/adportfolionode}/mensa-frontend:${MENSA_VERSION:-latest}
+    image: ${POCKETPRO_NYL_REGISTRY:-ghcr.io/adportfolionode}/pocketpro-nyl-frontend:${POCKETPRO_NYL_VERSION:-latest}

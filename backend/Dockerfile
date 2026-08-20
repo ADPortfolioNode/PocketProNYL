@@ -38,8 +38,8 @@ WORKDIR /app
 # Create non-root user for security
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
-# Create home directory for appuser and set permissions
-# Rely on docker-entrypoint.sh for /home/appuser permissions
+# Explicitly create and set permissions for /home/appuser, or ensure /app is the home
+RUN mkdir -p /home/appuser && chown appuser:appuser /home/appuser
 
 # Set HOME environment variable for appuser to match WORKDIR
 ENV HOME=/app

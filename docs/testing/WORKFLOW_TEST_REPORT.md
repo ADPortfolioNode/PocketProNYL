@@ -268,7 +268,7 @@ All game collections are initialized and accessible via the Chroma vector databa
 #### Prerequisites
 - [ ] Open http://localhost:3000 in browser
 - [ ] Verify all 3 containers running (`docker compose ps`)
-- [ ] Check backend healthy (`docker logs mensa_backend`)
+- [ ] Check backend healthy (`docker logs pocketpro_nyl_backend`)
 
 #### Test Sequence
 

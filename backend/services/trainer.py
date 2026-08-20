@@ -1,11 +1,14 @@
 import json
 import os
 import re
+import logging
 import time
 import numpy as np
 import joblib
+import warnings
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, accuracy_score
+from sklearn.exceptions import ConvergenceWarning
 from config import GAME_CONFIGS
 from utils.training_params import (
     extract_training_params,
@@ -17,14 +20,18 @@ from utils.training_params import (
 )
 
 from utils.game_data_parser import (
-    _get_rules,
-    _parse_numbers,
-    _parse_pick3_digits,
-    _clamp_primary,
-    _extract_bonus_values,
-    _extract_primary_candidate,
-    _extract_record_sequence,
+    _get_rules as get_game_rules,
+    _parse_numbers as parse_numbers_util,
+    _parse_pick3_digits as parse_pick3_digits_util,
+    _clamp_primary as clamp_primary_util,
+    _extract_bonus_values as extract_bonus_values_util,
+    _extract_primary_candidate as extract_primary_candidate_util,
+    _extract_record_sequence as extract_record_sequence_util,
 )
+
+# Suppress the specific ConvergenceWarning from sklearn's MLP, which can be noisy
+# during the iterative training process of the modular engine.
+warnings.filterwarnings("ignore", category=ConvergenceWarning, module="sklearn")
 
 
 class TrainerService:
@@ -167,168 +174,8 @@ class TrainerService:
         if auto_tune is not None:
             self.auto_tune = bool(auto_tune)
 
-    def _parse_numbers(self, raw_value: str):
-        tokens = re.findall(r"\d+", str(raw_value or ""))
-        return [int(token) for token in tokens]
-
-    def _parse_pick3_digits(self, raw_value: str):
-        text = str(raw_value or "").strip()
-        if not text:
-            return []
-        # Extract all digits, then pad/truncate to exactly 3
-        all_digits = re.findall(r"\d", text) # Find individual digits
-        if not all_digits:
-            return []
-        
-        # Join, pad/truncate, and convert to int list
-        padded = "".join(all_digits).zfill(3)[-3:]
-        return [int(digit) for digit in padded]
-
-    def _get_rules(self, game: str):
-        base = {
-            "primary_count": 5,
-            "primary_min": 1,
-            "primary_max": 99,
-            "primary_unique": True,
-            "bonus_count": 0,
-            "bonus_min": 1,
-            "bonus_max": 99,
-            "bonus_keys": [],
-            "embedded_bonus_in_winning_numbers": False,
-        }
-        configured = GAME_CONFIGS.get(game, {}) or {}
-        merged = {**base, **configured}
-        merged["bonus_keys"] = [str(k).lower() for k in (merged.get("bonus_keys") or [])]
-        return merged
-
-    def _clamp_primary(self, numbers, rules):
-        valid = [
-            int(n)
-            for n in numbers
-            if rules["primary_min"] <= int(n) <= rules["primary_max"]
-        ]
-
-        if not valid:
-            return []
-
-        if rules.get("primary_unique", True):
-            seen = set()
-            uniq = []
-            for value in valid:
-                if value not in seen:
-                    seen.add(value)
-                    uniq.append(value)
-            valid = uniq
-
-        if len(valid) < rules["primary_count"]:
-            return []
-        return valid[:rules["primary_count"]]
-
-    def _extract_bonus_values(self, metadata, rules):
-        bonus_count = int(rules.get("bonus_count", 0) or 0)
-        if bonus_count <= 0:
-            return []
-
-        values = []
-        bonus_min = int(rules.get("bonus_min", 1))
-        bonus_max = int(rules.get("bonus_max", 99))
-
-        for key, value in (metadata or {}).items():
-            key_lower = str(key).lower()
-            if key_lower in rules["bonus_keys"] or ("bonus" in key_lower and "winning" not in key_lower):
-                parsed = self._parse_numbers(value)
-                for item in parsed:
-                    if bonus_min <= item <= bonus_max:
-                        values.append(item)
-                        if len(values) >= bonus_count:
-                            return values[:bonus_count]
-        return values[:bonus_count]
-
-    def _extract_primary_candidate(self, metadata, game: str | None = None):
-        preferred = []
-        fallback = []
-        pick3_specific_fields = []
-
-        for key, value in (metadata or {}).items():
-            key_lower = str(key).lower()
-            if "draw_number" in key_lower or not str(value or "").strip():
-                continue
-
-            if key_lower in ("winning_numbers", "winningnumbers"):
-                preferred.append(value)
-            elif key_lower in ("midday_daily", "evening_daily"):
-                pick3_specific_fields.append(value)
-            elif "winning" in key_lower and "number" in key_lower:
-                fallback.append(value)
-            elif "numbers" in key_lower or "result" in key_lower:
-                fallback.append(value)
-
-        parse_value = self._parse_pick3_digits if str(game or "").lower() == "pick3" else self._parse_numbers
-
-        # For pick3, prioritize specific daily fields if winning_numbers is not immediately parsable
-        if str(game or "").lower() == "pick3":
-            # Try preferred (winning_numbers) first, ensuring it yields 3 digits
-            for candidate in preferred:
-                numbers = parse_value(candidate)
-                if len(numbers) == 3: # Ensure exactly 3 digits for pick3
-                    return numbers
-            # Then try pick3 specific daily fields
-            for candidate in pick3_specific_fields:
-                numbers = parse_value(candidate)
-                if len(numbers) == 3:
-                    return numbers
-            # Finally, try generic fallback fields
-            for candidate in fallback:
-                numbers = parse_value(candidate)
-                if len(numbers) == 3:
-                    return numbers
-        else:
-            # For other games, just take the first valid candidate
-            for candidate in preferred + pick3_specific_fields + fallback:
-                numbers = parse_value(candidate)
-                if numbers:
-                    return numbers
-
-        return []
-
-    def _extract_record_sequence(self, metadata, game: str):
-        rules = self._get_rules(game)
-        winning_numbers = self._extract_primary_candidate(metadata, game=game)
-        if not winning_numbers:
-            return []
-
-        if str(game or "").lower() == "pick3":
-            # The _extract_primary_candidate for pick3 should already ensure len == 3
-            # This block becomes a final safeguard/normalization
-            if len(winning_numbers) != 3:
-                logging.debug(f"[{game}] _extract_record_sequence: Pick3 primary numbers length mismatch after candidate extraction. Expected 3, got {len(winning_numbers)}. Metadata: {metadata}")
-                return []
-            # Ensure all numbers are single digits (0-9)
-            winning_numbers = [n % 10 for n in winning_numbers] # Ensure single digit
-
-        primary_count = int(rules["primary_count"])
-        bonus_count = int(rules.get("bonus_count", 0) or 0)
-
-        embedded_bonus = []
-        if rules.get("embedded_bonus_in_winning_numbers") and bonus_count > 0 and len(winning_numbers) >= primary_count + bonus_count:
-            embedded_bonus = winning_numbers[primary_count:primary_count + bonus_count]
-            winning_numbers = winning_numbers[:primary_count]
-
-        primary_numbers = self._clamp_primary(winning_numbers, rules)
-        if len(primary_numbers) != primary_count:
-            logging.debug(f"[{game}] _extract_record_sequence: Clamped primary numbers length mismatch. Expected {primary_count}, got {len(primary_numbers)}. Metadata: {metadata}")
-            return []
-
-        bonus_numbers = self._extract_bonus_values(metadata, rules)
-        if not bonus_numbers and embedded_bonus:
-            bonus_min = int(rules.get("bonus_min", 1))
-            bonus_max = int(rules.get("bonus_max", 99))
-            bonus_numbers = [int(n) for n in embedded_bonus if bonus_min <= int(n) <= bonus_max][:bonus_count]
-
-        if bonus_count > 0 and bonus_numbers:
-            return primary_numbers + bonus_numbers[:bonus_count]
-        logging.debug(f"[{game}] _extract_record_sequence: Successfully extracted primary numbers: {primary_numbers}. Metadata: {metadata}")
-        return primary_numbers
+    # Use the logger from the module
+    logger = logging.getLogger(__name__)
 
     def _metadata_sort_key(self, metadata):
         if not isinstance(metadata, dict):
@@ -380,7 +227,7 @@ class TrainerService:
                 continue
 
             numbers = _extract_record_sequence(meta, game)
-            if numbers:
+            if numbers: # Use the imported utility function
                 sequences.append(numbers)
 
         return sequences

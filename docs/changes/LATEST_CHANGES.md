@@ -1,6 +1,6 @@
 I have updated the `docker-compose.yml` file to address the `chroma` service failing its healthcheck.
 
-The error `container mensa_chroma is unhealthy` was likely caused by the healthcheck command using `localhost`, which can be unreliable inside a Docker container. I have changed it to use `127.0.0.1` instead.
+The error `container pocketpro_nyl_chroma is unhealthy` was likely caused by the healthcheck command using `localhost`, which can be unreliable inside a Docker container. I have changed it to use `127.0.0.1` instead.
 
 **Next Steps:**
 

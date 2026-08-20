@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -18,6 +19,20 @@ class Draw:
     @property
     def all_numbers(self) -> list[int]:
         return list(self.primary) + list(self.bonus)
+
+    @property
+    def draw_date(self) -> date | None:
+        raw = self.metadata.get("draw_date")
+        if isinstance(raw, date):
+            return raw
+        if isinstance(raw, datetime):
+            return raw.date()
+        if isinstance(raw, str):
+            try:
+                return date.fromisoformat(raw)
+            except (ValueError, TypeError):
+                pass
+        return None
 
 
 @dataclass

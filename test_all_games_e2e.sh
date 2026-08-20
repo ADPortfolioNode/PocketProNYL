@@ -17,10 +17,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/scripts/resolve_host_ports.sh"
 
 # --- Configuration ---
-resolve_compose_host_ports || exit 1
-BACKEND_PORT="${BACKEND_HOST_PORT:-5000}"
-BIND_HOST="${DOCKER_BIND_HOST:-127.0.0.1}"
-MENSA_API_BASE="http://${BIND_HOST}:${BACKEND_PORT}"
+if [ -z "${POCKETPRO_API_BASE:-}" ]; then
+    echo "INFO: POCKETPRO_API_BASE not set, resolving from local Docker setup..."
+    resolve_compose_host_ports || exit 1
+    BACKEND_PORT="${BACKEND_HOST_PORT:-5000}"
+    BIND_HOST="${DOCKER_BIND_HOST:-127.0.0.1}"
+    # Export the variable so it's available to child processes (like the python script)
+    export POCKETPRO_API_BASE="http://${BIND_HOST}:${BACKEND_PORT}"
+fi
+echo "INFO: Using API base: ${POCKETPRO_API_BASE}"
 TEST_SCRIPT_PATH="${SCRIPT_DIR}/test_all_workflows.py"
 declare -A ALL_GAME_RESULTS
 
@@ -51,7 +56,7 @@ step "Waiting for initial background data ingestion to complete..."
 max_wait=1200 # 20 minutes
 elapsed=0
 while [ $elapsed -lt $max_wait ]; do
-    status_json=$(curl -s "${MENSA_API_BASE}/api/startup_status" || echo "{}")
+    status_json=$(curl -s "${POCKETPRO_API_BASE}/api/startup_status" || echo "{}")
 
     # Use Python for robust JSON parsing to avoid issues with multiple 'status' keys
     parsed_status=$(echo "$status_json" | python -c 'import sys, json; data=json.load(sys.stdin); print(f"{data.get(\"status\", \"unknown\")}|{data.get(\"progress\", 0)}|{data.get(\"total\", 0)}|{data.get(\"current_game\", \"none\")}")' 2>/dev/null || echo "error|0|0|none")
@@ -74,7 +79,7 @@ fi
 
 # 3. Get the list of games
 step "Fetching list of all games from the API..."
-games_json=$(curl -s "${MENSA_API_BASE}/api/games")
+games_json=$(curl -s "${POCKETPRO_API_BASE}/api/games")
 if ! echo "$games_json" | grep -q '"games":'; then
     echo -e "${RED}ERROR: Could not fetch the list of games from the API. Aborting.${RESET}" >&2
     echo "Response: $games_json"
@@ -90,7 +95,7 @@ for game in "${GAMES[@]}"; do
     
     # Run the Python test script for the specific game
     # The script returns 0 on success (no FAILs), 1 on failure
-    if WORKFLOW_GAME="$game" MENSA_API_BASE="$MENSA_API_BASE" python "$TEST_SCRIPT_PATH"; then
+    if WORKFLOW_GAME="$game" python "$TEST_SCRIPT_PATH"; then
         echo -e "${GREEN}✓ Workflow for ${game} PASSED.${RESET}"
         ALL_GAME_RESULTS["$game"]="PASS"
     else

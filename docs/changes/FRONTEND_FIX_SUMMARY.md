@@ -105,7 +105,7 @@ fetch('/api/startup_status').then(r => r.json()).then(d => console.log('Status:'
 
 ### Error: `ERR_CONNECTION_RESET`
 - Container may have crashed
-- Run: `docker logs mensa_backend --tail 50`
+- Run: `docker logs pocketpro_nyl_backend --tail 50`
 - Restart if needed: `docker restart pocketpro_nyl_backend`
 
 ### Error: `/api/api/startup_status` in Network tab
@@ -143,7 +143,7 @@ Two scripts are available for testing:
 
 ```
 ┌─────────────────────────────────────────────┐
-│           Browser (localhost:3000)          │
+│           Browser (localhost:3000)          │ # PocketPro:NYL Project
 │  "Mensa Project Dashboard"                  │
 └────────────┬────────────────────────────────┘
              │
@@ -207,8 +207,8 @@ If verification fails:
 
 1. **Check container logs**:
    ```bash
-   docker logs mensa_backend --tail 30
-   docker logs mensa_frontend --tail 30
+   docker logs pocketpro_nyl_backend --tail 30
+   docker logs pocketpro_nyl_frontend --tail 30
    ```
 
 2. **Check browser console** (F12):

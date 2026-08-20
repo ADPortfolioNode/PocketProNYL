@@ -5,18 +5,18 @@ Lottery data pipeline with ingestion, model training, suggestions, and optional 
 ## Quick start (Windows)
 
 1. Install Docker Desktop and wait until it is running. # PocketPro:NYL Project
-2. Open the `pocketpro_nyl_project` folder.
-3. Double-click **`StartPocketProNYL.bat`** # Renamed start script
+2. Open the `pocketpro-nyl` folder.
+3. Double-click **`StartPocketProNYL.bat`**
    - First run: creates `.env` from `.env.example` (optional API keys for chat).
    - Builds images, starts containers, opens the dashboard in your browser.
-4. Double-click **`StopPocketProNYL.bat`** when finished (data volumes are kept). # Renamed stop script
+4. Double-click **`StopPocketProNYL.bat`** when finished (data volumes are kept).
 
 First build can take 10–20 minutes. Later starts are faster.
 
 | Launcher | Purpose |
-|----------|---------| # PocketPro:NYL Project
-| `StartPocketProNYL.bat` (or `Start PocketPro:NYL.bat`) | Build + start stack, open app |
-| `StopPocketProNYL.bat` (or `Stop PocketPro:NYL.bat`) | Stop containers cleanly | # Renamed stop script
+|----------|---------|
+| `StartPocketProNYL.bat` | Build + start stack, open app |
+| `StopPocketProNYL.bat` | Stop containers cleanly |
 | `start-windows.ps1` | PowerShell launcher used by the `.bat` file |
 | `recover_stack.ps1` | Recovery when Docker port-forwarding fails |
 | `rebuild.ps1` | Rebuild frontend/backend and restart |
@@ -32,8 +32,8 @@ First build can take 10–20 minutes. Later starts are faster.
 ## Quick start (Mac / Linux)
 
 ```bash
-git clone https://github.com/ADPortfolioNode/pocketpro_nyl_project.git
-cd pocketpro_nyl_project
+git clone https://github.com/ADPortfolioNode/pocketpro-nyl.git
+cd pocketpro-nyl
 cp .env.example .env   # add API keys if you want AI chat
 docker compose up --build -d
 ```
@@ -87,9 +87,9 @@ Training uses **incremental learning**: new runs build on the prior best model. 
 
 ## Project layout
 
-```
-mensa_project/
-├── StartMensa.bat / StopMensa.bat     # Windows one-click launchers
+```text
+pocketpro-nyl/
+├── StartPocketProNYL.bat / StopPocketProNYL.bat # Windows one-click launchers
 ├── start-windows.ps1                  # Staged Docker startup (Windows)
 ├── docker-compose.yml                 # Local dev stack
 ├── docker-compose.prod.yml            # Loopback-only port overrides
@@ -170,8 +170,8 @@ python verify_all_games_training.py
 Package the app for delivery to a client (source, launchers, optional pre-built Docker images):
 
 ```powershell
-.\scripts\package-distribution.ps1 -Version 20260706b
-.\scripts\zip-distribution.ps1 -PackageDir release\mensa_client_20260706b
+.\scripts\package-distribution.ps1 -Version 20260818
+.\scripts\zip-distribution.ps1 -PackageDir release\pocketpro_nyl_client_20260818
 ```
 
 Output under `release/`:

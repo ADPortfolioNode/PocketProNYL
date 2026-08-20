@@ -7,7 +7,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-
+# Import the new health router specifically to access its global flag
 from routes import health, games, models, chroma, ingestion, predictions, training, experiments, chat
 from middleware.rate_limit import rate_limit_middleware
 from state.ingestion_worker import start_background_ingestion
@@ -35,16 +35,19 @@ async def lifespan(app: FastAPI):
 
     # Startup
     print("🚀 PocketPro:NYL Project backend starting up...")
+    # Run startup tasks
+    asyncio.create_task(_deferred_lm_audit())
+    # This is a synchronous call that starts the background worker thread.
+    # It should not be wrapped in asyncio.create_task.
+    start_background_ingestion() 
+
+    # Signal that the application is now fully initialized and ready to serve traffic.
+    health.APP_IS_READY = True
 
     yield
 
-    # Tasks to run after the application has started and is ready to serve requests
-    asyncio.create_task(_deferred_lm_audit())
-    asyncio.create_task(start_background_ingestion()) # Ensure ingestion runs in background
-
     # Shutdown
     print("👋 PocketPro:NYL Project backend shutting down...")
-
 
 # Create FastAPI application
 app = FastAPI(lifespan=lifespan)

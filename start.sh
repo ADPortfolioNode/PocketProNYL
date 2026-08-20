@@ -12,40 +12,30 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #   --build  : Force a rebuild of the docker images (--no-cache).
 #   --down   : Stop and remove containers, networks, and volumes.
 
-# Keep the bash launcher aligned with the compose defaults and any .env overrides.
-resolve_compose_host_ports || {
-    echo "ERROR: Unable to resolve Docker host ports. Check your environment values." >&2
-    exit 1
-}
-
-# Assign resolved host ports to shorter variables for consistent use
-FRONTEND_PORT="${FRONTEND_HOST_PORT}"
-BACKEND_PORT="${BACKEND_HOST_PORT}"
-CHROMA_PORT="${CHROMA_HOST_PORT}"
-BIND_HOST="${DOCKER_BIND_HOST:-127.0.0.1}" # Define BIND_HOST for consistency
+# Port resolution is deferred until after initial cleanup.
 
 # --- Helper Functions ---
 export DOCKER_BUILDKIT=1
 
 choose_compose_command() {
     # Prefer 'docker compose' (v2) but fall back to 'docker-compose' (v1)
-    if docker compose version >/dev/null 2>&1; then
-        COMPOSE_CMD="docker compose"
-    elif command -v docker-compose >/dev/null 2>&1 && docker-compose version >/dev/null 2>&1; then
-        COMPOSE_CMD="docker-compose"
+    # Using `command` bypasses shell aliases/functions. The array stores the command
+    # correctly, preventing word-splitting issues that can trigger auto-correct.
+    if command docker compose version >/dev/null 2>&1; then
+        COMPOSE_CMD_ARRAY=(docker compose -f docker-compose.yml)
+    elif command -v docker-compose >/dev/null 2>&1 && command docker-compose version >/dev/null 2>&1; then
+        COMPOSE_CMD_ARRAY=(docker-compose -f docker-compose.yml)
     else
         echo "ERROR: Neither 'docker compose' nor 'docker-compose' commands are available." >&2
         echo "Install Docker Compose (v2 is recommended) or ensure it's on PATH." >&2
         exit 1
     fi
+    # Keep the string version for display purposes in echo statements.
+    COMPOSE_CMD="${COMPOSE_CMD_ARRAY[*]}"
 }
 
 compose_cmd() {
-    if [ "${COMPOSE_CMD}" = "docker compose" ]; then
-        docker compose "$@"
-    else
-        docker-compose "$@"
-    fi
+    "${COMPOSE_CMD_ARRAY[@]}" "$@"
 }
 
 is_windows_shell() {
@@ -131,6 +121,27 @@ wait_for_service() {
     return 1
 }
 
+wait_for_http_service() {
+    local svc_name="$1"
+    local url="$2"
+    local max_checks=${3:-30}
+    local interval=${4:-3}
+
+    echo "Waiting for ${svc_name} to be accessible at ${url} (timeout ${max_checks}*${interval}s)..."
+    for i in $(seq 1 "${max_checks}"); do
+        # Use curl to check. -s silent, -f fail fast on HTTP error, -o discard output
+        if curl -s -f --max-time ${interval} "${url}" >/dev/null; then
+            echo "✓ ${svc_name} is accessible."
+            return 0
+        fi
+        echo "  ... ${svc_name} not ready yet (attempt ${i}/${max_checks}). Retrying in ${interval}s."
+        sleep ${interval}
+    done
+
+    echo "✗ ERROR: Timed out waiting for ${svc_name} to become accessible at ${url}." >&2
+    return 1
+}
+
 check_docker_version() {
     echo "Checking Docker environment..."
     
@@ -175,18 +186,18 @@ check_docker_version() {
 }
 
 trigger_startup_init() {
-    local backend_url="http://${BIND_HOST}:${BACKEND_PORT}"
-    echo "==> Triggering backend startup initialization at ${backend_url}/api/startup_init"
+    local backend_url="http://${BIND_HOST_FOR_CURL}:${BACKEND_PORT}" # PocketPro:NYL Project
+    local force_payload='{"force": false}'
+    local message="==> Triggering backend startup initialization at ${backend_url}/api/startup_init"
+
+    if [ "${BUILD}" = true ]; then
+        message="==> Triggering backend startup with FULL DATA REFRESH (force=true)..."
+        force_payload='{"force": true}'
+    fi
+    echo "$message"
 
     # Use curl to send the POST request
-    # -s: silent (don't show progress meter or error messages)
-    # -X POST: specify POST method
-    # -H "Content-Type: application/json": set header for JSON body
-    # -d "{}": send an empty JSON object as the request body
-    # -w "%{http_code}": print only the HTTP status code to stdout
-    # -o /dev/null: discard the response body
-    # --max-time 15: set a timeout for the request
-    http_code=$(curl -s -X POST -H "Content-Type: application/json" -d "{}" "${backend_url}/api/startup_init" -w "%{http_code}" -o /dev/null --max-time 15)
+    http_code=$(curl -s -X POST -H "Content-Type: application/json" -d "${force_payload}" "${backend_url}/api/startup_init" -w "%{http_code}" -o /dev/null --max-time 15)
 
     if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then
         echo "  ✓ Backend startup init triggered successfully (HTTP $http_code)"
@@ -196,21 +207,61 @@ trigger_startup_init() {
     fi
 }
 
-# --- Main Script ---
+wait_for_ingestion_completion() {
+    local backend_url="http://${BIND_HOST_FOR_CURL}:${BACKEND_PORT}"
+    local max_wait_minutes=45 # Generous timeout for all games
+    local max_wait_seconds=$((max_wait_minutes * 60))
+    local elapsed=0
+    local interval=5
 
+    echo ""
+    echo "==> Waiting for background data ingestion to complete (max ${max_wait_minutes} minutes)..."
+    echo "    This one-time process populates the database with lottery history."
+    echo "    You can monitor detailed progress at: ${backend_url}/api/startup_status"
+
+    while [ "${elapsed}" -lt "${max_wait_seconds}" ]; do
+        # Use curl to fetch status, fail silently if server not ready
+        status_json=$(curl -s -f "${backend_url}/api/startup_status" || echo "{}")
+
+        # Use python for robust JSON parsing to get detailed status
+        parsed_status=$(echo "$status_json" | python -c 'import sys, json; data=json.load(sys.stdin); print(f"{data.get(\"status\", \"pending\")}|{data.get(\"progress\", 0)}|{data.get(\"total\", 0)}|{data.get(\"current_game\", \"N/A\")}")' 2>/dev/null || echo "pending|0|0|N/A")
+        IFS='|' read -r status progress total current_game <<< "$parsed_status"
+
+        if [[ "$status" == "completed" ]]; then
+            echo "  ✓ All game data ingestion is complete."
+            return 0
+        fi
+
+        echo "  ... Status: ${status} | Progress: ${progress}/${total} | Current: ${current_game} | Waiting... (${elapsed}s / ${max_wait_seconds}s)"
+        sleep "${interval}"
+        elapsed=$((elapsed + interval))
+    done
+
+    echo "  ✗ WARNING: Timed out waiting for data ingestion to complete after ${max_wait_minutes} minutes." >&2
+    echo "    The application is running, but some games may be missing data. You can ingest them manually from the UI." >&2
+}
+
+# --- Main Script ---
 BUILD=false
 DOWN=false
+RESET_REQUESTED=false # New flag for reset option
 
 while [[ ${#} -gt 0 ]]; do
     case "$1" in
         --build) BUILD=true; shift ;;
         --down) DOWN=true; shift ;;
+        --reset) RESET_REQUESTED=true; shift ;; # Handle new --reset flag
         -h|--help) echo "Usage: $0 [--build] [--down]"; exit 0 ;;
-        *) echo "Unknown arg: $1"; echo "Usage: $0 [--build] [--down]"; exit 2 ;;
+        *) echo "Unknown arg: $1"; echo "Usage: $0 [--build] [--down] [--reset]"; exit 2 ;;
     esac
 done
 
 # --- Execution Flow ---
+if [ "${RESET_REQUESTED}" = true ]; then
+    echo "Performing full reset and rebuild. This will clear all data."
+    "${SCRIPT_DIR}/reset.sh" --yes # Pass --yes to bypass interactive confirmation
+    exit 0 # Exit after reset.sh handles the full startup
+fi
 
 echo "Starting PocketPro:NYL Project..."
 
@@ -228,15 +279,29 @@ if [ "${DOWN}" = true ]; then
 fi
 
 # 3. Stop existing containers before starting
-echo "Stopping any running Docker services and clearing ports..."
+echo "Stopping any running Docker services to clear ports..."
 compose_cmd down --remove-orphans 2>/dev/null || true # Stop and remove containers/networks, including orphans
+
+# Give the OS a moment to release ports before we check them
+sleep 2
+
+# 4. Resolve host ports now that they are likely free
+resolve_compose_host_ports || {
+    echo "ERROR: Unable to resolve Docker host ports. Check your environment values." >&2
+    exit 1
+}
+
+# Assign resolved host ports to shorter variables for consistent use
+FRONTEND_PORT="${FRONTEND_HOST_PORT}"
+BACKEND_PORT="${BACKEND_HOST_PORT}"
+CHROMA_PORT="${CHROMA_HOST_PORT}"
+BIND_HOST_FOR_CURL="127.0.0.1" # Always use 127.0.0.1 for curl from host
 
 # Explicitly state which ports are being targeted for cleanup (from .env or defaults)
 echo "Targeting ports for cleanup: Frontend=${FRONTEND_PORT}, Backend=${BACKEND_PORT}, Chroma=${CHROMA_PORT}"
 
 echo "Pruning dangling Docker resources to ensure ports are fully released..."
 docker system prune -f 2>/dev/null || true # Clear dangling images, build cache, etc.
-sleep 2 # Give the OS a moment to release ports
 UP_ARGS=("-d" "--wait")
 
 if [ "${BUILD}" = true ]; then
@@ -269,23 +334,9 @@ if ! compose_cmd up -d frontend; then
     echo "ERROR: 'docker compose up frontend' failed." >&2
     exit 1
 fi
-
-# Wait for frontend healthcheck, but if it fails, try HTTP accessibility as a fallback.
-# This addresses the finding: "Frontend shows unhealthy in docker compose but returns HTTP 200 and serves content correctly."
-if ! wait_for_service frontend 90; then # Increased max_checks to 90 (450s) for frontend
-    echo "WARNING: Frontend healthcheck failed or timed out. Attempting HTTP accessibility check as fallback..." >&2
-    frontend_url="http://${BIND_HOST}:${FRONTEND_PORT}"
-    if curl -s -f "${frontend_url}" >/dev/null; then
-        echo "✓ Frontend is accessible via HTTP at ${frontend_url} despite Docker healthcheck status."
-    else
-        echo "✗ ERROR: Frontend is not accessible via HTTP at ${frontend_url} after healthcheck failure." >&2
-        echo "--- LOGS FOR frontend ---" >&2
-        compose_cmd logs --tail 100 frontend >&2
-        echo "--------------------------------" >&2
-        exit 1
-    fi
-fi
-
+# Rely on the robust internal healthcheck defined in docker-compose.yml
+# to ensure the frontend is fully ready before proceeding.
+wait_for_service frontend 90 5 || exit 1 # Wait up to 7.5 mins (90 checks * 5s)
 
 
 
@@ -310,6 +361,28 @@ compose_cmd ps
 
 # Trigger backend startup ingestion after all services are up and healthy
 trigger_startup_init
+
+echo ""
+echo "==> Running end-to-end workflow verification..."
+if [ ! -f "test_all_workflows.py" ]; then
+    echo "  ... skipping, test_all_workflows.py not found."
+else
+    # First, wait for the initial data download to complete.
+    # This ensures that the tests run against a fully populated database.
+    wait_for_ingestion_completion
+
+    backend_url="http://${BIND_HOST_FOR_CURL}:${BACKEND_PORT}"
+    # Pass the correct backend URL to the test script
+    if ! POCKETPRO_API_BASE="$backend_url" python test_all_workflows.py; then
+        echo "✗ WARNING: End-to-end workflow verification failed." >&2
+        echo "  A core workflow (like training or prediction) has an issue." >&2
+        echo "  The application stack is still running. You can proceed with manual testing." >&2
+        echo "  Review the test output above for details. To see logs, run: ${COMPOSE_CMD} logs -f" >&2
+        # This is now a non-fatal warning to allow startup to complete.
+    else
+        echo "✓ End-to-end workflow verification passed."
+    fi
+fi
 
 # Keep the final startup banner consistent with the same values compose is using.
 echo ""

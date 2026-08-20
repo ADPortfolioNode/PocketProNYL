@@ -26,12 +26,12 @@ from experiments.store import update_accuracy_history  # noqa: E402
 from services.trainer import TrainerService  # noqa: E402
 
 DEFAULT_API_CANDIDATES = (
-    os.environ.get("MENSA_API_BASE"),
+    os.environ.get("POCKETPRO_API_BASE"),
     "http://127.0.0.1:5001",
     "http://127.0.0.1:3000",
     "http://127.0.0.1:5000",
 )
-BASE = os.environ.get("MENSA_API_BASE", "http://127.0.0.1:5001")
+BASE = os.environ.get("POCKETPRO_API_BASE", "http://127.0.0.1:5001")
 GAME = os.environ.get("VERIFY_GAME", "pick3")
 TRAIN_TIMEOUT = int(os.environ.get("VERIFY_TRAIN_TIMEOUT", "900"))
 TRAIN_ITERATIONS = int(os.environ.get("VERIFY_TRAIN_ITERATIONS", "3"))

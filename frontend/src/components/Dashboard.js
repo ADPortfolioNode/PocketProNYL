@@ -53,7 +53,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
   // Function to fetch startup status directly from the backend for the auto-ingestion check
   const getBackendStartupStatus = useCallback(async () => {
     try {
-      const response = await axios.get(`${API_BASE}/api/startup_status`);
+      const response = await axios.get(`${API_BASE}/api/startup_status`, { timeout: 660000 }); // Increased timeout to 11 minutes (660s)
       return response.data;
     } catch (err) {
       console.error("Failed to fetch backend startup status for auto-ingestion:", err);
@@ -94,6 +94,67 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
   const [summaryRefreshKey, setSummaryRefreshKey] = useState(0);
   const [allGamesProgress, setAllGamesProgress] = useState({});
 
+  // New useEffect to sync internal ingestion state with startupStatus prop
+  useEffect(() => {
+    if (!startupStatus) return;
+
+    const backendIngestStatus = startupStatus.status;
+    const backendGamesProgress = startupStatus.games || {};
+
+    // Update overall ingestStatus
+    if (backendIngestStatus === 'ingesting') {
+      setIngestStatus('in progress');
+    } else if (backendIngestStatus === 'completed') {
+      setIngestStatus('completed');
+    } else if (backendIngestStatus === 'failed') {
+      setIngestStatus('error');
+    } else {
+      setIngestStatus('idle'); // Or 'ready'
+    }
+
+    // Update game-specific progress
+    setAllGamesProgress((prev) => {
+      const newProgress = { ...prev };
+      for (const gameName in backendGamesProgress) {
+        const gameData = backendGamesProgress[gameName];
+        const rowsFetched = Number(gameData.current_game_rows_fetched || 0);
+        const totalRows = Number(gameData.current_game_rows_total || 0);
+
+        // Determine status for individual game
+        let gameStatus = 'pending';
+        if (gameData.status === 'ingesting') {
+          gameStatus = 'active';
+        } else if (gameData.status === 'completed') {
+          gameStatus = 'completed';
+        } else if (gameData.status === 'failed') {
+          gameStatus = 'error';
+        }
+
+        newProgress[gameName] = {
+          ...(prev[gameName] || {}),
+          status: gameStatus,
+          rowsFetched,
+          totalRows,
+        };
+      }
+      return newProgress;
+    });
+
+    // Update ingestingGame if a specific game is being processed
+    if (startupStatus.current_game && startupStatus.status === 'ingesting') {
+      setIngestingGame(startupStatus.current_game);
+    } else {
+      setIngestingGame(null);
+    }
+
+    // Update ingestStartTime if ingestion just started
+    if (startupStatus.status === 'ingesting' && !ingestStartTime) {
+      setIngestStartTime(Date.now());
+    } else if (startupStatus.status !== 'ingesting' && ingestStartTime) {
+      setIngestStartTime(null); // Reset if ingestion is no longer active
+    }
+
+  }, [startupStatus, setIngestStatus, setAllGamesProgress, setIngestingGame, ingestStartTime, setIngestStartTime]); // Dependencies
 
   useEffect(() => {
     if (ingestStatus !== 'in progress' || selectedGame !== ALL_GAMES_VALUE) {
@@ -344,37 +405,6 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
       },
     });
   }, [API_BASE, trainStatus, ingestStatus]);
-
-  // Effect to check for auto-ingestion conditions and trigger if necessary on initial load
-  useEffect(() => {
-    // Only run if API_BASE is available and we haven't checked yet for this component instance
-    if (!API_BASE || hasCheckedForAutoIngestion.current) {
-      return;
-    }
-
-    const performAutoIngestionCheck = async () => {
-      hasCheckedForAutoIngestion.current = true; // Mark as checked
-
-      // First, check the overall startup status from the backend
-      const currentBackendStatus = await getBackendStartupStatus();
-
-      if (!currentBackendStatus) {
-        console.warn("Could not get backend startup status. Skipping auto-ingestion check.");
-        return;
-      }
-
-      // Condition for auto-ingestion: overall system status is 'ready' AND all games are 'not_started'
-      const allGamesNotStarted = Object.values(currentBackendStatus.games || {}).every(
-        (gameStatus) => gameStatus.status === 'not_started'
-      );
-
-      if (currentBackendStatus.status === 'ready' && allGamesNotStarted) {
-        console.log("Detected all games require ingestion. Auto-triggering backend startup initialization.");
-        triggerBackendStartupInit();
-      }
-    };
-    performAutoIngestionCheck();
-  }, [API_BASE, getBackendStartupStatus, triggerBackendStartupInit]); // Dependencies
 
   const startIngest = useCallback(async () => {
     if (!selectedGame) return;
@@ -1002,7 +1032,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
         {/* Mensa Concierge */}
         <div className={getFocusColClass('chat')}>
           <ExpandableCard
-            title="Mensa Concierge"
+            title="PocketPro Concierge"
             cardKey="chat"
             focusedCard={expandedCard}
             neonBorder={true}
@@ -1514,7 +1544,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
             focusedCard={expandedCard}
             neonBorder={true}
             metadata={{
-              'Host': 'mensa_chroma',
+              'Host': 'pocketpro_nyl_chroma',
               'Port': '8000'
             }}
             onToggle={handleCardFocus('chroma')}

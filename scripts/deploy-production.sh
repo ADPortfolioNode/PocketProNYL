@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy Mensa on a Linux web server for subscribing customers.
+# Deploy PocketPro:NYL on a Linux web server for subscribing customers.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -52,7 +52,7 @@ if [[ "${BUILD_LOCAL:-0}" == "1" ]]; then
   echo "Building images locally..."
   docker compose "${COMPOSE_ARGS[@]}" build
 else
-  echo "Pulling images (registry=${MENSA_REGISTRY:-ghcr.io/adportfolionode}, version=${MENSA_VERSION:-latest})..."
+  echo "Pulling images (registry=${POCKETPRO_NYL_REGISTRY:-ghcr.io/adportfolionode}, version=${POCKETPRO_NYL_VERSION:-latest})..."
   if ! docker compose "${COMPOSE_ARGS[@]}" pull; then
     echo ""
     echo "WARN: Registry pull failed (private GHCR or no release yet)."
