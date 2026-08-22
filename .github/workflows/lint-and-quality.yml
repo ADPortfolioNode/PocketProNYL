@@ -2,15 +2,9 @@ name: Lint & Code Quality
 
 on:
   push:
-<<<<<<< HEAD
-    branches: [main, pocketpro-nyl]
-  pull_request:
-    branches: [main, pocketpro-nyl]
-=======
     branches: [main]
   pull_request:
     branches: [main]
->>>>>>> f8d15eea4aab2b9244b47f5221229d448e13a685
 
 jobs:
   python-lint:
@@ -18,22 +12,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install flake8 black --quiet
-
       - name: Lint with flake8
         run: |
           flake8 backend/ --count --select=E9,F63,F7,F82 --show-source --statistics
           flake8 backend/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-
       - name: Check formatting with black
         run: |
           black --check backend/ --diff || echo "Formatting issues found (non-blocking)"
@@ -43,13 +33,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Lint backend Dockerfile
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: backend/Dockerfile
           failure-threshold: warning
-
       - name: Lint frontend Dockerfile
         uses: hadolint/hadolint-action@v3.1.0
         with:
@@ -61,14 +49,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Lint YAML files
         uses: ibiqlik/action-yamllint@v3
         with:
-<<<<<<< HEAD
-=======
           file_or_dir: docker-compose.yml docker-compose.prod.yml docker-compose.distribution.yml .github/workflows
->>>>>>> f8d15eea4aab2b9244b47f5221229d448e13a685
           config_data: |
             extends: relaxed
             rules:
