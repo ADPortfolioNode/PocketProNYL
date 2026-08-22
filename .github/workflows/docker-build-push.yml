@@ -4,19 +4,17 @@ on:
   push:
     branches:
       - main
-      - mensa
     tags:
       - 'v*'
-  pull_request: # PocketPro:NYL Project
-    branches: # PocketPro:NYL Project
-      - main # PocketPro:NYL Project
-      - mensa # PocketPro:NYL Project
+  pull_request:
+    branches:
+      - main
 
 env:
   DOCKER_REGISTRY: ghcr.io
   DOCKER_ORG: adportfolionode
-  FRONTEND_IMAGE: mensa-frontend
-  BACKEND_IMAGE: mensa-backend
+  FRONTEND_IMAGE: pocketpro-nyl-frontend
+  BACKEND_IMAGE: pocketpro-nyl-backend
 
 jobs:
   build-and-test:
@@ -42,7 +40,7 @@ jobs:
         with:
           context: ./backend
           file: ./backend/Dockerfile
-          tags: ${{ env.BACKEND_IMAGE }}:test # PocketPro:NYL Project
+          tags: ${{ env.BACKEND_IMAGE }}:test
           load: true
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new
@@ -52,7 +50,7 @@ jobs:
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
-          tags: ${{ env.FRONTEND_IMAGE }}:test # PocketPro:NYL Project
+          tags: ${{ env.FRONTEND_IMAGE }}:test
           load: true
           build-args: NODE_VERSION=22.13.1
           cache-from: type=local,src=/tmp/.buildx-cache
@@ -60,12 +58,12 @@ jobs:
 
       - name: Test backend image
         run: |
-          docker run --rm ${{ env.BACKEND_IMAGE }}:test python -c "import fastapi, hypercorn, chromadb, sklearn; print('All backend imports OK')"
- # PocketPro:NYL Project
+          docker run --rm --user root --entrypoint python ${{ env.BACKEND_IMAGE }}:test -c "import fastapi, hypercorn, chromadb, sklearn; print('All backend imports OK')"
+
       - name: Test frontend image
         run: |
           docker run --rm ${{ env.FRONTEND_IMAGE }}:test sh -c '[ -f /usr/share/nginx/html/index.html ] && echo "Frontend build OK" || exit 1'
- # PocketPro:NYL Project
+
       - name: Move cache
         run: |
           rm -rf /tmp/.buildx-cache
@@ -100,7 +98,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: | # PocketPro:NYL Project
+          images: |
             ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_ORG }}/pocketpro-nyl-frontend
             ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_ORG }}/pocketpro-nyl-backend
             ${{ secrets.DOCKER_USERNAME }}/pocketpro-nyl-frontend
@@ -118,7 +116,7 @@ jobs:
         with:
           context: ./backend
           file: ./backend/Dockerfile
-          push: true # PocketPro:NYL Project
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -129,7 +127,7 @@ jobs:
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
-          push: true # PocketPro:NYL Project
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: NODE_VERSION=22.13.1
@@ -147,22 +145,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Generate release notes
-        id: release_notes
-        run: |
-          if [ -f RELEASE_NOTES.md ]; then
-            cat RELEASE_NOTES.md
-          else
-            echo "## Release ${{ github.ref_name }}" > RELEASE_NOTES.md
-            echo "" >> RELEASE_NOTES.md
-            echo "See commit history for details." >> RELEASE_NOTES.md
-          fi
-
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           name: Release ${{ github.ref_name }}
-          body_path: RELEASE_NOTES.md
+          body_path: docs/changes/RELEASE_NOTES.md
           draft: false
           prerelease: false
           generate_release_notes: true
