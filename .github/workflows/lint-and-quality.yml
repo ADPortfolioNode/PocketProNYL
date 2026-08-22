@@ -2,9 +2,9 @@ name: Lint & Code Quality
 
 on:
   push:
-    branches: [main, mensa]
+    branches: [main]
   pull_request:
-    branches: [main, mensa]
+    branches: [main]
 
 jobs:
   python-lint:
@@ -59,6 +59,7 @@ jobs:
       - name: Lint YAML files
         uses: ibiqlik/action-yamllint@v3
         with:
+          file_or_dir: docker-compose.yml docker-compose.prod.yml docker-compose.distribution.yml .github/workflows
           config_data: |
             extends: relaxed
             rules:
