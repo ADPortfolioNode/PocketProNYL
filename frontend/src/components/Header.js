@@ -29,7 +29,7 @@ const Header = ({ startupStatus }) => {
         <div className="header-startup-strip py-2 mb-3">
           <div className="container">
             <div className="header-startup-meta small mb-2">
-              <strong>🎰 Lottery Data Initialization</strong>
+              <strong>Lottery Data Initialization</strong>
               {startupStatus.current_game && (
                 <span className="ms-2">
                   • {startupStatus.current_game.toUpperCase()}
@@ -53,10 +53,10 @@ const Header = ({ startupStatus }) => {
 
       <div className="container py-4">
         <div className="alert alert-info">
-          <h4>Welcome to Mensa Suggestion Dashboard</h4>
-          <p>Use this app to suggest lottery numbers. Follow the workflow: 1. Ingest data, 2. Train the model, 3. Make suggestions.</p>
+          <h4>Welcome to PocketPro:NYL</h4>
+          <p>Use this app to suggest NY lottery numbers. Follow the workflow: 1. Ingest data, 2. Train the model, 3. Make suggestions.</p>
         </div>
-        <h2>Mensa Suggestion Dashboard</h2>
+        <h2>PocketPro:NYL Suggestion Dashboard</h2>
       </div>
     </div>
   );

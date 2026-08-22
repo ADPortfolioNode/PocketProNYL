@@ -1,19 +1,16 @@
 #!/bin/sh
 set -e
 
-# Fix permissions for data directory if it exists
-if [ -d "/data" ]; then
+# Permission repair only works as root. Compose often starts the backend as
+# root then drops to appuser; CI smoke tests run the image as appuser.
+if [ "$(id -u)" = "0" ] && [ -d "/data" ]; then
     echo "Fixing permissions for /data directory..."
-    # Ensure experiments directory exists and has correct permissions
-    # Also ensure /home/appuser and the HF_HOME cache directory are writable
     mkdir -p /data/experiments /home/appuser /app/.cache/chroma
-    chown -R appuser:appuser /data /data/experiments /home/appuser /app/.cache/chroma # Ensure appuser owns the data and its home
-    chmod -R ug+rwX,o+rX /data /data/experiments /home/appuser /app/.cache/chroma # Ensure appuser can read/write and others can read
+    chown -R appuser:appuser /data /data/experiments /home/appuser /app/.cache/chroma
+    chmod -R ug+rwX,o+rX /data /data/experiments /home/appuser /app/.cache/chroma
     echo "Permissions fixed for /data directory"
 fi
 
-# Ensure HOME is explicitly set for the appuser's session
 export HOME=/app
 
-# Execute the main command
-exec "$@" # PocketPro:NYL Project
+exec "$@"
