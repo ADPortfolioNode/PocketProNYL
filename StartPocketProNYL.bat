@@ -56,8 +56,8 @@ if errorlevel 1 (
 echo.
 echo ============================================================
 echo   PocketPro:NYL is running.
- echo   Open:  http://127.0.0.1:3000
- echo   Stop:  StopPocketProNYL.bat
+echo   Open:  http://127.0.0.1:3000
+echo   Stop:  StopPocketProNYL.bat
 echo ============================================================
 echo.
 pause
