@@ -2,9 +2,15 @@ name: Lint & Code Quality
 
 on:
   push:
+<<<<<<< HEAD
     branches: [main, pocketpro-nyl]
   pull_request:
     branches: [main, pocketpro-nyl]
+=======
+    branches: [main]
+  pull_request:
+    branches: [main]
+>>>>>>> f8d15eea4aab2b9244b47f5221229d448e13a685
 
 jobs:
   python-lint:
@@ -59,6 +65,10 @@ jobs:
       - name: Lint YAML files
         uses: ibiqlik/action-yamllint@v3
         with:
+<<<<<<< HEAD
+=======
+          file_or_dir: docker-compose.yml docker-compose.prod.yml docker-compose.distribution.yml .github/workflows
+>>>>>>> f8d15eea4aab2b9244b47f5221229d448e13a685
           config_data: |
             extends: relaxed
             rules:

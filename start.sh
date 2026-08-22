@@ -241,18 +241,190 @@ wait_for_ingestion_completion() {
     echo "    The application is running, but some games may be missing data. You can ingest them manually from the UI." >&2
 }
 
+# --- Real-time Monitoring Function ---
+monitor_startup_with_regression_tests() {
+    local monitor_log="startup_monitor_$(date +%Y%m%d_%H%M%S).log"
+    local start_time=$(date +%s)
+    
+    # Color codes
+    local GREEN='\033[0;32m'
+    local YELLOW='\033[1;33m'
+    local RED='\033[0;31m'
+    local BLUE='\033[0;34m'
+    local CYAN='\033[0;36m'
+    local RESET='\033[0m'
+    
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo -e "${CYAN}REGRESSION TEST MONITORING ENABLED${RESET}"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo -e "Monitor log: ${monitor_log}"
+    echo ""
+    
+    # Log header
+    echo "=== REGRESSION TEST MONITORING LOG ===" > "$monitor_log"
+    echo "Timestamp: $(date)" >> "$monitor_log"
+    echo "Command: ./start.sh --reset --build --test" >> "$monitor_log"
+    echo "========================================" >> "$monitor_log"
+    echo "" >> "$monitor_log"
+    
+    log_event() {
+        local level="$1"
+        local message="$2"
+        local timestamp=$(date '+%H:%M:%S')
+        local elapsed=$(($(date +%s) - start_time))
+        
+        local color=""
+        case "$level" in
+            "INFO") color="$CYAN" ;;
+            "SUCCESS") color="$GREEN" ;;
+            "WARNING") color="$YELLOW" ;;
+            "ERROR") color="$RED" ;;
+            *) color="$RESET" ;;
+        esac
+        
+        echo -e "${color}[${timestamp}] [${elapsed}s] [${level}]${RESET} ${message}"
+        echo "[${timestamp}] [${elapsed}s] [${level}] ${message}" >> "$monitor_log"
+    }
+    
+    # Monitor startup phases
+    log_event "INFO" "Starting Docker environment check..."
+    
+    # Check Docker
+    if ! command -v docker &> /dev/null; then
+        log_event "ERROR" "Docker command not found"
+        return 1
+    fi
+    log_event "SUCCESS" "Docker command available"
+    
+    if ! docker info >/dev/null 2>&1; then
+        log_event "ERROR" "Docker daemon not responding"
+        return 1
+    fi
+    log_event "SUCCESS" "Docker daemon responsive"
+    
+    # Monitor port resolution
+    log_event "INFO" "Resolving host ports..."
+    if ! resolve_compose_host_ports; then
+        log_event "ERROR" "Failed to resolve host ports"
+        return 1
+    fi
+    log_event "SUCCESS" "Ports resolved - Frontend:${FRONTEND_HOST_PORT} Backend:${BACKEND_HOST_PORT} Chroma:${CHROMA_HOST_PORT}"
+    
+    # Monitor cleanup phase
+    log_event "INFO" "Stopping existing containers..."
+    compose_cmd down --remove-orphans 2>/dev/null || true
+    docker system prune -f 2>/dev/null || true
+    log_event "SUCCESS" "Cleanup completed"
+    
+    # Monitor build phase if requested
+    if [ "${BUILD}" = true ]; then
+        log_event "INFO" "Starting Docker image build with --no-cache..."
+        local build_start=$(date +%s)
+        if ! compose_cmd build --no-cache 2>&1 | tee -a "$monitor_log"; then
+            log_event "ERROR" "Docker build failed"
+            return 1
+        fi
+        local build_duration=$(($(date +%s) - build_start))
+        log_event "SUCCESS" "Build completed in ${build_duration}s"
+    fi
+    
+    # Monitor service startup
+    log_event "INFO" "Starting Chroma service..."
+    local chroma_start=$(date +%s)
+    if ! compose_cmd up -d chroma 2>&1 | tee -a "$monitor_log"; then
+        log_event "ERROR" "Failed to start Chroma"
+        return 1
+    fi
+    if ! wait_for_service chroma; then
+        log_event "ERROR" "Chroma health check failed"
+        return 1
+    fi
+    local chroma_duration=$(($(date +%s) - chroma_start))
+    log_event "SUCCESS" "Chroma healthy in ${chroma_duration}s"
+    
+    log_event "INFO" "Starting Backend service..."
+    local backend_start=$(date +%s)
+    if ! compose_cmd up -d backend 2>&1 | tee -a "$monitor_log"; then
+        log_event "ERROR" "Failed to start Backend"
+        return 1
+    fi
+    if ! wait_for_service backend; then
+        log_event "ERROR" "Backend health check failed"
+        return 1
+    fi
+    local backend_duration=$(($(date +%s) - backend_start))
+    log_event "SUCCESS" "Backend healthy in ${backend_duration}s"
+    
+    log_event "INFO" "Starting Frontend service..."
+    local frontend_start=$(date +%s)
+    if ! compose_cmd up -d frontend 2>&1 | tee -a "$monitor_log"; then
+        log_event "ERROR" "Failed to start Frontend"
+        return 1
+    fi
+    if ! wait_for_service frontend 90 5; then
+        log_event "ERROR" "Frontend health check failed"
+        return 1
+    fi
+    local frontend_duration=$(($(date +%s) - frontend_start))
+    log_event "SUCCESS" "Frontend healthy in ${frontend_duration}s"
+    
+    # Monitor ingestion
+    log_event "INFO" "Monitoring data ingestion..."
+    local ingest_start=$(date +%s)
+    local max_wait=2700 # 45 minutes
+    local elapsed=0
+    local last_status=""
+    
+    while [ $elapsed -lt $max_wait ]; do
+        status_json=$(curl -s -f "http://${BIND_HOST_FOR_CURL}:${BACKEND_PORT}/api/startup_status" 2>/dev/null || echo "{}")
+        status=$(echo "$status_json" | python -c 'import sys, json; data=json.load(sys.stdin); print(data.get("status", "pending"))' 2>/dev/null || echo "pending")
+        
+        if [ "$status" != "$last_status" ]; then
+            log_event "INFO" "Ingestion status: ${status}"
+            last_status="$status"
+        fi
+        
+        if [[ "$status" == "completed" ]]; then
+            local ingest_duration=$(($(date +%s) - ingest_start))
+            log_event "SUCCESS" "Data ingestion completed in ${ingest_duration}s"
+            break
+        fi
+        
+        sleep 5
+        elapsed=$(($(date +%s) - ingest_start))
+    done
+    
+    if [ $elapsed -ge $max_wait ]; then
+        log_event "WARNING" "Data ingestion timeout after ${max_wait}s"
+    fi
+    
+    # Final status
+    local total_duration=$(($(date +%s) - start_time))
+    log_event "SUCCESS" "Startup completed in ${total_duration}s"
+    
+    echo ""
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo -e "${GREEN}✓ STARTUP MONITORING COMPLETE${RESET}"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo -e "Monitor log saved to: ${monitor_log}"
+    
+    return 0
+}
+
 # --- Main Script ---
 BUILD=false
 DOWN=false
 RESET_REQUESTED=false # New flag for reset option
+TEST_REQUESTED=false # New flag for regression testing
 
 while [[ ${#} -gt 0 ]]; do
     case "$1" in
         --build) BUILD=true; shift ;;
         --down) DOWN=true; shift ;;
         --reset) RESET_REQUESTED=true; shift ;; # Handle new --reset flag
-        -h|--help) echo "Usage: $0 [--build] [--down]"; exit 0 ;;
-        *) echo "Unknown arg: $1"; echo "Usage: $0 [--build] [--down] [--reset]"; exit 2 ;;
+        --test) TEST_REQUESTED=true; shift ;; # Handle new --test flag
+        -h|--help) echo "Usage: $0 [--build] [--down] [--reset] [--test]"; exit 0 ;;
+        *) echo "Unknown arg: $1"; echo "Usage: $0 [--build] [--down] [--reset] [--test]"; exit 2 ;;
     esac
 done
 
@@ -261,6 +433,30 @@ if [ "${RESET_REQUESTED}" = true ]; then
     echo "Performing full reset and rebuild. This will clear all data."
     "${SCRIPT_DIR}/reset.sh" --yes # Pass --yes to bypass interactive confirmation
     exit 0 # Exit after reset.sh handles the full startup
+fi
+
+# If test mode is enabled, use the monitoring function
+if [ "${TEST_REQUESTED}" = true ]; then
+    monitor_startup_with_regression_tests || exit 1
+    
+    echo ""
+    echo "==> Running production regression tests..."
+    timestamp=$(date +%Y-%m-%d_%H-%M-%S)
+    report_file="regression_test_report_${timestamp}.txt"
+    
+    # Call PowerShell script from bash environment
+    if command -v powershell.exe &> /dev/null; then
+        powershell.exe -ExecutionPolicy Bypass -File "${SCRIPT_DIR}/production_test.ps1" -WriteFile -Verbose 2>&1 | tee "$report_file"
+    elif command -v pwsh &> /dev/null; then
+        pwsh -ExecutionPolicy Bypass -File "${SCRIPT_DIR}/production_test.ps1" -WriteFile -Verbose 2>&1 | tee "$report_file"
+    else
+        echo "ERROR: PowerShell not found. Cannot run production tests." >&2
+        exit 1
+    fi
+    
+    echo ""
+    echo "==> Regression test report saved to: $report_file"
+    exit 0
 fi
 
 echo "Starting PocketPro:NYL Project..."

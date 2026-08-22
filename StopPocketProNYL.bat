@@ -1,4 +1,5 @@
 @echo off
+<<<<<<< HEAD
 setlocal EnableExtensions
 title PocketProNYL - Stopping
 
@@ -54,3 +55,12 @@ exit /b 0
 echo.
 pause
 exit /b 1
+=======
+cd /d "%~dp0"
+if exist "%~dp0StopMensa.bat" (
+    call "%~dp0StopMensa.bat" %*
+    exit /b %ERRORLEVEL%
+)
+docker compose -f docker-compose.yml down
+exit /b %ERRORLEVEL%
+>>>>>>> f8d15eea4aab2b9244b47f5221229d448e13a685

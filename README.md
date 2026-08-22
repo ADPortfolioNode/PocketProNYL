@@ -4,8 +4,13 @@ Lottery data pipeline with ingestion, model training, suggestions, and optional 
 
 ## Quick start (Windows)
 
+<<<<<<< HEAD
 1. Install Docker Desktop and wait until it is running. # PocketPro:NYL Project
 2. Open the `pocketpro-nyl` folder.
+=======
+1. Install Docker Desktop and wait until it is running.
+2. Open the `PocketProNYL` folder.
+>>>>>>> f8d15eea4aab2b9244b47f5221229d448e13a685
 3. Double-click **`StartPocketProNYL.bat`**
    - First run: creates `.env` from `.env.example` (optional API keys for chat).
    - Builds images, starts containers, opens the dashboard in your browser.
@@ -32,8 +37,13 @@ First build can take 10–20 minutes. Later starts are faster.
 ## Quick start (Mac / Linux)
 
 ```bash
+<<<<<<< HEAD
 git clone https://github.com/ADPortfolioNode/pocketpro-nyl.git
 cd pocketpro-nyl
+=======
+git clone https://github.com/ADPortfolioNode/PocketProNYL.git
+cd PocketProNYL
+>>>>>>> f8d15eea4aab2b9244b47f5221229d448e13a685
 cp .env.example .env   # add API keys if you want AI chat
 docker compose up --build -d
 ```
@@ -50,13 +60,7 @@ Host ports come from `.env`. Compose defaults vs common Windows overrides:
 | Backend | 5000 | 5000 | **5001** |
 | ChromaDB | 8000 | 8000 | **8001** |
 
-Check your active ports:
-
-```bash
-docker compose ps
-```
-
-Health checks (adjust port if you use `BACKEND_HOST_PORT` / `CHROMA_HOST_PORT`):
+Health checks:
 
 ```bash
 curl http://127.0.0.1:3000/
@@ -66,25 +70,20 @@ curl http://127.0.0.1:8001/api/v1/heartbeat
 
 ## API keys (optional)
 
-Training, ingestion, and suggestions work without keys. At least one key enables AI chat:
-
-| Provider | Variable | Get a key |
-|----------|----------|-----------|
-| Google Gemini | `GEMINI_API_KEY` | https://aistudio.google.com/app/apikey |
-| OpenAI | `OPENAI_API_KEY` / `CHAT_GPT_API_KEY` | https://platform.openai.com/api-keys |
-| xAI Grok | `GROK_API_KEY` | https://console.x.ai |
+Training, ingestion, and suggestions work without keys. At least one key enables AI chat.
 
 ## Typical workflow
 
 1. **Ingest** — pull draw history into ChromaDB for a game.
-2. **Train** — build a Random Forest model; experiments are saved with accuracy and parameters.
+2. **Train** — build a model; experiments are saved with accuracy and parameters.
 3. **Suggest** — generate next-draw suggestions from the trained model.
 4. **Chat** (optional) — RAG concierge when API keys are set.
 
-Training uses **incremental learning**: new runs build on the prior best model. The dashboard loads **highest-accuracy settings** from saved experiments when you select a game or restart.
+## Troubleshooting the local stack
 
-**Large games (e.g. Powerball):** if training hits 502/504, lower target accuracy (~85–88%), max iterations (10–12), N estimators (~150), and disable auto-tune.
+If the UI loads but APIs fail:
 
+<<<<<<< HEAD
 ## Project layout
 
 ```text
@@ -275,3 +274,9 @@ black --check backend/
 ```
 
 3. Open a pull request against `main`.
+=======
+- Set `REACT_APP_API_BASE=` (empty) in `.env` so the browser uses nginx `/api` proxy.
+- Set `CHROMA_HOST=pocketpro_nyl_chroma` (not `mensa_chroma`).
+- Point scripts at `http://127.0.0.1:5001` when `BACKEND_HOST_PORT=5001`.
+- Do not commit `.env`. Rotate any keys that were pasted into chat or committed.
+>>>>>>> f8d15eea4aab2b9244b47f5221229d448e13a685

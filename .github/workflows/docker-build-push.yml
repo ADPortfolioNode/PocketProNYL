@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+<<<<<<< HEAD
       - pocketpro-nyl
     tags:
       - 'v*'
@@ -11,6 +12,13 @@ on:
     branches: # PocketPro:NYL Project
       - main # PocketPro:NYL Project
       - pocketpro-nyl # PocketPro:NYL Project
+=======
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+>>>>>>> f8d15eea4aab2b9244b47f5221229d448e13a685
 
 env:
   DOCKER_REGISTRY: ghcr.io
@@ -42,7 +50,7 @@ jobs:
         with:
           context: ./backend
           file: ./backend/Dockerfile
-          tags: ${{ env.BACKEND_IMAGE }}:test # PocketPro:NYL Project
+          tags: ${{ env.BACKEND_IMAGE }}:test
           load: true
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new
@@ -52,7 +60,7 @@ jobs:
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
-          tags: ${{ env.FRONTEND_IMAGE }}:test # PocketPro:NYL Project
+          tags: ${{ env.FRONTEND_IMAGE }}:test
           load: true
           build-args: NODE_VERSION=22.13.1
           cache-from: type=local,src=/tmp/.buildx-cache
@@ -60,12 +68,12 @@ jobs:
 
       - name: Test backend image
         run: |
-          docker run --rm ${{ env.BACKEND_IMAGE }}:test python -c "import fastapi, hypercorn, chromadb, sklearn; print('All backend imports OK')"
- # PocketPro:NYL Project
+          docker run --rm --user root --entrypoint python ${{ env.BACKEND_IMAGE }}:test -c "import fastapi, hypercorn, chromadb, sklearn; print('All backend imports OK')"
+
       - name: Test frontend image
         run: |
           docker run --rm ${{ env.FRONTEND_IMAGE }}:test sh -c '[ -f /usr/share/nginx/html/index.html ] && echo "Frontend build OK" || exit 1'
- # PocketPro:NYL Project
+
       - name: Move cache
         run: |
           rm -rf /tmp/.buildx-cache
@@ -101,10 +109,17 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
+<<<<<<< HEAD
             ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_ORG }}/${{ env.FRONTEND_IMAGE }}
             ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_ORG }}/${{ env.BACKEND_IMAGE }}
             ${{ secrets.DOCKER_USERNAME }}/${{ env.FRONTEND_IMAGE }}
             ${{ secrets.DOCKER_USERNAME }}/${{ env.BACKEND_IMAGE }}
+=======
+            ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_ORG }}/pocketpro-nyl-frontend
+            ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_ORG }}/pocketpro-nyl-backend
+            ${{ secrets.DOCKER_USERNAME }}/pocketpro-nyl-frontend
+            ${{ secrets.DOCKER_USERNAME }}/pocketpro-nyl-backend
+>>>>>>> f8d15eea4aab2b9244b47f5221229d448e13a685
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -118,7 +133,7 @@ jobs:
         with:
           context: ./backend
           file: ./backend/Dockerfile
-          push: true # PocketPro:NYL Project
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -129,7 +144,7 @@ jobs:
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
-          push: true # PocketPro:NYL Project
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: NODE_VERSION=22.13.1
@@ -147,22 +162,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Generate release notes
-        id: release_notes
-        run: |
-          if [ -f RELEASE_NOTES.md ]; then
-            cat RELEASE_NOTES.md
-          else
-            echo "## Release ${{ github.ref_name }}" > RELEASE_NOTES.md
-            echo "" >> RELEASE_NOTES.md
-            echo "See commit history for details." >> RELEASE_NOTES.md
-          fi
-
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           name: Release ${{ github.ref_name }}
-          body_path: RELEASE_NOTES.md
+          body_path: docs/changes/RELEASE_NOTES.md
           draft: false
           prerelease: false
           generate_release_notes: true
