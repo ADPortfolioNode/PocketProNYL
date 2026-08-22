@@ -12,9 +12,4 @@ if [ "$(id -u)" = "0" ] && [ -d "/data" ]; then
 fi
 
 export HOME=/app
-
-<<<<<<< HEAD
-# Execute the main command
-=======
->>>>>>> f8d15eea4aab2b9244b47f5221229d448e13a685
 exec "$@"
