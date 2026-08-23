@@ -23,13 +23,11 @@ const errorPatterns = {
     ],
 };
 
-/** Turn axios/FastAPI errors into readable text (handles detail arrays). */
 export function formatApiError(error, fallback = 'Request failed') {
     const data = error?.response?.data;
     if (!data) {
         return error?.message || fallback;
     }
-
     const detail = data.detail ?? data.message ?? data.error;
     if (Array.isArray(detail)) {
         return detail
@@ -46,11 +44,9 @@ export function formatApiError(error, fallback = 'Request failed') {
             .filter(Boolean)
             .join('; ');
     }
-
     if (detail && typeof detail === 'object') {
         return detail.message || detail.msg || JSON.stringify(detail);
     }
-
     return String(detail || error?.message || fallback);
 }
 
@@ -70,22 +66,23 @@ export function analyzeError(error) {
     }
 
     const titles = {
-        [ErrorCategory.CONNECTION_ERROR]: "Connection Issue",
-        [ErrorCategory.UNKNOWN_ERROR]: "Unexpected Error",
+        [ErrorCategory.CONNECTION_ERROR]: 'Connection Issue',
+        [ErrorCategory.UNKNOWN_ERROR]: 'Unexpected Error',
     };
 
     const suggestions = {
         [ErrorCategory.CONNECTION_ERROR]: [
-            "Wait 60-90 seconds after a container restart, then hard-refresh (Ctrl+Shift+R).",
-            "Try http://127.0.0.1:3000 instead of http://localhost:3000 (Windows IPv6/Docker issue).",
-            "Restart Docker Desktop, then run: docker compose up -d --force-recreate",
-            "Check containers: docker ps --filter name=mensa",
-            "Review backend logs: docker logs mensa_backend --tail 50",
+            'Wait 60-90 seconds after a container restart, then hard-refresh (Ctrl+Shift+R).',
+            'Use http://127.0.0.1:3000 instead of http://localhost:3000.',
+            'Ingestion can block the API for a minute; keep this tab open and wait.',
+            'Restart Docker Desktop, then run: docker compose up -d --force-recreate',
+            'Check containers: docker ps --filter name=pocketpro_nyl',
+            'Review backend logs: docker logs pocketpro_nyl_backend --tail 50',
         ],
         [ErrorCategory.UNKNOWN_ERROR]: [
-            "Check the browser console for more details.",
-            "Try refreshing the page.",
-            "Report this issue if it persists.",
+            'Check the browser console for more details.',
+            'Try refreshing the page.',
+            'Report this issue if it persists.',
         ],
     };
 
