@@ -43,11 +43,11 @@ services:
     networks:
       - pocketpro-nyl-net
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; exit(0) if urllib.request.urlopen('http://127.0.0.1:5000/api/health', timeout=2).getcode() == 200 else exit(1)"]
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1',5000),2); s.close()"]
       interval: 15s
-      timeout: 10s
+      timeout: 5s
       retries: 8
-      start_period: 600s
+      start_period: 60s
     restart: unless-stopped
     user: "root"
 
@@ -58,13 +58,13 @@ services:
       args:
         NODE_VERSION: 22.13.1
         REACT_APP_API_BASE: ""
-        CACHE_BUSTER: ${FRONTEND_CACHE_BUSTER:-20260823c}
+        CACHE_BUSTER: ${FRONTEND_CACHE_BUSTER:-20260823d}
     container_name: pocketpro_nyl_frontend
     ports:
       - "${DOCKER_BIND_HOST:-0.0.0.0}:${FRONTEND_HOST_PORT:-3000}:80"
     depends_on:
       backend:
-        condition: service_healthy
+        condition: service_started
     environment:
       - HOME=/app
       - REACT_APP_API_BASE=
@@ -75,7 +75,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 60s
+      start_period: 20s
     restart: unless-stopped
 
   chroma:

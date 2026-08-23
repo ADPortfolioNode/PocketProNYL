@@ -1,9 +1,9 @@
 {
-  "short_name": "Mensa",
-  "name": "Mensa Suggestion Dashboard",
+  "short_name": "PocketPro:NYL",
+  "name": "PocketPro:NYL Suggestion Dashboard",
   "icons": [],
   "start_url": "/",
   "display": "standalone",
-  "theme_color": "#000000",
+  "theme_color": "#0d6efd",
   "background_color": "#ffffff"
 }

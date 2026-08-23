@@ -1,4 +1,4 @@
-/** Shared training payload + result formatting for Mensa dashboards. */
+/** Shared training payload + result formatting for PocketPro:NYL dashboards. */
 
 import { parseExperimentTimestampMs } from './timestampUtils';
 
@@ -16,7 +16,6 @@ export function formatModelStrategyLabel(strategy) {
   return STRATEGY_LABELS[key] || String(strategy);
 }
 
-/** Human-readable Model Type line for dashboard metadata. */
 export function formatModelTypeLabel({ strategy, blendWeight } = {}) {
   const strategyLabel = formatModelStrategyLabel(strategy);
   if (!strategyLabel) return BASE_MODEL_TYPE;
@@ -32,7 +31,6 @@ export function clampTrainValue(value, min, max, fallback) {
   return Math.min(max, Math.max(min, n));
 }
 
-/** train_size must be a 0.1–0.5 fraction; tolerate legacy percent inputs (e.g. 25 or 254). */
 export function normalizeTrainSizeFraction(value, fallback = 0.25) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
@@ -116,7 +114,6 @@ export function isCompletedTrainingExperiment(exp) {
   return expType === 'training' && (expStatus === 'completed' || expStatus === 'success');
 }
 
-/** Pick the completed training experiment with the highest accuracy (ties: newest). */
 export function pickHighestAccuracyExperiment(experiments, game = null) {
   const gameKey = game ? String(game).toLowerCase() : null;
   const rows = (experiments || []).filter((exp) => {
@@ -163,7 +160,6 @@ export function experimentToTrainParams(experiment) {
   });
 }
 
-/** Merge API recreate defaults with the highest-accuracy experiment snapshot. */
 export function resolveBestTrainParams({
   defaults = {},
   recreateDefaults = {},
@@ -179,7 +175,6 @@ export function resolveBestTrainParams({
   return { ...fromApi, ...fromExperiment };
 }
 
-/** Training dataset freshness vs last successful train. */
 export function trainingDataBadgeClass(status) {
   switch (String(status || '').toLowerCase()) {
     case 'never_trained':
@@ -231,7 +226,7 @@ export function formatTrainingErrorMessage(error, formatApiError) {
       'Backend unavailable during training (HTTP '
       + (status || '502')
       + '). The API container may have restarted or run out of memory on large games like Powerball. '
-      + 'Wait 30s, check docker logs for mensa_backend, then retry with Target Accuracy 85% to 90%, '
+      + 'Wait 30s, check docker logs for pocketpro_nyl_backend, then retry with Target Accuracy 85% to 90%, '
       + 'Max Iterations 10 to 12, N Estimators 150, and Auto-tune off. '
       + 'Also confirm a completed experiment was not already saved.'
     );
