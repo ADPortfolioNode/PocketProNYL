@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+import time
 from state.ingest_state import (
     get_manual_ingest_state,
     enqueue_manual_ingest,
@@ -40,6 +41,16 @@ def get_ingestion_status():
                     state[key] = value
         if not state.get("status"):
             state["status"] = "pending"
+        rows_fetched = int(state.get("rows_fetched") or state.get("current_game_rows_fetched") or 0)
+        total_rows = int(state.get("total_rows") or state.get("current_game_rows_total") or 0)
+        state["rows_fetched"] = rows_fetched
+        state["total_rows"] = total_rows
+        if total_rows > 0:
+            state["percent"] = round(min(100.0, (rows_fetched / total_rows) * 100), 1)
+        elif str(state.get("status")).lower() == "completed":
+            state["percent"] = 100.0
+        else:
+            state["percent"] = 0.0
         game_statuses[game] = state
 
         game_status = str(state.get("status") or "pending").lower()
@@ -50,8 +61,8 @@ def get_ingestion_status():
                 overall_status = "ingesting"
             current_game = current_game or game
             current_task = current_task or state.get("current_task") or game_status
-            current_game_progress = int(state.get("rows_fetched") or current_game_progress or 0)
-            current_game_total = int(state.get("total_rows") or current_game_total or 0)
+            current_game_progress = rows_fetched or current_game_progress
+            current_game_total = total_rows or current_game_total
             active_game_found = True
 
     if completed_count == len(all_games) and len(all_games) > 0:
@@ -65,9 +76,26 @@ def get_ingestion_status():
     except (TypeError, ValueError):
         progress_val = float(completed_count)
 
+    started_at = ss.get("started_at")
+    elapsed_s = ss.get("elapsed_s")
+    if started_at and not elapsed_s:
+        try:
+            elapsed_s = max(0.0, time.time() - float(started_at))
+        except (TypeError, ValueError):
+            elapsed_s = 0
+    elapsed_s = float(elapsed_s or 0)
+
+    total = len(all_games) or 1
+    row_frac = (current_game_progress / current_game_total) if current_game_total > 0 else 0.0
+    if progress_val > completed_count:
+        percent_complete = max(0.0, min(100.0, (progress_val / total) * 100.0))
+    else:
+        percent_complete = max(0.0, min(100.0, ((completed_count + row_frac) / total) * 100.0))
+
     return {
         "status": overall_status,
         "progress": progress_val,
+        "percent_complete": round(percent_complete, 1),
         "total": len(all_games),
         "current_game": current_game,
         "current_task": current_task,
@@ -77,7 +105,8 @@ def get_ingestion_status():
         "current_game_rows_total": current_game_total,
         "games": game_statuses,
         "available_games": all_games,
-        "elapsed_s": ss.get("elapsed_s") or 0,
+        "elapsed_s": elapsed_s,
+        "completed_games": completed_count,
     }
 
 
