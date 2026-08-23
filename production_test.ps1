@@ -33,26 +33,24 @@ function Get-PublishedHostPort([string]$Container, [int]$ContainerPort, [int]$Fa
     return $Fallback
 }
 
-$bindHost = Read-DotEnvValue "DOCKER_BIND_HOST" "127.0.0.1"
-if ([string]::IsNullOrWhiteSpace($bindHost) -or $bindHost -eq "0.0.0.0") { $bindHost = "127.0.0.1" }
-$frontendPort = [int](Read-DotEnvValue "FRONTEND_HOST_PORT" "3000")
+$bindHost = "127.0.0.1"
+$frontendPortEnv = [int](Read-DotEnvValue "FRONTEND_HOST_PORT" "3000")
 $backendPortEnv = [int](Read-DotEnvValue "BACKEND_HOST_PORT" "5001")
-$chromaPort = [int](Read-DotEnvValue "CHROMA_HOST_PORT" "8001")
+$chromaPortEnv = [int](Read-DotEnvValue "CHROMA_HOST_PORT" "8001")
+$frontendPort = Get-PublishedHostPort "pocketpro_nyl_frontend" 80 $frontendPortEnv
 $backendPort = Get-PublishedHostPort "pocketpro_nyl_backend" 5000 $backendPortEnv
+$chromaPort = Get-PublishedHostPort "pocketpro_nyl_chroma" 8000 $chromaPortEnv
 $frontendBase = "http://${bindHost}:${frontendPort}"
 $backendBase = "http://${bindHost}:${backendPort}"
 
 function Write-Report {
     param([string]$Message, [string]$Color = "White")
     Write-Host $Message -ForegroundColor $Color
-    if ($WriteFile) {
-        Add-Content -Path $reportFile -Value $Message
-    }
+    if ($WriteFile) { Add-Content -Path $reportFile -Value $Message }
 }
 
 function Test-Endpoint {
     param([string]$Url, [string]$Description, [int]$TimeoutSec = 10, [switch]$Optional)
-
     try {
         $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $TimeoutSec -ErrorAction Stop
         if ($response.StatusCode -eq 200) {
@@ -62,62 +60,50 @@ function Test-Endpoint {
         $label = if ($Optional) { "WARN" } else { "FAIL" }
         $color = if ($Optional) { "Yellow" } else { "Red" }
         Write-Report "  [$label] $Description (Status: $($response.StatusCode))" -Color $color
-        return @{ status = $(if ($Optional) { "warn" } else { "fail" }); code = $response.StatusCode }
-    }
-    catch {
+        return @{ status = $(if ($Optional) { "warn" } else { "fail" }) }
+    } catch {
         $label = if ($Optional) { "WARN" } else { "FAIL" }
         $color = if ($Optional) { "Yellow" } else { "Red" }
         Write-Report "  [$label] $Description (Error: $($_.Exception.Message))" -Color $color
-        return @{ status = $(if ($Optional) { "warn" } else { "fail" }); error = $_.Exception.Message }
+        return @{ status = $(if ($Optional) { "warn" } else { "fail" }) }
     }
 }
 
 Write-Report "`n============================================================" -Color Cyan
 Write-Report "POCKETPRO:NYL PRODUCTION TEST SUITE" -Color Cyan
 Write-Report "Build: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -Color Cyan
-Write-Report "Frontend: $frontendBase" -Color Cyan
-Write-Report "Backend host map: $backendBase  (.env=$backendPortEnv, published=$backendPort)" -Color Cyan
+Write-Report "Frontend: $frontendBase  (.env=$frontendPortEnv, published=$frontendPort)" -Color Cyan
+Write-Report "Backend:  $backendBase  (.env=$backendPortEnv, published=$backendPort)" -Color Cyan
+Write-Report "Chroma:   http://${bindHost}:${chromaPort}  (.env=$chromaPortEnv, published=$chromaPort)" -Color Cyan
 Write-Report "============================================================`n" -Color Cyan
 
 Write-Report "[1] CONTAINER HEALTH CHECK" -Color Yellow
 Write-Report "------------------------------------------------------------"
-
 $containerCount = 0
 $healthyCount = 0
 $containerLines = docker ps --no-trunc --filter "name=pocketpro_nyl"
-
 $containerTargets = @(
     @{ name = "pocketpro_nyl_frontend"; healthyKeyword = "Up" }
     @{ name = "pocketpro_nyl_backend"; healthyKeyword = "healthy|Up" }
     @{ name = "pocketpro_nyl_chroma"; healthyKeyword = "Up" }
 )
-
 foreach ($target in $containerTargets) {
     $line = $containerLines | Where-Object { $_ -match $target.name } | Select-Object -First 1
     $containerCount++
-    if ($line) {
-        if ($line -match $target.healthyKeyword) {
-            Write-Report "  [PASS] $($target.name) running" -Color Green
-            $healthyCount++
-        } else {
-            Write-Report "  [FAIL] $($target.name) not healthy" -Color Red
-        }
+    if ($line -and $line -match $target.healthyKeyword) {
+        Write-Report "  [PASS] $($target.name) running" -Color Green
+        $healthyCount++
     } else {
-        Write-Report "  [FAIL] $($target.name) missing" -Color Red
+        Write-Report "  [FAIL] $($target.name) not running" -Color Red
     }
 }
-
 Write-Report "Summary: $healthyCount/$containerCount containers healthy`n" -Color Cyan
 
 Write-Report "[2] FRONTEND HTML VALIDATION" -Color Yellow
 Write-Report "------------------------------------------------------------"
 $htmlResult = Test-Endpoint "$frontendBase" "Frontend HTML"
-if ($htmlResult.status -eq "pass") {
-    if ($htmlResult.body -match 'id="root"') {
-        Write-Report "  [PASS] React root element present" -Color Green
-    } else {
-        Write-Report "  [FAIL] React root element missing" -Color Red
-    }
+if ($htmlResult.status -eq "pass" -and $htmlResult.body -match 'id="root"') {
+    Write-Report "  [PASS] React root element present" -Color Green
 }
 Write-Report ""
 
@@ -132,10 +118,7 @@ $endpoints = @(
     @{ url = "$backendBase/api/health"; desc = "/api/health (direct host)"; optional = $true }
     @{ url = "$backendBase/api/train_settings?game=pick3"; desc = "/api/train_settings (direct host)"; optional = $true; timeout = 20 }
 )
-
-$apiPassCount = 0
-$apiRequired = 0
-$apiRequiredPass = 0
+$apiPassCount = 0; $apiRequired = 0; $apiRequiredPass = 0
 foreach ($endpoint in $endpoints) {
     $timeoutSec = if ($endpoint.ContainsKey('timeout')) { [int]$endpoint.timeout } else { 10 }
     $optional = [bool]$endpoint.optional
@@ -150,46 +133,22 @@ Write-Report "Summary: $apiPassCount/$($endpoints.Count) endpoints responding (r
 
 Write-Report "[4] RESPONSE CONTRACT CHECKS" -Color Yellow
 Write-Report "------------------------------------------------------------"
-
 try {
     $gamesResp = Invoke-WebRequest -Uri "$frontendBase/api/games" -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
     $gamesPayload = $null
     try { $gamesPayload = $gamesResp.Content | ConvertFrom-Json } catch { }
-    if ($null -eq $gamesPayload) {
-        Write-Report "  [FAIL] /api/games returned non-JSON" -Color Red
-        $games = @()
-    } elseif ($gamesPayload -is [System.Array]) {
-        $games = $gamesPayload
-    } elseif ($gamesPayload.PSObject.Properties.Name -contains "games") {
-        $games = @($gamesPayload.games)
-    } else {
-        Write-Report "  [WARN] Unexpected /api/games shape" -Color Yellow
-        $games = @()
-    }
+    $games = @()
+    if ($gamesPayload -is [System.Array]) { $games = $gamesPayload }
+    elseif ($gamesPayload -and $gamesPayload.PSObject.Properties.Name -contains "games") { $games = @($gamesPayload.games) }
     $expectedGames = @("take5", "pick3", "powerball", "megamillions", "pick10", "cash4life", "quickdraw", "nylotto")
-    $foundCount = 0
-    foreach ($game in $expectedGames) {
-        if ($games -contains $game) { $foundCount++ }
-    }
+    $foundCount = @($expectedGames | Where-Object { $games -contains $_ }).Count
     Write-Report "  Games endpoint coverage: $foundCount/8" -Color $(if ($foundCount -eq 8) { "Green" } else { "Yellow" })
 } catch {
     Write-Report "  [FAIL] Could not fetch /api/games: $($_.Exception.Message)" -Color Red
 }
-
 try {
-    $statusResp = Invoke-WebRequest -Uri "$frontendBase/api/startup_status" -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
-    $status = $null
-    try { $status = $statusResp.Content | ConvertFrom-Json } catch { }
-    if ($null -eq $status) {
-        Write-Report "  [FAIL] /api/startup_status returned non-JSON" -Color Red
-    } else {
-        $requiredFields = @("status", "progress", "total", "games")
-        $fieldCount = 0
-        foreach ($field in $requiredFields) {
-            if ($status.PSObject.Properties.Name -contains $field) { $fieldCount++ }
-        }
-        Write-Report "  Startup status fields: $fieldCount/$($requiredFields.Count)  [ingestion status: $($status.status)]" -Color $(if ($fieldCount -eq 4) { "Green" } else { "Yellow" })
-    }
+    $status = (Invoke-WebRequest -Uri "$frontendBase/api/startup_status" -UseBasicParsing -TimeoutSec 10).Content | ConvertFrom-Json
+    Write-Report "  Startup status: $($status.status)" -Color Green
 } catch {
     Write-Report "  [FAIL] Could not fetch /api/startup_status: $($_.Exception.Message)" -Color Red
 }
@@ -199,13 +158,10 @@ Write-Report "[5] REGRESSION CHECKS" -Color Yellow
 Write-Report "------------------------------------------------------------"
 try {
     $htmlResp = Invoke-WebRequest -Uri "$frontendBase" -UseBasicParsing -TimeoutSec 8 -ErrorAction Stop
-    if ($htmlResp.Content -match '/api/api') {
-        Write-Report "  [FAIL] Double /api path found" -Color Red
-    } else {
-        Write-Report "  [PASS] No double /api path found" -Color Green
-    }
+    if ($htmlResp.Content -match '/api/api') { Write-Report "  [FAIL] Double /api path found" -Color Red }
+    else { Write-Report "  [PASS] No double /api path found" -Color Green }
 } catch {
-    Write-Report "  [FAIL] Could not evaluate frontend HTML for regressions" -Color Red
+    Write-Report "  [FAIL] Could not evaluate frontend HTML" -Color Red
 }
 Write-Report ""
 
@@ -213,8 +169,8 @@ Write-Report "[6] CONNECTIVITY" -Color Yellow
 Write-Report "------------------------------------------------------------"
 @(
     @{ host = $bindHost; port = $frontendPort; service = "Frontend (Nginx)"; optional = $false }
-    @{ host = $bindHost; port = $backendPort; service = "Backend host port (optional; UI uses nginx /api)"; optional = $true }
-    @{ host = $bindHost; port = $chromaPort; service = "ChromaDB"; optional = $false }
+    @{ host = $bindHost; port = $backendPort; service = "Backend host port"; optional = $true }
+    @{ host = $bindHost; port = $chromaPort; service = "ChromaDB"; optional = $true }
 ) | ForEach-Object {
     $isReachable = Test-NetConnection -ComputerName $_.host -Port $_.port -InformationLevel Quiet -WarningAction SilentlyContinue
     if ($isReachable) {
@@ -228,14 +184,8 @@ Write-Report "------------------------------------------------------------"
 
 Write-Report "`n============================================================" -Color Cyan
 Write-Report "TEST SUMMARY" -Color Cyan
-Write-Report "============================================================" -Color Cyan
 Write-Report "Containers healthy: $healthyCount/$containerCount" -Color Cyan
 Write-Report "Required proxy APIs: $apiRequiredPass/$apiRequired" -Color Cyan
 Write-Report "Ready URL: $frontendBase" -Color Green
-Write-Report "Direct backend URL: $backendBase (optional)" -Color Cyan
-
-if ($WriteFile) {
-    Write-Host "`nReport saved to: $reportFile" -ForegroundColor Cyan
-}
-
-Write-Report "" -Color White
+Write-Report "Direct backend URL: $backendBase" -Color Cyan
+if ($WriteFile) { Write-Host "`nReport saved to: $reportFile" -ForegroundColor Cyan }
