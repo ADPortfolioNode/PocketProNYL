@@ -1,16 +1,9 @@
-# =============================================================================
-# PocketProNYL Project - Local development Docker Compose
-# ============================================================================= # PocketProNYL Project
-# Public web-server / subscriber deployment:
-#   cp .env.production.example .env && ./scripts/deploy-production.sh
-#   See docs/deployment/PUBLIC_DISTRIBUTION.md
-#
-# Safer local bind (loopback only): 
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-# =============================================================================
+# PocketProNYL local stack
+# Host ports default to Windows-safe loopback: 3000 / 5001 / 8001
+# Override with FRONTEND_HOST_PORT, BACKEND_HOST_PORT, CHROMA_HOST_PORT in .env
 
 services:
-  backend: 
+  backend:
     container_name: pocketpro_nyl_backend
     build:
       context: ./backend
@@ -18,48 +11,43 @@ services:
       args:
         CACHE_BUSTER: ${BACKEND_CACHE_BUSTER:-stable}
     ports:
-      - "${DOCKER_BIND_HOST:-0.0.0.0}:${BACKEND_HOST_PORT:-5000}:5000"
+      - "${DOCKER_BIND_HOST:-127.0.0.1}:${BACKEND_HOST_PORT:-5001}:5000"
     environment:
       - DATA_DIR=/data
       - MAX_CONCURRENT_CLONES=3
       - CHROMA_SDK_ENABLED=1
-      - HOME=/app # Ensure appuser's home directory is writable and consistent with WORKDIR
+      - HOME=/app
       - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - CHAT_GPT_API_KEY=${CHAT_GPT_API_KEY} # Deprecated, use OPENAI_API_KEY
+      - CHAT_GPT_API_KEY=${CHAT_GPT_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - GROK_API_KEY=${GROK_API_KEY} 
+      - GROK_API_KEY=${GROK_API_KEY}
       - GROK_API_BASE=${GROK_API_BASE:-https://api.x.ai/v1}
       - GROK_MODEL=${GROK_MODEL:-grok-3-mini-beta}
       - CHROMA_HOST=pocketpro_nyl_chroma
-      - HF_HOME=/app/.cache/chroma # For ChromaDB client embedding models, mounted to volume, within appuser's WORKDIR
+      - HF_HOME=/app/.cache/chroma
       - CHROMA_PORT=8000
-      - INGEST_BATCH_SIZE=6000 # Keep this for manual ingestion
-      - INGEST_REQUEST_TIMEOUT=30 # Keep this for manual ingestion
+      - INGEST_BATCH_SIZE=6000
+      - INGEST_REQUEST_TIMEOUT=30
       - INGEST_MAX_RETRIES=3
       - INGEST_RETRY_DELAY=1
       - INGEST_BATCH_MAX_RETRIES=2
       - INGEST_PROGRESS_INTERVAL_S=0.5
       - INGEST_STATE_SAVE_INTERVAL_S=2
-      # Set to 1 to ensure single-threaded execution of background tasks, avoiding concurrency
-      # issues with in-memory queues in a multi-process development environment.
       - INGEST_STARTUP_COUNT_WORKERS=1
-      # Set to 1 to enable background data ingestion on application startup.
       - INGEST_STARTUP_PARALLEL=1
-      - INGEST_ENABLE_CATALOG_FALLBACK=1 # Use local data catalog as a fail-safe if live API fails
+      - INGEST_ENABLE_CATALOG_FALLBACK=1
       - INGEST_MAX_CATALOG_CANDIDATES=3
       - INGEST_SKIP_FETCH_THRESHOLD=50000
       - INGEST_FAST_COMPLETE_POPULATED=1
-      # --- Ingestion Redesign for Robustness ---
-      - INGEST_STARTUP_BATCH_SIZE=${INGEST_STARTUP_BATCH_SIZE:-500} # Smaller batches during startup to minimize loss on failure
-      - INGEST_STARTUP_BATCH_MAX_RETRIES=${INGEST_STARTUP_BATCH_MAX_RETRIES:-5} # More retries for startup batches
-      - INGEST_QUICK_COMPLETE_THRESHOLD=${INGEST_QUICK_COMPLETE_THRESHOLD:-1000} # Skip full fetch for games with >1000 draws on startup
-      - PREDICTION_ENGINE=modular # PocketPro:NYL Project
-      # Prediction defaults (statistical strategies)
+      - INGEST_STARTUP_BATCH_SIZE=${INGEST_STARTUP_BATCH_SIZE:-500}
+      - INGEST_STARTUP_BATCH_MAX_RETRIES=${INGEST_STARTUP_BATCH_MAX_RETRIES:-5}
+      - INGEST_QUICK_COMPLETE_THRESHOLD=${INGEST_QUICK_COMPLETE_THRESHOLD:-1000}
+      - PREDICTION_ENGINE=modular
       - PREDICTION_HOT_WINDOW=${PREDICTION_HOT_WINDOW:-50}
       - PREDICTION_COLD_WINDOW=${PREDICTION_COLD_WINDOW:-200}
       - PREDICTION_HOT_WEIGHT=${PREDICTION_HOT_WEIGHT:-0.7}
       - PREDICTION_COLD_WEIGHT=${PREDICTION_COLD_WEIGHT:-0.3}
-      - PREDICTION_STATE_DIR=/data/prediction # PocketProNYL Project
+      - PREDICTION_STATE_DIR=/data/prediction
       - TRAIN_TARGET_ACCURACY=0.99
       - TRAIN_MAX_ATTEMPTS=40
       - TRAIN_SIZE=0.33
@@ -74,67 +62,58 @@ services:
     depends_on:
       chroma:
         condition: service_healthy
-    # For development, this MUST be 1 to prevent concurrency issues with the in-memory task queue.
-    # Hardcoding --workers 1 is the most robust way to ensure single-process execution,
-    # ignoring any potentially conflicting HYPERCORN_WORKERS values in local .env files.
     command: sh -c "exec hypercorn main:app --bind 0.0.0.0:5000 --workers 1"
     volumes:
       - backend_data:/data
-      # Persist the ChromaDB ONNX embedding model cache so the 79 MB
-      # all-MiniLM-L6-v2 download does not block HTTP endpoints on every restart # PocketPro:NYL Project
-      - chroma_model_cache:/app/.cache/chroma # Mount to HF_HOME location
+      - chroma_model_cache:/app/.cache/chroma
     networks:
       - pocketpro-nyl-net
-    healthcheck: # Reverting to Python socket check, more reliable as it doesn't depend on curl being installed
-      # Use a more robust healthcheck that verifies the API is responsive, not just the port.
-      # This prevents a race condition where startup is triggered before the app is fully initialized.
+    healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; exit(0) if urllib.request.urlopen('http://127.0.0.1:5000/api/health', timeout=2).getcode() == 200 else exit(1)"]
       interval: 15s
       timeout: 10s
       retries: 8
-      start_period: 600s # Increased to allow more time for backend initialization, especially with startup ingestion
-    deploy:
-      resources:
-        limits:
-          memory: 16G # Increased from 12G to further mitigate OutOfMemoryException during prediction
+      start_period: 600s
     restart: unless-stopped
-    user: "root" # Run as root to fix volume permission issues on /data for training
+    user: "root"
+
   frontend:
-    build: 
+    build:
       context: ./frontend
       dockerfile: Dockerfile
       args:
         NODE_VERSION: 22.13.1
-        REACT_APP_API_BASE: "" # PocketPro:NYL Project
-        CACHE_BUSTER: ${FRONTEND_CACHE_BUSTER:-20260703b}
+        REACT_APP_API_BASE: ""
+        CACHE_BUSTER: ${FRONTEND_CACHE_BUSTER:-20260822}
     container_name: pocketpro_nyl_frontend
-    ports: 
-      - "${DOCKER_BIND_HOST:-0.0.0.0}:${FRONTEND_HOST_PORT:-3000}:80"
-    depends_on: # PocketProNYL Project
+    ports:
+      - "${DOCKER_BIND_HOST:-127.0.0.1}:${FRONTEND_HOST_PORT:-3000}:80"
+    depends_on:
       backend:
         condition: service_healthy
     environment:
       - HOME=/app
-      - CHOKIDAR_USEPOLLING=true # PocketPro:NYL Project
-      - UPDATE_BROWSERSLIST_DB=0 # Suppress caniuse-lite update warning
-      - REACT_APP_API_BASE=http://backend:5000 # Ensure frontend connects to backend service
-    networks: # PocketPro:NYL Project
+      - CHOKIDAR_USEPOLLING=true
+      - UPDATE_BROWSERSLIST_DB=0
+      - REACT_APP_API_BASE=
+    networks:
       - pocketpro-nyl-net
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:80/"]
-      interval: 15s # Check more frequently
-      timeout: 5s   # Fail faster
-      retries: 5    # Allow more transient failures before marking unhealthy
-      start_period: 300s # Increased to give even more time for Nginx and React app to fully initialize and serve static files
-    restart: unless-stopped # PocketProNYL Project
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 300s
+    restart: unless-stopped
+
   chroma:
-    image: chromadb/chroma:0.5.3 # PocketPro:NYL Project
+    image: chromadb/chroma:0.5.3
     container_name: pocketpro_nyl_chroma
     environment:
       - IS_PERSISTENT=TRUE
       - ANONYMIZED_TELEMETRY=FALSE
     ports:
-      - "${DOCKER_BIND_HOST:-0.0.0.0}:${CHROMA_HOST_PORT:-8000}:8000"
+      - "${DOCKER_BIND_HOST:-127.0.0.1}:${CHROMA_HOST_PORT:-8001}:8000"
     volumes:
       - chroma_data:/chroma/chroma
     healthcheck:
@@ -142,14 +121,10 @@ services:
       interval: 30s
       timeout: 30s
       retries: 10
-      start_period: 30s # Reduced from 120s, ChromaDB should start quickly
+      start_period: 30s
     networks:
       - pocketpro-nyl-net
-    deploy:
-      resources:
-        limits:
-          memory: 2G # Add memory limit to prevent OOM kills
-    restart: on-failure # PocketPro:NYL Project
+    restart: on-failure
 
 networks:
   pocketpro-nyl-net:

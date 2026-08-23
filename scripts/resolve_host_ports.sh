@@ -5,7 +5,7 @@ host_port_in_use() {
     local port="$1"
 
     if command -v docker >/dev/null 2>&1; then
-        if docker ps --format '{{.Ports}}' 2>/dev/null | grep -qE "(0\.0\.0\.0|:::|\[::\]):${port}->"; then
+        if docker ps --format '{{.Ports}}' 2>/dev/null | grep -qE "(0\\.0\\.0\\.0|127\\.0\\.0\\.1|:::|\\[::\\]):${port}->"; then
             return 0
         fi
     fi
@@ -112,8 +112,8 @@ resolve_host_port() {
 }
 
 resolve_compose_host_ports() {
-    resolve_compose_host_port BACKEND_HOST_PORT 5000 || return 1
-    resolve_compose_host_port CHROMA_HOST_PORT 8000 || return 1
     resolve_compose_host_port FRONTEND_HOST_PORT 3000 || return 1
+    resolve_compose_host_port BACKEND_HOST_PORT 5001 || return 1
+    resolve_compose_host_port CHROMA_HOST_PORT 8001 || return 1
     return 0
 }
