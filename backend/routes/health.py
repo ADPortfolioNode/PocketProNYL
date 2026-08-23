@@ -16,6 +16,22 @@ class StartupInitRequest(BaseModel):
 
 APP_IS_READY = False
 
+_STATUS_RANK = {
+    "pending": 0,
+    "ready": 1,
+    "queued": 1,
+    "error": 2,
+    "failed": 2,
+    "fetching": 3,
+    "ingesting": 3,
+    "running": 3,
+    "completed": 4,
+}
+
+
+def _status_rank(value) -> int:
+    return _STATUS_RANK.get(str(value or "pending").lower(), 0)
+
 
 def get_ingestion_status():
     """Merge background startup_state with per-game manual queue state."""
@@ -36,17 +52,32 @@ def get_ingestion_status():
         state = dict(startup_games.get(game) or {})
         manual = get_manual_ingest_state(game) or {}
         if manual:
+            man_status = str(manual.get("status") or "").lower()
+            start_status = str(state.get("status") or "").lower()
+            if _status_rank(man_status) > _status_rank(start_status):
+                state["status"] = man_status
             for key, value in manual.items():
-                if value is not None:
+                if key == "status" or value is None:
+                    continue
+                if key in ("rows_fetched", "total_rows") and state.get(key):
+                    try:
+                        state[key] = max(int(state.get(key) or 0), int(value or 0))
+                        continue
+                    except (TypeError, ValueError):
+                        pass
+                if key not in state or state.get(key) in (None, "", 0):
                     state[key] = value
         if not state.get("status"):
             state["status"] = "pending"
+
         rows_fetched = int(state.get("rows_fetched") or state.get("current_game_rows_fetched") or 0)
         total_rows = int(state.get("total_rows") or state.get("current_game_rows_total") or 0)
+        if rows_fetched > total_rows:
+            total_rows = rows_fetched
         state["rows_fetched"] = rows_fetched
         state["total_rows"] = total_rows
         if total_rows > 0:
-            state["percent"] = round(min(100.0, (rows_fetched / total_rows) * 100), 1)
+            state["percent"] = round(min(100.0, (rows_fetched / total_rows) * 100.0), 1)
         elif str(state.get("status")).lower() == "completed":
             state["percent"] = 100.0
         else:
@@ -54,16 +85,29 @@ def get_ingestion_status():
         game_statuses[game] = state
 
         game_status = str(state.get("status") or "pending").lower()
-        if game_status in ("completed",):
+        if game_status == "completed":
             completed_count += 1
         elif game_status in ("ingesting", "running", "queued", "fetching") and not active_game_found:
             if overall_status in ("pending", "ready", "unknown", ""):
                 overall_status = "ingesting"
-            current_game = current_game or game
+            if not current_game:
+                current_game = game
             current_task = current_task or state.get("current_task") or game_status
-            current_game_progress = rows_fetched or current_game_progress
-            current_game_total = total_rows or current_game_total
+            if game == current_game:
+                current_game_progress = max(current_game_progress, rows_fetched)
+                current_game_total = max(current_game_total, total_rows)
             active_game_found = True
+
+    if current_game and current_game in game_statuses:
+        cur = game_statuses[current_game]
+        if _status_rank(cur.get("status")) < _status_rank("ingesting"):
+            cur["status"] = "ingesting"
+        current_game_progress = max(current_game_progress, int(cur.get("rows_fetched") or 0))
+        current_game_total = max(current_game_total, int(cur.get("total_rows") or 0))
+        if current_game_progress > current_game_total:
+            current_game_total = current_game_progress
+            cur["total_rows"] = current_game_total
+        cur["rows_fetched"] = max(int(cur.get("rows_fetched") or 0), current_game_progress)
 
     if completed_count == len(all_games) and len(all_games) > 0:
         overall_status = "completed"
@@ -86,7 +130,9 @@ def get_ingestion_status():
     elapsed_s = float(elapsed_s or 0)
 
     total = len(all_games) or 1
-    row_frac = (current_game_progress / current_game_total) if current_game_total > 0 else 0.0
+    denom = current_game_total if current_game_total > 0 else 0
+    row_frac = (current_game_progress / denom) if denom else 0.0
+    row_frac = max(0.0, min(1.0, row_frac))
     if progress_val > completed_count:
         percent_complete = max(0.0, min(100.0, (progress_val / total) * 100.0))
     else:
@@ -126,8 +172,15 @@ def get_startup_status():
 def trigger_startup_init(request: StartupInitRequest):
     from state.manual_ingest_worker import _start_manual_ingest_worker_if_needed
 
+    ss = get_startup_state() or {}
+    if str(ss.get("status") or "").lower() == "ingesting" and not request.force:
+        return {"status": "already_running", "message": "Ingestion already in progress."}
+
     games_to_ingest = list(GAME_CONFIGS.keys())
     for game_key in games_to_ingest:
+        existing = str((get_startup_state() or {}).get("games", {}).get(game_key, {}).get("status") or "").lower()
+        if existing in ("ingesting", "fetching", "running", "completed") and not request.force:
+            continue
         seq = enqueue_manual_ingest(game_key, force=request.force)
         set_manual_ingest_state(game_key, {
             "status": "queued",
