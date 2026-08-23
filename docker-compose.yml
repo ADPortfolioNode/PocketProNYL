@@ -57,7 +57,7 @@ services:
       args:
         NODE_VERSION: 22.13.1
         REACT_APP_API_BASE: ""
-        CACHE_BUSTER: ${FRONTEND_CACHE_BUSTER:-20260823}
+        CACHE_BUSTER: ${FRONTEND_CACHE_BUSTER:-20260823b}
     container_name: pocketpro_nyl_frontend
     ports:
       - "${DOCKER_BIND_HOST:-0.0.0.0}:${FRONTEND_HOST_PORT:-3000}:80"
@@ -70,11 +70,11 @@ services:
     networks:
       - pocketpro-nyl-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:80/"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 180s
+      start_period: 60s
     restart: unless-stopped
 
   chroma:
