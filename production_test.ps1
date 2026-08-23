@@ -1,5 +1,5 @@
 #!/usr/bin/env powershell
-# MENSA PROJECT PRODUCTION TEST SUITE (ASCII-safe)
+# PocketPro:NYL production test suite (ASCII-safe)
 
 param(
     [switch]$Verbose,
@@ -20,11 +20,25 @@ function Read-DotEnvValue([string]$Name, [string]$Default) {
     return $Default
 }
 
+function Get-PublishedHostPort([string]$Container, [int]$ContainerPort, [int]$Fallback) {
+    try {
+        $raw = docker port $Container "$ContainerPort" 2>$null
+        if ($raw) {
+            $line = ($raw | Select-Object -First 1).ToString().Trim()
+            if ($line -match ':(\d+)\s*$') {
+                return [int]$Matches[1]
+            }
+        }
+    } catch { }
+    return $Fallback
+}
+
 $bindHost = Read-DotEnvValue "DOCKER_BIND_HOST" "127.0.0.1"
-if ([string]::IsNullOrWhiteSpace($bindHost)) { $bindHost = "127.0.0.1" }
+if ([string]::IsNullOrWhiteSpace($bindHost) -or $bindHost -eq "0.0.0.0") { $bindHost = "127.0.0.1" }
 $frontendPort = [int](Read-DotEnvValue "FRONTEND_HOST_PORT" "3000")
-$backendPort = [int](Read-DotEnvValue "BACKEND_HOST_PORT" "5000")
-$chromaPort = [int](Read-DotEnvValue "CHROMA_HOST_PORT" "8000")
+$backendPortEnv = [int](Read-DotEnvValue "BACKEND_HOST_PORT" "5001")
+$chromaPort = [int](Read-DotEnvValue "CHROMA_HOST_PORT" "8001")
+$backendPort = Get-PublishedHostPort "pocketpro_nyl_backend" 5000 $backendPortEnv
 $frontendBase = "http://${bindHost}:${frontendPort}"
 $backendBase = "http://${bindHost}:${backendPort}"
 
@@ -37,7 +51,7 @@ function Write-Report {
 }
 
 function Test-Endpoint {
-    param([string]$Url, [string]$Description, [int]$TimeoutSec = 10)
+    param([string]$Url, [string]$Description, [int]$TimeoutSec = 10, [switch]$Optional)
 
     try {
         $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $TimeoutSec -ErrorAction Stop
@@ -45,19 +59,24 @@ function Test-Endpoint {
             Write-Report "  [PASS] $Description (200 OK)" -Color Green
             return @{ status = "pass"; code = 200; body = $response.Content }
         }
-
-        Write-Report "  [FAIL] $Description (Status: $($response.StatusCode))" -Color Red
-        return @{ status = "fail"; code = $response.StatusCode; body = $response.Content }
+        $label = if ($Optional) { "WARN" } else { "FAIL" }
+        $color = if ($Optional) { "Yellow" } else { "Red" }
+        Write-Report "  [$label] $Description (Status: $($response.StatusCode))" -Color $color
+        return @{ status = $(if ($Optional) { "warn" } else { "fail" }); code = $response.StatusCode }
     }
     catch {
-        Write-Report "  [FAIL] $Description (Error: $($_.Exception.Message))" -Color Red
-        return @{ status = "fail"; error = $_.Exception.Message }
+        $label = if ($Optional) { "WARN" } else { "FAIL" }
+        $color = if ($Optional) { "Yellow" } else { "Red" }
+        Write-Report "  [$label] $Description (Error: $($_.Exception.Message))" -Color $color
+        return @{ status = $(if ($Optional) { "warn" } else { "fail" }); error = $_.Exception.Message }
     }
 }
 
 Write-Report "`n============================================================" -Color Cyan
 Write-Report "POCKETPRO:NYL PRODUCTION TEST SUITE" -Color Cyan
 Write-Report "Build: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -Color Cyan
+Write-Report "Frontend: $frontendBase" -Color Cyan
+Write-Report "Backend host map: $backendBase  (.env=$backendPortEnv, published=$backendPort)" -Color Cyan
 Write-Report "============================================================`n" -Color Cyan
 
 Write-Report "[1] CONTAINER HEALTH CHECK" -Color Yellow
@@ -105,24 +124,29 @@ Write-Report ""
 Write-Report "[3] CRITICAL API ENDPOINTS" -Color Yellow
 Write-Report "------------------------------------------------------------"
 $endpoints = @(
-    @{ url = "$frontendBase/api/health"; desc = "/api/health (proxy)" }
-    @{ url = "$frontendBase/api/games"; desc = "/api/games (proxy)" }
-    @{ url = "$frontendBase/api/startup_status"; desc = "/api/startup_status (proxy)" }
-    @{ url = "$frontendBase/api/chroma/collections"; desc = "/api/chroma/collections (proxy)" }
-    @{ url = "$frontendBase/api/experiments"; desc = "/api/experiments (proxy)" }
-    @{ url = "$backendBase/api/health"; desc = "/api/health (direct)" }
-    @{ url = "$backendBase/api/train_settings?game=pick3"; desc = "/api/train_settings (direct)"; timeout = 20 }
+    @{ url = "$frontendBase/api/health"; desc = "/api/health (proxy)"; optional = $false }
+    @{ url = "$frontendBase/api/games"; desc = "/api/games (proxy)"; optional = $false }
+    @{ url = "$frontendBase/api/startup_status"; desc = "/api/startup_status (proxy)"; optional = $false }
+    @{ url = "$frontendBase/api/chroma/collections"; desc = "/api/chroma/collections (proxy)"; optional = $false }
+    @{ url = "$frontendBase/api/experiments"; desc = "/api/experiments (proxy)"; optional = $false }
+    @{ url = "$backendBase/api/health"; desc = "/api/health (direct host)"; optional = $true }
+    @{ url = "$backendBase/api/train_settings?game=pick3"; desc = "/api/train_settings (direct host)"; optional = $true; timeout = 20 }
 )
 
 $apiPassCount = 0
+$apiRequired = 0
+$apiRequiredPass = 0
 foreach ($endpoint in $endpoints) {
     $timeoutSec = if ($endpoint.ContainsKey('timeout')) { [int]$endpoint.timeout } else { 10 }
-    $result = Test-Endpoint $endpoint.url $endpoint.desc $timeoutSec
+    $optional = [bool]$endpoint.optional
+    if (-not $optional) { $apiRequired++ }
+    $result = Test-Endpoint $endpoint.url $endpoint.desc $timeoutSec -Optional:$optional
     if ($result.status -eq "pass") {
         $apiPassCount++
+        if (-not $optional) { $apiRequiredPass++ }
     }
 }
-Write-Report "Summary: $apiPassCount/$($endpoints.Count) endpoints responding`n" -Color Cyan
+Write-Report "Summary: $apiPassCount/$($endpoints.Count) endpoints responding (required proxy $apiRequiredPass/$apiRequired)`n" -Color Cyan
 
 Write-Report "[4] RESPONSE CONTRACT CHECKS" -Color Yellow
 Write-Report "------------------------------------------------------------"
@@ -132,14 +156,14 @@ try {
     $gamesPayload = $null
     try { $gamesPayload = $gamesResp.Content | ConvertFrom-Json } catch { }
     if ($null -eq $gamesPayload) {
-        Write-Report "  [FAIL] /api/games returned non-JSON: $($gamesResp.Content.Substring(0,[Math]::Min(120,$gamesResp.Content.Length)))" -Color Red
+        Write-Report "  [FAIL] /api/games returned non-JSON" -Color Red
         $games = @()
     } elseif ($gamesPayload -is [System.Array]) {
         $games = $gamesPayload
     } elseif ($gamesPayload.PSObject.Properties.Name -contains "games") {
         $games = @($gamesPayload.games)
     } else {
-        Write-Report "  [WARN] Unexpected /api/games shape: $($gamesResp.Content.Substring(0,[Math]::Min(120,$gamesResp.Content.Length)))" -Color Yellow
+        Write-Report "  [WARN] Unexpected /api/games shape" -Color Yellow
         $games = @()
     }
     $expectedGames = @("take5", "pick3", "powerball", "megamillions", "pick10", "cash4life", "quickdraw", "nylotto")
@@ -157,7 +181,7 @@ try {
     $status = $null
     try { $status = $statusResp.Content | ConvertFrom-Json } catch { }
     if ($null -eq $status) {
-        Write-Report "  [FAIL] /api/startup_status returned non-JSON: $($statusResp.Content.Substring(0,[Math]::Min(120,$statusResp.Content.Length)))" -Color Red
+        Write-Report "  [FAIL] /api/startup_status returned non-JSON" -Color Red
     } else {
         $requiredFields = @("status", "progress", "total", "games")
         $fieldCount = 0
@@ -188,13 +212,15 @@ Write-Report ""
 Write-Report "[6] CONNECTIVITY" -Color Yellow
 Write-Report "------------------------------------------------------------"
 @(
-    @{ host = $bindHost; port = $frontendPort; service = "Frontend (Nginx)" }
-    @{ host = $bindHost; port = $backendPort; service = "Backend (FastAPI)" }
-    @{ host = $bindHost; port = $chromaPort; service = "ChromaDB" }
+    @{ host = $bindHost; port = $frontendPort; service = "Frontend (Nginx)"; optional = $false }
+    @{ host = $bindHost; port = $backendPort; service = "Backend host port (optional; UI uses nginx /api)"; optional = $true }
+    @{ host = $bindHost; port = $chromaPort; service = "ChromaDB"; optional = $false }
 ) | ForEach-Object {
     $isReachable = Test-NetConnection -ComputerName $_.host -Port $_.port -InformationLevel Quiet -WarningAction SilentlyContinue
     if ($isReachable) {
         Write-Report "  [PASS] $($_.service) reachable on $($_.host):$($_.port)" -Color Green
+    } elseif ($_.optional) {
+        Write-Report "  [WARN] $($_.service) not reachable on $($_.host):$($_.port)" -Color Yellow
     } else {
         Write-Report "  [FAIL] $($_.service) not reachable on $($_.host):$($_.port)" -Color Red
     }
@@ -204,9 +230,9 @@ Write-Report "`n============================================================" -C
 Write-Report "TEST SUMMARY" -Color Cyan
 Write-Report "============================================================" -Color Cyan
 Write-Report "Containers healthy: $healthyCount/$containerCount" -Color Cyan
-Write-Report "Critical API endpoints responding: $apiPassCount/$($endpoints.Count)" -Color Cyan
+Write-Report "Required proxy APIs: $apiRequiredPass/$apiRequired" -Color Cyan
 Write-Report "Ready URL: $frontendBase" -Color Green
-Write-Report "Backend URL: $backendBase" -Color Green
+Write-Report "Direct backend URL: $backendBase (optional)" -Color Cyan
 
 if ($WriteFile) {
     Write-Host "`nReport saved to: $reportFile" -ForegroundColor Cyan
