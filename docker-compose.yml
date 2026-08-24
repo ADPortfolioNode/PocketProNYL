@@ -1,6 +1,5 @@
 # PocketProNYL local stack
 # Publish on 0.0.0.0 so Docker Desktop (Windows/WSL2) creates a real host listener.
-# App/tests still use http://127.0.0.1:<port>
 
 services:
   backend:
@@ -10,6 +9,7 @@ services:
       dockerfile: Dockerfile
       args:
         CACHE_BUSTER: ${BACKEND_CACHE_BUSTER:-stable}
+        SKIP_ONNX: "1"
     ports:
       - "${DOCKER_BIND_HOST:-0.0.0.0}:${BACKEND_HOST_PORT:-5001}:5000"
     environment:
@@ -29,6 +29,7 @@ services:
       - INGEST_STARTUP_COUNT_WORKERS=1
       - INGEST_STARTUP_PARALLEL=1
       - INGEST_ENABLE_CATALOG_FALLBACK=0
+      - INGEST_MAX_ROWS_PER_GAME=80000
       - INGEST_STARTUP_BATCH_SIZE=500
       - PREDICTION_ENGINE=modular
       - PREDICTION_STATE_DIR=/data/prediction
