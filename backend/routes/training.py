@@ -1,11 +1,10 @@
-"""
-Training API routes.
-"""
+"""Training API routes."""
 import logging
 import asyncio
 import hashlib
 import json
 import os
+import threading
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
@@ -16,7 +15,7 @@ from utils.validation import _require_game_key
 from config import GAME_CONFIGS
 from services.chroma_client import chroma_client
 from utils.timestamps import normalize_experiment_record, runtime_timestamp_fields
-
+from state.train_jobs import get_job, set_job, list_jobs, is_running
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -86,7 +85,6 @@ def _experiment_timestamp(experiment: dict) -> float:
 
 
 def _last_trained_dataset_snapshot(game_key: str) -> dict:
-    """Best-effort snapshot of the dataset size/hash at last successful training."""
     game_key = str(game_key or "").strip().lower()
     last_count = 0
     last_hash = None
@@ -147,15 +145,6 @@ def _last_trained_dataset_snapshot(game_key: str) -> dict:
 
 
 def _training_data_status(game_key: str, *, incremental: dict | None = None) -> dict:
-    """
-    Compare ingested draw count vs last training snapshot.
-
-    status:
-      - no_data: nothing ingested
-      - never_trained: draws exist but no model trained on them
-      - stale: new draws since last training
-      - current: trained on latest dataset size
-    """
     game_key = str(game_key or "").strip().lower()
     current = _dataset_snapshot(game_key)
     last = _last_trained_dataset_snapshot(game_key)
@@ -218,6 +207,143 @@ def _training_data_status(game_key: str, *, incremental: dict | None = None) -> 
     }
 
 
+def _run_trainer(game_key: str, request: TrainingRequest):
+    if hasattr(trainer_service, "train"):
+        return trainer_service.train(
+            game_key,
+            target_accuracy=request.target_accuracy,
+            max_iterations=request.max_iterations,
+            train_size=request.train_size,
+            n_estimators=request.n_estimators,
+            max_depth=request.max_depth,
+            random_state=request.random_state,
+            blend_step=request.blend_step,
+            window_size=request.window_size,
+            auto_tune=request.auto_tune,
+        )
+    if hasattr(trainer_service, "train_model"):
+        trainer_service.configure_training(
+            target_accuracy=request.target_accuracy,
+            max_iterations=request.max_iterations,
+            train_size=request.train_size,
+            n_estimators=request.n_estimators,
+            max_depth=request.max_depth,
+            random_state=request.random_state,
+            window_size=request.window_size,
+            auto_tune=request.auto_tune,
+            blend_step=request.blend_step,
+        )
+        return trainer_service.train_model(game_key)
+    raise RuntimeError("TrainerService is missing train/train_model methods")
+
+
+def _persist_training_result(game_key: str, request: TrainingRequest, result: dict) -> dict:
+    if result.get("status") == "error":
+        payload = {
+            "status": "error",
+            "game": game_key,
+            "message": result.get("message", "Training failed."),
+            **{k: result.get(k) for k in (
+                "accuracy", "highest_accuracy", "record_accuracy", "baseline_accuracy",
+                "candidate_accuracy", "previous_accuracy", "training_target",  "target_accuracy",
+                "retained_previous_model", "used_previous_training", "training_time",
+            )},
+        }
+        set_job(game_key, payload)
+        return payload
+
+    accuracy = result.get("highest_accuracy") or result.get("record_accuracy") or result.get("accuracy")
+    runtime_ts = runtime_timestamp_fields()
+    experiment_id = f"train-{game_key}-{runtime_ts['timestamp_seconds']}"
+    dataset = _dataset_snapshot(game_key)
+    scored_params = merge_training_params(
+        result.get("best_training_params"),
+        result.get("training_params"),
+        extract_training_params(request.model_dump()),
+        {
+            "train_size": result.get("train_size", request.train_size),
+            "validation_size": result.get("validation_size"),
+            "n_estimators": request.n_estimators,
+            "max_depth": request.max_depth,
+            "random_state": request.random_state,
+            "window_size": request.window_size,
+            "auto_tune": request.auto_tune,
+            "blend_step": request.blend_step,
+            "max_iterations": request.max_iterations,
+            "target_accuracy": result.get("target_accuracy", request.target_accuracy),
+            "training_target": result.get("training_target"),
+            "model_strategy": result.get("model_strategy"),
+            "blend_weight": result.get("blend_weight"),
+        },
+    )
+    exp_store.save_experiment(normalize_experiment_record({
+        "experiment_id": experiment_id,
+        "game": game_key,
+        **runtime_ts,
+        "status": "COMPLETED",
+        "type": "training",
+        "target_accuracy": result.get("target_accuracy", request.target_accuracy),
+        "training_target": result.get("training_target"),
+        "baseline_accuracy": result.get("baseline_accuracy"),
+        "final_accuracy": accuracy,
+        "highest_accuracy": result.get("highest_accuracy", accuracy),
+        "record_accuracy": result.get("record_accuracy", result.get("highest_accuracy", accuracy)),
+        "score": result.get("highest_accuracy", accuracy),
+        "accuracy": result.get("highest_accuracy", accuracy),
+        "iterations": result.get("attempts"),
+        "max_iterations": scored_params.get("max_iterations", request.max_iterations),
+        "training_time": result.get("training_time"),
+        "model_strategy": result.get("model_strategy"),
+        "blend_weight": result.get("blend_weight"),
+        "candidate_accuracy": result.get("candidate_accuracy"),
+        "previous_accuracy": result.get("previous_accuracy"),
+        "retained_previous_model": result.get("retained_previous_model"),
+        "used_previous_training": result.get("used_previous_training"),
+        "message": result.get("message"),
+        "train_size": scored_params.get("train_size", result.get("train_size", request.train_size)),
+        "validation_size": scored_params.get("validation_size", result.get("validation_size")),
+        "n_estimators": scored_params.get("n_estimators", request.n_estimators),
+        "max_depth": scored_params.get("max_depth", request.max_depth),
+        "random_state": scored_params.get("random_state", request.random_state),
+        "window_size": scored_params.get("window_size", request.window_size),
+        "auto_tune": scored_params.get("auto_tune", request.auto_tune),
+        "blend_step": scored_params.get("blend_step", request.blend_step),
+        "data_limit": scored_params.get("data_limit"),
+        "training_params": scored_params,
+        "best_training_params": result.get("best_training_params") or scored_params,
+        "leaderboard": result.get("leaderboard", []),
+        "accuracy_history": result.get("accuracy_history", []),
+        "optimal_config_applied": result.get("optimal_config_applied", False),
+        "optimal_config": result.get("optimal_config", {}),
+        "record_count": dataset.get("record_count"),
+        "dataset_hash": dataset.get("dataset_hash"),
+    }))
+    payload = {
+        **result,
+        "status": "COMPLETED",
+        "game": game_key,
+        "experiment_id": experiment_id,
+        "record_count": dataset.get("record_count"),
+        "dataset_hash": dataset.get("dataset_hash"),
+        "score": accuracy,
+        "accuracy": accuracy,
+        "highest_accuracy": result.get("highest_accuracy", accuracy),
+        "record_accuracy": result.get("record_accuracy", accuracy),
+        "message": result.get("message") or "Training completed.",
+    }
+    set_job(game_key, payload)
+    return payload
+
+
+def _training_worker(game_key: str, request: TrainingRequest):
+    try:
+        result = _run_trainer(game_key, request)
+        _persist_training_result(game_key, request, result)
+    except Exception as exc:
+        logger.exception("Training failed for %s", game_key)
+        set_job(game_key, {"status": "error", "game": game_key, "message": str(exc)})
+
+
 @router.get("/api/train_settings")
 async def get_train_settings(game: str = None):
     defaults = trainer_service.get_training_defaults()
@@ -243,6 +369,7 @@ async def get_train_settings(game: str = None):
             "training_data": training_data,
             "best_training_params": incremental.get("best_training_params") or {},
             "recreate_defaults": recreate_defaults,
+            "job": get_job(game_key),
         }
 
     per_game = {}
@@ -260,6 +387,7 @@ async def get_train_settings(game: str = None):
             "recreate_defaults": incremental.get("recreate_defaults") or {},
             "score_leaderboard": incremental.get("score_leaderboard") or [],
             "training_data": _training_data_status(game_name, incremental=incremental),
+            "job": get_job(game_name),
         }
     return {"game": None, "defaults": defaults, "per_game": per_game}
 
@@ -269,167 +397,43 @@ async def get_train_settings_by_path(game: str):
     return await get_train_settings(game=game)
 
 
+@router.get("/api/train_status")
+async def get_train_status(game: str = None):
+    if game:
+        return get_job(_require_game_key(game))
+    return {"jobs": list_jobs()}
+
+
 @router.post("/api/train")
 async def train_model(request: TrainingRequest):
-    """
-    Train a suggestion model for a specific game.
-    """
     try:
         game_key = _require_game_key(request.game)
+        if is_running(game_key):
+            job = get_job(game_key)
+            return {"status": "already_running", "game": game_key, "message": "Training already in progress.", **job}
 
-        def _run_training():
-            if hasattr(trainer_service, "train"):
-                return trainer_service.train(
-                    game_key,
-                    target_accuracy=request.target_accuracy,
-                    max_iterations=request.max_iterations,
-                    train_size=request.train_size,
-                    n_estimators=request.n_estimators,
-                    max_depth=request.max_depth,
-                    random_state=request.random_state,
-                    blend_step=request.blend_step,
-                    window_size=request.window_size,
-                    auto_tune=request.auto_tune,
-                )
-            if hasattr(trainer_service, "train_model"):
-                trainer_service.configure_training(
-                    target_accuracy=request.target_accuracy,
-                    max_iterations=request.max_iterations,
-                    train_size=request.train_size,
-                    n_estimators=request.n_estimators,
-                    max_depth=request.max_depth,
-                    random_state=request.random_state,
-                    window_size=request.window_size,
-                    auto_tune=request.auto_tune,
-                    blend_step=request.blend_step,
-                )
-                return trainer_service.train_model(game_key)
-            raise RuntimeError("TrainerService is missing train/train_model methods")
-
-        result = await asyncio.to_thread(_run_training)
-
-        if result.get("status") == "error":
-            return {
-                "status": "error",
-                "game": game_key,
-                "message": result.get("message", "Training failed."),
-                "accuracy": result.get("highest_accuracy") or result.get("record_accuracy"),
-                "highest_accuracy": result.get("highest_accuracy"),
-                "record_accuracy": result.get("record_accuracy"),
-                "baseline_accuracy": result.get("baseline_accuracy"),
-                "candidate_accuracy": result.get("candidate_accuracy"),
-                "previous_accuracy": result.get("previous_accuracy"),
-                "training_target": result.get("training_target"),
-                "target_accuracy": result.get("target_accuracy"),
-                "retained_previous_model": result.get("retained_previous_model"),
-                "used_previous_training": result.get("used_previous_training"),
-                "training_time": result.get("training_time"),
-                "leaderboard": result.get("leaderboard", []),
-                "accuracy_history": result.get("accuracy_history", []),
-                "optimal_config_applied": result.get("optimal_config_applied", False),
-                "optimal_config": result.get("optimal_config", {}),
-            }
-
-        accuracy = (
-            result.get("highest_accuracy")
-            or result.get("record_accuracy")
-            or result.get("accuracy")
+        set_job(game_key, {
+            "status": "running",
+            "message": "Training in progress",
+            "target_accuracy": request.target_accuracy,
+            "max_iterations": request.max_iterations,
+        })
+        thread = threading.Thread(
+            target=_training_worker,
+            args=(game_key, request),
+            daemon=True,
+            name=f"train-{game_key}",
         )
-        runtime_ts = runtime_timestamp_fields()
-        experiment_id = f"train-{game_key}-{runtime_ts['timestamp_seconds']}"
-        dataset = _dataset_snapshot(game_key)
-
-        scored_params = merge_training_params(
-            result.get("best_training_params"),
-            result.get("training_params"),
-            extract_training_params(request.model_dump()),
-            {
-                "train_size": result.get("train_size", request.train_size),
-                "validation_size": result.get("validation_size"),
-                "n_estimators": request.n_estimators,
-                "max_depth": request.max_depth,
-                "random_state": request.random_state,
-                "window_size": request.window_size,
-                "auto_tune": request.auto_tune,
-                "blend_step": request.blend_step,
-                "max_iterations": request.max_iterations,
-                "target_accuracy": result.get("target_accuracy", request.target_accuracy),
-                "training_target": result.get("training_target"),
-                "model_strategy": result.get("model_strategy"),
-                "blend_weight": result.get("blend_weight"),
-            },
-        )
-        exp_store.save_experiment(normalize_experiment_record({
-            "experiment_id": experiment_id,
-            "game": game_key,
-            **runtime_ts,
-            "status": "COMPLETED",
-            "type": "training",
-            "target_accuracy": result.get("target_accuracy", request.target_accuracy),
-            "training_target": result.get("training_target"),
-            "baseline_accuracy": result.get("baseline_accuracy"),
-            "final_accuracy": accuracy,
-            "highest_accuracy": result.get("highest_accuracy", accuracy),
-            "record_accuracy": result.get("record_accuracy", result.get("highest_accuracy", accuracy)),
-            "score": result.get("highest_accuracy", accuracy),
-            "accuracy": result.get("highest_accuracy", accuracy),
-            "iterations": result.get("attempts"),
-            "max_iterations": scored_params.get("max_iterations", request.max_iterations),
-            "training_time": result.get("training_time"),
-            "model_strategy": result.get("model_strategy"),
-            "blend_weight": result.get("blend_weight"),
-            "candidate_accuracy": result.get("candidate_accuracy"),
-            "previous_accuracy": result.get("previous_accuracy"),
-            "retained_previous_model": result.get("retained_previous_model"),
-            "used_previous_training": result.get("used_previous_training"),
-            "message": result.get("message"),
-            "train_size": scored_params.get("train_size", result.get("train_size", request.train_size)),
-            "validation_size": scored_params.get("validation_size", result.get("validation_size")),
-            "n_estimators": scored_params.get("n_estimators", request.n_estimators),
-            "max_depth": scored_params.get("max_depth", request.max_depth),
-            "random_state": scored_params.get("random_state", request.random_state),
-            "window_size": scored_params.get("window_size", request.window_size),
-            "auto_tune": scored_params.get("auto_tune", request.auto_tune),
-            "blend_step": scored_params.get("blend_step", request.blend_step),
-            "data_limit": scored_params.get("data_limit"),
-            "training_params": scored_params,
-            "best_training_params": result.get("best_training_params") or scored_params,
-            "leaderboard": result.get("leaderboard", []),
-            "accuracy_history": result.get("accuracy_history", []),
-            "optimal_config_applied": result.get("optimal_config_applied", False),
-            "optimal_config": result.get("optimal_config", {}),
-            "record_count": dataset.get("record_count"),
-            "dataset_hash": dataset.get("dataset_hash"),
-        }))
-
+        thread.start()
         return {
-            **result,
-            "status": "COMPLETED",
+            "status": "started",
             "game": game_key,
-            "experiment_id": experiment_id,
-            "record_count": dataset.get("record_count"),
-            "dataset_hash": dataset.get("dataset_hash"),
-            "training_data": _training_data_status(
-                game_key,
-                incremental=trainer_service.get_incremental_training_context(
-                    game_key,
-                    requested_target=result.get("target_accuracy", request.target_accuracy),
-                ),
-            ),
-            "score": accuracy,
-            "accuracy": accuracy,
-            "highest_accuracy": result.get("highest_accuracy", accuracy),
-            "record_accuracy": result.get("record_accuracy", accuracy),
+            "message": "Training started in the background. Poll /api/train_status.",
         }
-
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        return {
-            "status": "error",
-            "game": request.game,
-            "message": str(e)
-        }
+        return {"status": "error", "game": request.game, "message": str(e)}
 
 
 @router.post("/api/train_all")
