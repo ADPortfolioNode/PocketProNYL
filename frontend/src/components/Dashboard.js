@@ -15,6 +15,7 @@ import chromaStateManager from '../utils/chromaStateManager';
 import { startPolling } from '../utils/polling';
 import { formatApiError } from '../utils/errorUtils';
 import { formatExperimentTimestamp, parseExperimentTimestampMs } from '../utils/timestampUtils';
+import { runTrainingJob } from '../utils/runTrainJob';
 import {
   BASE_MODEL_TYPE,
   buildTrainRequestBody,
@@ -809,14 +810,14 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
     
     const interval = setInterval(() => setTrainProgress(p => Math.min(p + 5, 95)), 2000);
     try {
-      const response = await axios.post(
-        `${API_BASE}/api/train`,
+      const response = { data: await runTrainingJob(
+        axios,
+        API_BASE,
         buildTrainRequestBody(selectedTrainGame, {
           ...trainParams,
           targetAccuracy: effectiveTrainingTarget,
         }),
-        { timeout: 600000 },
-      );
+      ) };
       clearInterval(interval); // Clear interval regardless of outcome
       setTrainProgress(100);
       if (isTrainSuccessStatus(response?.data?.status)) {

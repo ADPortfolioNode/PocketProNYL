@@ -59,7 +59,7 @@ services:
       args:
         NODE_VERSION: 22.13.1
         REACT_APP_API_BASE: ""
-        CACHE_BUSTER: ${FRONTEND_CACHE_BUSTER:-20260823d}
+        CACHE_BUSTER: ${FRONTEND_CACHE_BUSTER:-20260826a}
     container_name: pocketpro_nyl_frontend
     ports:
       - "${DOCKER_BIND_HOST:-0.0.0.0}:${FRONTEND_HOST_PORT:-3000}:80"

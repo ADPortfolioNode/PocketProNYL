@@ -7,6 +7,7 @@ import {
   formatTrainingSuccessMessage,
   isTrainSuccessStatus,
 } from '../utils/trainingUtils';
+import { runTrainingJob } from '../utils/runTrainJob';
 
 const DEFAULT_TRAIN_PARAMS = {
   testSize: 0.25,
@@ -152,11 +153,11 @@ export default function Dashboard() {
     }, 2000);
 
     try {
-      const response = await axios.post(
-        `${API_BASE}/api/train`,
+      const response = { data: await runTrainingJob(
+        axios,
+        API_BASE,
         buildTrainRequestBody(selectedGame, DEFAULT_TRAIN_PARAMS),
-        { timeout: 600000 },
-      );
+      ) };
       
       clearInterval(interval);
       setTrainProgress(100);
