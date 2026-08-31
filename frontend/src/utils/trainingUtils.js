@@ -131,16 +131,23 @@ export function pickHighestAccuracyExperiment(experiments, game = null) {
 }
 
 export function mapApiDefaultsToTrainParams(defaults = {}, prev = {}) {
+  // Use optimized defaults if available, otherwise use regular defaults
+  const optimizedDefaults = defaults.optimized_defaults || {};
+  const effectiveDefaults = defaults.optimization_applied ? optimizedDefaults : defaults;
+  
   return {
-    testSize: normalizeTrainSizeFraction(defaults.train_size ?? prev.testSize ?? 0.25, 0.25),
-    randomState: defaults.random_state ?? prev.randomState ?? 42,
-    nEstimators: normalizeNEstimators(defaults.n_estimators ?? prev.nEstimators ?? 250),
-    maxDepth: normalizeMaxDepth(defaults.max_depth ?? prev.maxDepth ?? 18),
-    maxIterations: normalizeMaxIterations(defaults.max_iterations ?? prev.maxIterations ?? 40),
-    targetAccuracy: defaults.target_accuracy ?? prev.targetAccuracy ?? 0.90,
-    windowSize: defaults.window_size ?? prev.windowSize ?? 3,
-    autoTune: defaults.auto_tune ?? prev.autoTune ?? true,
-    blendStep: defaults.blend_step ?? prev.blendStep ?? 0.05,
+    testSize: normalizeTrainSizeFraction(effectiveDefaults.train_size ?? prev.testSize ?? 0.25, 0.25),
+    randomState: effectiveDefaults.random_state ?? prev.randomState ?? 42,
+    nEstimators: normalizeNEstimators(effectiveDefaults.n_estimators ?? prev.nEstimators ?? 250),
+    maxDepth: normalizeMaxDepth(effectiveDefaults.max_depth ?? prev.maxDepth ?? 18),
+    maxIterations: normalizeMaxIterations(effectiveDefaults.max_iterations ?? prev.maxIterations ?? 40),
+    targetAccuracy: effectiveDefaults.target_accuracy ?? prev.targetAccuracy ?? 0.90,
+    windowSize: effectiveDefaults.window_size ?? prev.windowSize ?? 3,
+    autoTune: effectiveDefaults.auto_tune ?? prev.autoTune ?? true,
+    blendStep: effectiveDefaults.blend_step ?? prev.blendStep ?? 0.05,
+    // Include optimization metadata
+    optimizationApplied: defaults.optimization_applied || false,
+    optimizationReasoning: effectiveDefaults.reasoning || '',
   };
 }
 

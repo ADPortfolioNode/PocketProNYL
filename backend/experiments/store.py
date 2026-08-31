@@ -108,12 +108,29 @@ class ExperimentStore:
                 json.dump([], f)
 
     def list_experiments(self) -> List[Dict[str, Any]]:
-        with open(self.store_path, "r") as f:
-            return json.load(f)
+        try:
+            with open(self.store_path, "r") as f:
+                data = json.load(f)
+            return data if isinstance(data, list) else []
+        except (json.JSONDecodeError, OSError, ValueError):
+            # Recover from a truncated/corrupt write so predictions can still save.
+            return []
+
+    @staticmethod
+    def _json_default(value: Any):
+        """Serialize numpy scalars and other common non-JSON types."""
+        if hasattr(value, "item"):
+            try:
+                return value.item()
+            except Exception:
+                pass
+        if isinstance(value, (set, tuple)):
+            return list(value)
+        return str(value)
 
     def save_experiment(self, experiment_data: Dict[str, Any]):
         experiments = self.list_experiments()
         experiments.append(experiment_data)
         experiments = prune_experiments(experiments)
         with open(self.store_path, "w") as f:
-            json.dump(experiments, f, indent=2)
+            json.dump(experiments, f, indent=2, default=self._json_default)

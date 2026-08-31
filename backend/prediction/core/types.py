@@ -15,6 +15,8 @@ class Draw:
     bonus: list[int] = field(default_factory=list)
     draw_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Explicit calendar date used by suggestion/training filters.
+    date: date | None = None
 
     @property
     def all_numbers(self) -> list[int]:
@@ -22,16 +24,21 @@ class Draw:
 
     @property
     def draw_date(self) -> date | None:
+        if self.date is not None:
+            return self.date
         raw = self.metadata.get("draw_date")
-        if isinstance(raw, date):
+        if isinstance(raw, date) and not isinstance(raw, datetime):
             return raw
         if isinstance(raw, datetime):
             return raw.date()
         if isinstance(raw, str):
             try:
-                return date.fromisoformat(raw)
+                return datetime.fromisoformat(raw.replace("Z", "+00:00")).date()
             except (ValueError, TypeError):
-                pass
+                try:
+                    return date.fromisoformat(raw[:10])
+                except (ValueError, TypeError):
+                    pass
         return None
 
 

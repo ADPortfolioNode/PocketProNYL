@@ -4,6 +4,7 @@ import time
 import os
 import re
 import signal
+import traceback
 from functools import wraps
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 import json # Added for json.dumps
@@ -192,6 +193,11 @@ class IngestService:
         Process a single row from the API, normalize it, and prepare for ChromaDB.
         This method was restored to fix a regression where it was missing.
         """
+        # Validate input type
+        if not isinstance(row_dict, dict):
+            print(f"⚠ Invalid row type for {game}: expected dict, got {type(row_dict).__name__}")
+            return []
+            
         metadata_item = row_dict
         
         # Generate a base ID for records that don't get expanded
@@ -272,19 +278,9 @@ class IngestService:
                 if ' ' in normalized_rec['winning_numbers'] and ',' not in normalized_rec['winning_numbers']:
                     normalized_rec['winning_numbers'] = normalized_rec['winning_numbers'].replace(' ', ',')
 
-            for key, value in list(normalized_rec.items()):
+            for key, value in normalized_rec.items():
                 if isinstance(value, list):
                     normalized_rec[key] = ",".join(map(str, value))
-                elif value is None:
-                    # Chroma metadata rejects NoneType; drop null fields.
-                    normalized_rec.pop(key, None)
-                elif isinstance(value, bool):
-                    continue
-                elif isinstance(value, (int, float, str)):
-                    continue
-                else:
-                    # Fallback: stringify unsupported metadata types
-                    normalized_rec[key] = str(value)
             
             final_records.append((r_id, normalized_rec))
 
@@ -298,13 +294,22 @@ class IngestService:
         total_estimated_game_rows: int = 0,
     ) -> tuple[list[dict], list[str]]:
         """
-        Fetches all rows from a list of paginated API endpoints.
+        Fetches all rows from a list of paginated API endpoints with optimized dynamic batching.
         Returns a tuple of (all_rows, column_names).
         """
-        socrata_page_size = self.batch_size # Use batch_size as page size for Socrata API
+        # Dynamic page size based on estimated dataset size
+        if total_estimated_game_rows > 100000:
+            socrata_page_size = 10000  # Larger pages for big datasets
+        elif total_estimated_game_rows > 10000:
+            socrata_page_size = 5000   # Medium pages for medium datasets
+        else:
+            socrata_page_size = 2000   # Smaller pages for small datasets
+            
         all_fetched_rows = []
         _current_column_names: list[str] = []
         last_progress_at = 0.0
+        consecutive_empty_pages = 0
+        max_consecutive_empty_pages = 3
 
         def _emit_progress(rows_fetched: int, total_rows: int):
             nonlocal last_progress_at
@@ -327,12 +332,17 @@ class IngestService:
                     filtered_query_items.append((key, value))
 
             print(f"[{game.upper()}] Endpoint {endpoint_idx + 1}/{len(endpoints)}: {endpoint}")
+            print(f"[{game.upper()}] Using dynamic page size: {socrata_page_size}")
 
             current_offset = 0
+            total_fetched_for_endpoint = 0
+            
             while True:
                 paginated_query_params = parse_qs(urlencode(filtered_query_items, doseq=True), keep_blank_values=True)
                 paginated_query_params['$limit'] = [socrata_page_size]
                 paginated_query_params['$offset'] = [current_offset]
+                # Add order by ID for consistent pagination
+                paginated_query_params['$order'] = [':id']
                 new_query = urlencode(paginated_query_params, doseq=True)
                 paginated_endpoint = urlunparse(parsed_url._replace(query=new_query))
                 
@@ -341,7 +351,7 @@ class IngestService:
                     response = None
                     data = None
                     try:
-                        print(f"  Fetching from {paginated_endpoint} (attempt {attempt + 1}/{self.max_retries})...")
+                        print(f"  Fetching offset {current_offset} (attempt {attempt + 1}/{self.max_retries})...")
                         response = requests.get(paginated_endpoint, timeout=self.request_timeout)
                         response.raise_for_status()
                         data = response.json()
@@ -389,14 +399,75 @@ class IngestService:
                     print(f"  ✓ Extracted {len(_current_column_names)} column names from payload")
 
                 if not fetched_rows:
-                    print(f"  ✓ No more data from {paginated_endpoint} (offset {current_offset})")
-                    break
+                    consecutive_empty_pages += 1
+                    print(f"  ⚠ Empty page at offset {current_offset} (consecutive empty: {consecutive_empty_pages})")
+                    if consecutive_empty_pages >= max_consecutive_empty_pages:
+                        print(f"  ✓ Reached {max_consecutive_empty_pages} consecutive empty pages, stopping pagination")
+                        break
+                    current_offset += socrata_page_size
+                    continue
                 
+                consecutive_empty_pages = 0  # Reset counter on successful fetch
                 all_fetched_rows.extend(fetched_rows)
+                total_fetched_for_endpoint += len(fetched_rows)
                 _emit_progress(len(all_fetched_rows), total_estimated_game_rows)
+                
+                # Dynamic progress update
+                if total_estimated_game_rows > 0:
+                    progress_pct = (len(all_fetched_rows) / total_estimated_game_rows) * 100
+                    print(f"  ✓ Fetched {len(fetched_rows)} rows (total: {len(all_fetched_rows)}, {progress_pct:.1f}% of estimated)")
+                else:
+                    print(f"  ✓ Fetched {len(fetched_rows)} rows (total: {len(all_fetched_rows)})")
+                
                 current_offset += len(fetched_rows)
+                
+                # Adaptive page size adjustment based on response size
+                if len(fetched_rows) < socrata_page_size * 0.5:
+                    # If we're getting much less than requested, reduce page size
+                    new_page_size = max(500, len(fetched_rows) * 2)
+                    if new_page_size != socrata_page_size:
+                        print(f"  ↳ Adjusting page size: {socrata_page_size} -> {new_page_size}")
+                        socrata_page_size = new_page_size
 
+            print(f"[{game.upper()}] Endpoint {endpoint_idx + 1} complete: {total_fetched_for_endpoint} rows")
+
+        print(f"[{game.upper()}] Total rows fetched across all endpoints: {len(all_fetched_rows)}")
         return all_fetched_rows, _current_column_names
+
+    def _validate_row_data(self, row: dict, game: str, row_index: int) -> tuple[bool, str]:
+        """Validate a single row of data for quality and completeness."""
+        if not isinstance(row, dict):
+            return False, f"Row {row_index}: Not a dict"
+        
+        # Check for required fields based on game configuration
+        game_config = GAME_CONFIGS.get(game, {})
+        required_fields = ['draw_date', 'winning_numbers']
+        
+        missing_fields = []
+        for field in required_fields:
+            if field not in row or not row[field]:
+                missing_fields.append(field)
+        
+        if missing_fields:
+            return False, f"Row {row_index}: Missing required fields: {missing_fields}"
+        
+        # Validate draw_date format
+        draw_date = row.get('draw_date')
+        if draw_date:
+            try:
+                str(draw_date)  # Ensure it can be converted to string
+            except Exception:
+                return False, f"Row {row_index}: Invalid draw_date format"
+        
+        # Validate winning_numbers format
+        winning_numbers = row.get('winning_numbers')
+        if winning_numbers:
+            try:
+                str(winning_numbers)  # Ensure it can be converted to string
+            except Exception:
+                return False, f"Row {row_index}: Invalid winning_numbers format"
+        
+        return True, ""
 
     def _process_rows_from_file(
         self,
@@ -407,10 +478,11 @@ class IngestService:
         column_names: list[str],
         progress_callback=None,
     ) -> tuple[int, int]:
-        """Processes a list of rows from a file and upserts them into ChromaDB."""
+        """Processes a list of rows from a file and upserts them into ChromaDB with real-time validation."""
         chroma_batch_size = self.batch_size
         total_rows_processed_in_run = 0
         rows_added = 0
+        validation_errors = 0
         last_progress_at = 0.0
 
         def _emit_progress(processed: int, total: int):
@@ -422,23 +494,37 @@ class IngestService:
                 progress_callback(processed, total)
                 last_progress_at = now
 
+        # Validate all_rows type
+        if not isinstance(all_rows, list):
+            print(f"⚠ Invalid all_rows type for {game}: expected list, got {type(all_rows).__name__}")
+            print(f"  all_rows preview: {str(all_rows)[:200]}")
+            return 0, 0
+
         for j in range(0, len(all_rows), chroma_batch_size):
             chroma_batch = all_rows[j:j + chroma_batch_size]
             chroma_metadatas, chroma_ids, chroma_documents = [], [], []
 
-            for row in chroma_batch:
-                if isinstance(row, (list, tuple)):
-                    from utils.game_data_parser import _rows_to_dicts
-                    converted = _rows_to_dicts([row], column_names)
-                    if not converted:
-                        continue
-                    row = converted[0]
+            for batch_index, row in enumerate(chroma_batch):
+                # Validate row type before processing
                 if not isinstance(row, dict):
+                    print(f"⚠ Skipping invalid row type in batch: expected dict, got {type(row).__name__}")
+                    print(f"  Row preview: {str(row)[:200]}")
+                    validation_errors += 1
                     continue
+                
+                # Validate row data quality
+                is_valid, error_msg = self._validate_row_data(row, game, j + batch_index)
+                if not is_valid:
+                    print(f"⚠ Skipping invalid row: {error_msg}")
+                    validation_errors += 1
+                    continue
+                    
                 processed_records = self._process_api_row(row, game, column_names, existing_ids)
                 for record_id, record_meta, doc_text in processed_records:
+                    # Filter out None values from metadata to satisfy ChromaDB validation
+                    filtered_meta = {k: v for k, v in record_meta.items() if v is not None}
                     chroma_ids.append(record_id)
-                    chroma_metadatas.append(record_meta)
+                    chroma_metadatas.append(filtered_meta)
                     chroma_documents.append(doc_text)
 
             if not chroma_ids:
@@ -457,6 +543,9 @@ class IngestService:
                         delay = self.retry_delay * (2 ** batch_attempt)
                         print(f"  ⚠ ChromaDB batch failed (attempt {batch_attempt + 1}): {batch_error}; retrying in {delay:.1f}s")
                         time.sleep(delay)
+                    else:
+                        print(f"  ✗ ChromaDB batch failed after {self.batch_max_retries} attempts: {batch_error}")
+                        traceback.print_exc()
 
             if not batch_stored:
                 print(f"  ✗ Error processing batch after {self.batch_max_retries} attempts. Skipping.")
@@ -464,6 +553,9 @@ class IngestService:
 
             total_rows_processed_in_run += len(chroma_ids)
             _emit_progress(total_rows_processed_in_run, len(all_rows))
+
+        if validation_errors > 0:
+            print(f"⚠ [{game.upper()}] Validation completed with {validation_errors} errors out of {len(all_rows)} rows")
 
         return total_rows_processed_in_run, rows_added
 
@@ -512,6 +604,8 @@ class IngestService:
         except Exception as conn_error:
             raise Exception(f"Failed to connect to ChromaDB collection '{collection_name}': {str(conn_error)}")
 
+        import traceback
+
         # --- JSON Caching and Fetching Logic ---
         json_cache_dir = "/data/ingestion_cache"
         os.makedirs(json_cache_dir, exist_ok=True)
@@ -548,13 +642,16 @@ class IngestService:
                     count_response.raise_for_status()
                     count_data = count_response.json()
                     if count_data and isinstance(count_data, list) and len(count_data) > 0:
-                        first = count_data[0]
-                        if isinstance(first, dict):
-                            raw_count = first.get("count", first.get("count(*)", 0))
+                        # Handle case where count_data[0] might be a list instead of dict
+                        first_item = count_data[0]
+                        if isinstance(first_item, dict):
+                            count_for_ep = int(first_item.get('count', 0))
+                        elif isinstance(first_item, (int, float)):
+                            count_for_ep = int(first_item)
                         else:
-                            raw_count = first
-                        count_for_ep = int(raw_count or 0)
+                            count_for_ep = 0
                         total_estimated_game_rows += count_for_ep
+                        print(f"  ✓ Estimated {count_for_ep} rows from endpoint")
                 except Exception as e:
                     print(f"  ⚠ Could not get total row count for an endpoint: {e}.")
             
@@ -583,22 +680,27 @@ class IngestService:
         # --- Processing from Cache or Loaded Data ---
         if not all_rows and os.path.exists(json_path):
             print(f"  ✓ Loading from cached JSON file: {json_path}")
-            with open(json_path, "r") as f:
-                cached_data = json.load(f)
-            if isinstance(cached_data, dict):
-                all_rows = cached_data.get("rows", []) or []
-                column_names = cached_data.get("columns", []) or []
-            elif isinstance(cached_data, list):
-                all_rows = cached_data
+            try:
+                with open(json_path, "r") as f:
+                    cached_data = json.load(f)
+                # Handle case where cached_data might be a list instead of dict
+                if isinstance(cached_data, dict):
+                    all_rows = cached_data.get("rows", [])
+                    column_names = cached_data.get("columns", [])
+                    # Convert rows from lists to dicts if needed
+                    if all_rows and isinstance(all_rows[0], list):
+                        all_rows, column_names = extract_rows_and_columns_util({"data": all_rows, "meta": {"view": {"columns": [{"fieldName": col} for col in column_names]}}})
+                else:
+                    print(f"  ⚠ Corrupted cache file format for {game_key}: expected dict, got {type(cached_data).__name__}")
+                    all_rows = []
+                    column_names = []
+                if progress_callback:
+                    progress_callback(len(all_rows), len(all_rows))
+            except Exception as e:
+                print(f"  ⚠ Failed to load cache file for {game_key}: {e}")
+                traceback.print_exc()
+                all_rows = []
                 column_names = []
-            else:
-                all_rows, column_names = [], []
-            # Ensure rows are dicts (legacy SODA2 list-rows may be cached raw)
-            if all_rows and not isinstance(all_rows[0], dict):
-                from utils.game_data_parser import _rows_to_dicts
-                all_rows = _rows_to_dicts(all_rows, column_names)
-            if progress_callback:
-                progress_callback(len(all_rows), len(all_rows))
 
         if not all_rows:
             raise Exception(f"No data was successfully ingested for game '{game_key}'. Check backend logs for details.")
@@ -613,21 +715,31 @@ class IngestService:
                 if existing_count <= self.max_id_preload:
                     try:
                         existing_payload = collection.get(include=[])
-                        existing_ids = set(existing_payload.get("ids") or [])
+                        # Handle case where get() might return a list instead of dict
+                        if isinstance(existing_payload, dict):
+                            existing_ids = set(existing_payload.get("ids") or [])
+                        else:
+                            existing_ids = set()
                         print(f"  ✓ Loaded {len(existing_ids)} existing IDs for dedupe")
                     except Exception as e:
                         print(f"  ⚠ Could not pre-load existing IDs ({e}); falling back to upsert-only sync")
+                        traceback.print_exc()
                 else:
                     print(f"  ↳ Skipping ID preload ({existing_count} > {self.max_id_preload}); upsert dedupe only")
 
-        total_rows_processed, total_rows_added = self._process_rows_from_file(
-            game=game_key,
-            all_rows=all_rows,
-            collection=collection,
-            existing_ids=existing_ids,
-            column_names=column_names,
-            progress_callback=progress_callback,
-        )
+        try:
+            total_rows_processed, total_rows_added = self._process_rows_from_file(
+                game=game_key,
+                all_rows=all_rows,
+                collection=collection,
+                existing_ids=existing_ids,
+                column_names=column_names,
+                progress_callback=progress_callback,
+            )
+        except Exception as process_error:
+            print(f"❌ [{game_key.upper()}] Failed to process rows: {process_error}")
+            traceback.print_exc()
+            raise
 
         # --- Finalization ---
         final_total = max(existing_count + total_rows_added, existing_count, total_rows_processed)
@@ -648,8 +760,13 @@ class IngestService:
         if total_rows_added > 0 and os.environ.get("PREDICTION_ENGINE", "modular").lower() != "legacy":
             try:
                 latest = chroma_repository.get_documents(collection_name, limit=1, include=["metadatas", "ids"])
-                metas = latest.get("metadatas") or []
-                ids = latest.get("ids") or []
+                # Handle case where get_documents might return a list instead of dict
+                if isinstance(latest, dict):
+                    metas = latest.get("metadatas") or []
+                    ids = latest.get("ids") or []
+                else:
+                    metas = []
+                    ids = []
                 if metas:
                     from prediction.adapter_hooks import on_new_draw_metadata
                     on_new_draw_metadata(game_key, metas[0], ids[0] if ids else None)

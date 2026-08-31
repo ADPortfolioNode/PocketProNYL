@@ -46,10 +46,51 @@ class PredictorService:
         return None
 
     def _get_rules(self, game_key: str) -> Dict[str, Any]:
-        """Helper to get game rules, falling back to an empty dict."""
-        # This is a placeholder for a more robust implementation if needed.
-        # For now, it mirrors the behavior of the original code.
-        return GAME_CONFIGS.get(game_key, {}).get("rules", {})
+        """Return merged game rules from GAME_CONFIGS."""
+        return get_game_rules(game_key)
+
+    def _normalize_prediction_metadata(self, meta: dict, game_key: str) -> list[dict]:
+        """
+        Normalize Chroma metadata into one-or-more draw records.
+
+        Take 5 NY Open Data stores midday/evening boards in separate fields
+        instead of a single winning_numbers column.
+        """
+        if not isinstance(meta, dict):
+            return []
+
+        base = dict(meta)
+        # Normalize space-separated boards to comma-separated.
+        for key, value in list(base.items()):
+            if isinstance(value, str) and "winning" in key.lower() and "number" in key.lower():
+                if " " in value and "," not in value:
+                    base[key] = value.replace(" ", ",")
+
+        game = str(game_key or "").lower()
+        if game == "take5":
+            records: list[dict] = []
+            for session_key, session_name in (
+                ("midday_winning_numbers", "midday"),
+                ("evening_winning_numbers", "evening"),
+            ):
+                raw = base.get(session_key)
+                if not raw:
+                    continue
+                row = dict(base)
+                row["winning_numbers"] = raw
+                row["draw_session"] = session_name
+                records.append(row)
+            if records:
+                return records
+            # Fallback: some rows only have a generic winning_numbers field.
+            if base.get("winning_numbers"):
+                return [base]
+            return []
+
+        if "winning_numbers" in base and isinstance(base["winning_numbers"], str):
+            if " " in base["winning_numbers"] and "," not in base["winning_numbers"]:
+                base["winning_numbers"] = base["winning_numbers"].replace(" ", ",")
+        return [base]
 
     def _current_prediction_datetime(self):
         try:
@@ -172,12 +213,21 @@ class PredictorService:
 
         main_values = [max(main_min, min(main_max, int(np.round(value)))) for value in normalized[:main_count]]
         if format_spec.get("unique_main", False):
-            main_values = list(np.unique(main_values)) # Simpler way to ensure uniqueness
+            # np.unique returns numpy scalars; coerce back to plain Python ints for JSON.
+            seen = set()
+            unique_mains: list[int] = []
+            for value in main_values:
+                if value not in seen:
+                    seen.add(value)
+                    unique_mains.append(int(value))
+            main_values = unique_mains
         if format_spec.get("sort_main", False):
-            main_values = sorted(main_values)
+            main_values = sorted(int(v) for v in main_values)
+        else:
+            main_values = [int(v) for v in main_values]
 
         bonus_values = [
-            max(bonus_min, min(bonus_max, int(np.round(value))))
+            int(max(bonus_min, min(bonus_max, int(np.round(value)))))
             for value in normalized[main_count:main_count + bonus_count]
         ]
 
@@ -189,7 +239,7 @@ class PredictorService:
             "has_bonus": bonus_count > 0,
         }
 
-        return formatted, main_values + bonus_values
+        return formatted, [int(v) for v in (main_values + bonus_values)]
 
     def _predict_from_artifact(self, artifact: dict, X):
         model_strategy = str((artifact or {}).get("model_strategy", "single"))
@@ -264,7 +314,7 @@ class PredictorService:
         self,
         game: str,
         recent_k: int = 10,
-        strategy: str = "rf",
+        strategy: Optional[str] = "rf",
         target_draw_date_str: Optional[str] = None,
         hot_window: Optional[int] = None,
         cold_window: Optional[int] = None,
@@ -328,42 +378,78 @@ class PredictorService:
             if not draw_date_str_meta:
                 continue
             try:
-                draw_date_obj = datetime.fromisoformat(draw_date_str_meta).date()
-                # Use <= to include draws from the target date. This is necessary for
-                # statistical analysis and for predicting subsequent draws on the same day.
-                if draw_date_obj <= target_draw_date:
-                    # FIX: Use imported utility to create Draw object directly
-                    # The original call to self._metadata_to_draw would fail as the method does not exist. # PocketProNYL Project
-                    
-                    # Defensively normalize the metadata before parsing. This handles cases where
-                    # older, space-separated 'winning_numbers' data exists in the database.
-                    normalized_meta = meta.copy()
-                    if 'winning_numbers' in normalized_meta and isinstance(normalized_meta['winning_numbers'], str):
-                        if ' ' in normalized_meta['winning_numbers'] and ',' not in normalized_meta['winning_numbers']:
-                            normalized_meta['winning_numbers'] = normalized_meta['winning_numbers'].replace(' ', ',')
-                    
+                draw_date_obj = datetime.fromisoformat(
+                    str(draw_date_str_meta).replace("Z", "+00:00")
+                ).date()
+            except (ValueError, TypeError):
+                try:
+                    draw_date_obj = datetime.strptime(str(draw_date_str_meta)[:10], "%Y-%m-%d").date()
+                except (ValueError, TypeError):
+                    continue
+
+            # Use <= to include draws from the target date.
+            if draw_date_obj > target_draw_date:
+                continue
+
+            for normalized_meta in self._normalize_prediction_metadata(meta, game_key):
+                try:
                     numbers = extract_record_sequence_util(normalized_meta, game_key)
                     if not numbers:
                         continue
-                    primary_count = int(rules.get("primary_count", 0))
+                    primary_count = int(rules.get("primary_count", 0) or 0)
+                    if primary_count <= 0 or len(numbers) < primary_count:
+                        continue
                     primary = numbers[:primary_count]
                     bonus = numbers[primary_count:]
-                    draw_obj = Draw(date=draw_date_obj, primary=primary, bonus=bonus)
-                    if draw_obj:
-                        history_for_strategy.append(draw_obj)
-            except (ValueError, TypeError):
-                continue
+                    # Take5 suggestion format is 5 mains / no bonus even if config lists bonus_keys.
+                    fmt = GAME_PREDICTION_FORMATS.get(game_key) or {}
+                    if int(fmt.get("bonus_count") or 0) <= 0:
+                        bonus = []
+                    history_for_strategy.append(
+                        Draw(
+                            primary=primary,
+                            bonus=bonus,
+                            date=draw_date_obj,
+                            metadata={
+                                **normalized_meta,
+                                "draw_date": draw_date_obj.isoformat(),
+                            },
+                        )
+                    )
+                except (ValueError, TypeError):
+                    continue
 
         if not history_for_strategy:
             return {"status": "error", "message": f"No historical draws found on or before {target_draw_date.isoformat()}."}
 
-        # Dispatch based on strategy
-        strategy_lower = strategy.lower()
+        # Dispatch based on strategy (UI often omits strategy → treat as RF with statistical fallback)
+        strategy_lower = str(strategy or "rf").strip().lower() or "rf"
         if strategy_lower in ("rf", "ensemble", "ensemble_hot_cold"):
-            return self._predict_with_rf_model(
+            rf_result = self._predict_with_rf_model(
                 game_key, recent_k, strategy_lower, target_draw_date, generated_at, history_for_strategy, rules,
                 hot_window=resolved_hot_window, cold_window=resolved_cold_window, hot_weight=resolved_hot_weight, cold_weight=resolved_cold_weight
             )
+            if isinstance(rf_result, dict) and rf_result.get("status") == "success":
+                return rf_result
+            # No trained model (or RF path failed): fall back so Suggest still returns numbers.
+            fallback = self._predict_with_statistical_strategy(
+                game_key, "frequency", target_draw_date, generated_at, history_for_strategy, rules, window=recent_k,
+                hot_window=resolved_hot_window, cold_window=resolved_cold_window, hot_weight=resolved_hot_weight, cold_weight=resolved_cold_weight
+            )
+            if isinstance(fallback, dict) and fallback.get("status") == "success":
+                rf_message = ""
+                if isinstance(rf_result, dict):
+                    rf_message = str(rf_result.get("message") or "").strip()
+                fallback["strategy_used"] = "frequency"
+                fallback["fallback_from"] = strategy_lower
+                if rf_message:
+                    fallback["fallback_reason"] = rf_message
+                for item in fallback.get("prediction_session") or []:
+                    if isinstance(item, dict):
+                        item["strategy_used"] = "frequency"
+                        item["fallback_from"] = strategy_lower
+                return fallback
+            return rf_result if isinstance(rf_result, dict) else fallback
         elif strategy_lower in ("frequency", "overdue", "hybrid", "hot_cold"):
             return self._predict_with_statistical_strategy(
                 game_key, strategy_lower, target_draw_date, generated_at, history_for_strategy, rules, window=recent_k, 
@@ -371,6 +457,66 @@ class PredictorService:
             )
         else:
             return {"status": "error", "message": f"Unknown prediction strategy: {strategy}"}
+
+    def _suggestion_counts(self, game_key: str, rules: Dict[str, Any]) -> tuple[int, int, int, int]:
+        """Return (primary_count, bonus_count, bonus_min, bonus_max) for suggestion output shape."""
+        format_spec = GAME_PREDICTION_FORMATS.get(game_key) or {}
+        primary_count = int(
+            format_spec.get("main_count", rules.get("primary_count", 5)) or 5
+        )
+        bonus_count = int(
+            format_spec.get("bonus_count", rules.get("bonus_count", 0)) or 0
+        )
+        bonus_min = int(
+            format_spec.get("bonus_min", rules.get("bonus_min", 1)) or 1
+        )
+        bonus_max = int(
+            format_spec.get("bonus_max", rules.get("bonus_max", 99)) or 99
+        )
+        return primary_count, bonus_count, bonus_min, bonus_max
+
+    def _select_bonus_numbers(
+        self,
+        history: List[Draw],
+        bonus_count: int,
+        bonus_min: int,
+        bonus_max: int,
+        window: int,
+        exclude: Optional[List[int]] = None,
+    ) -> List[int]:
+        """Pick bonus balls from recent bonus history (frequency), falling back to range fill."""
+        if bonus_count <= 0:
+            return []
+        exclude_set = set(int(n) for n in (exclude or []))
+        recent = history[-max(1, int(window or 1)) :]
+        from collections import Counter
+
+        counts: Counter = Counter()
+        for draw in recent:
+            for num in draw.bonus or []:
+                try:
+                    value = int(num)
+                except (TypeError, ValueError):
+                    continue
+                if bonus_min <= value <= bonus_max and value not in exclude_set:
+                    counts[value] += 1
+
+        ranked = [num for num, _ in counts.most_common()]
+        picks: List[int] = []
+        for num in ranked:
+            if num not in picks:
+                picks.append(int(num))
+            if len(picks) >= bonus_count:
+                break
+
+        if len(picks) < bonus_count:
+            for candidate in range(bonus_min, bonus_max + 1):
+                if candidate in exclude_set or candidate in picks:
+                    continue
+                picks.append(candidate)
+                if len(picks) >= bonus_count:
+                    break
+        return picks[:bonus_count]
 
     def _predict_with_statistical_strategy(
         self,
@@ -388,29 +534,58 @@ class PredictorService:
         freq_weight: float = 0.6,
     ):
         """Generates lottery number suggestions using pure statistical strategies."""
-        primary_count = int(rules.get("primary_count", 5))
-        bonus_count = int(rules.get("bonus_count", 0) or 0)
-        
+        primary_count, bonus_count, bonus_min, bonus_max = self._suggestion_counts(
+            game_key, rules
+        )
+        # Score against full primary universe from GAME_CONFIGS, but select suggestion-sized ticket.
+        scoring_rules = dict(rules)
+        scoring_rules["primary_count"] = primary_count
+
         scores: Dict[int, float] = {}
         if strategy == "frequency":
-            scores = score_frequency(history, rules, window=window)
+            scores = score_frequency(history, scoring_rules, window=window)
         elif strategy == "overdue":
-            scores = score_overdue(history, rules)
+            scores = score_overdue(history, scoring_rules)
         elif strategy == "hybrid":
-            scores = score_hybrid(history, rules, window=window, freq_weight=freq_weight)
+            scores = score_hybrid(history, scoring_rules, window=window, freq_weight=freq_weight)
         elif strategy == "hot_cold":
-            scores = score_hot_cold(history, rules, hot_window=hot_window, cold_window=cold_window, hot_weight=hot_weight, cold_weight=cold_weight)
-        
+            scores = score_hot_cold(
+                history,
+                scoring_rules,
+                hot_window=hot_window,
+                cold_window=cold_window,
+                hot_weight=hot_weight,
+                cold_weight=cold_weight,
+            )
+
         if not scores:
             return {"status": "error", "message": f"Could not generate scores for strategy '{strategy}'."}
 
-        suggested_numbers = select_top_numbers(scores, rules)
-        
-        # Split into primary and bonus based on rules
-        primary_numbers = suggested_numbers[:primary_count]
-        bonus_numbers = suggested_numbers[primary_count:] if bonus_count > 0 else []
+        primary_numbers = [int(n) for n in select_top_numbers(scores, scoring_rules)]
+        # Bonus balls are scored separately from historical bonus fields (not sliced from mains).
+        bonus_numbers = self._select_bonus_numbers(
+            history,
+            bonus_count=bonus_count,
+            bonus_min=bonus_min,
+            bonus_max=bonus_max,
+            window=window,
+            exclude=primary_numbers if game_key in ("nylotto", "take5") else None,
+        )
+        suggested_numbers = primary_numbers + bonus_numbers
 
-        formatted_prediction, normalized_flat = self._format_prediction(game_key, suggested_numbers)
+        formatted_prediction, normalized_flat = self._format_prediction(
+            game_key, suggested_numbers
+        )
+        # Prefer formatter output (respects GAME_PREDICTION_FORMATS) when present.
+        if isinstance(formatted_prediction, dict):
+            mains_fmt = formatted_prediction.get("main_numbers")
+            bonus_fmt = formatted_prediction.get("bonus_numbers")
+            if isinstance(mains_fmt, list) and mains_fmt:
+                primary_numbers = [int(n) for n in mains_fmt]
+            if isinstance(bonus_fmt, list):
+                bonus_numbers = [int(n) for n in bonus_fmt]
+            suggested_numbers = primary_numbers + bonus_numbers
+            normalized_flat = [int(n) for n in (primary_numbers + bonus_numbers)]
 
         session_predictions = [{
             "draw_index": 1,

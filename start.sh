@@ -195,11 +195,12 @@ assign_resolved_ports() {
 
 trigger_startup_init() {
     local backend_url="http://${BIND_HOST_FOR_CURL}:${BACKEND_PORT}"
+    # Keep Chroma history across rebuilds. Only --reset forces a full re-ingest.
     local force_payload='{"force": false}'
-    local message="==> Triggering backend startup initialization at ${backend_url}/api/startup_init"
+    local message="==> Triggering backend startup initialization at ${backend_url}/api/startup_init (keep existing draws)"
 
-    if [ "${BUILD}" = true ]; then
-        message="==> Triggering backend startup with FULL DATA REFRESH (force=true)..."
+    if [ "${RESET_REQUESTED}" = true ]; then
+        message="==> Triggering backend startup with FULL DATA REFRESH (force=true) because --reset was set..."
         force_payload='{"force": true}'
     fi
     echo "$message"

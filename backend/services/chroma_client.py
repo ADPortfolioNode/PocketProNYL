@@ -180,7 +180,14 @@ class ChromaClient:
                 continue
             if snapshot["state"] == "unknown":
                 snapshot["state"] = "exists"
-            if refresh or (snapshot["state"] == "exists" and snapshot["count"] <= 0):
+            # Always refresh when cache says 0/missing so UI/startup verification
+            # cannot hide real Chroma history behind a stale zero cache.
+            needs_live = (
+                refresh
+                or snapshot["count"] <= 0
+                or snapshot["state"] in ("unknown", "exists", "empty")
+            )
+            if needs_live:
                 live_count = self._live_count(name, timeout_seconds=min(timeout_seconds, CHROMA_REST_TIMEOUT))
                 if live_count > 0:
                     snapshot["count"] = int(live_count)

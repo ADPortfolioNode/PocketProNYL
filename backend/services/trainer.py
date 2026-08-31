@@ -51,19 +51,47 @@ class TrainerService:
         self.auto_tune = str(os.environ.get("TRAIN_AUTO_TUNE", "1")).lower() not in ("0", "false", "no")
 
     @staticmethod
-    def get_training_defaults():
-        return {
-            "target_accuracy": 0.90,
-            "max_iterations": 40,
-            "train_size": 0.25,
-            "n_estimators": 250,
-            "max_depth": 18,
-            "random_state": 42,
-            "blend_step": 0.05,
-            "data_limit": 0,
-            "window_size": 3,
-            "auto_tune": True,
-        }
+    def get_training_defaults(game: str | None = None):
+        """Return baseline or game-optimized training knobs."""
+        try:
+            from utils.training_defaults import (
+                get_base_training_defaults,
+                get_game_training_defaults,
+            )
+            if game:
+                defaults = get_game_training_defaults(game)
+            else:
+                defaults = get_base_training_defaults()
+            # Strip UI-only fields from trainer runtime knobs
+            return {
+                key: defaults[key]
+                for key in (
+                    "target_accuracy",
+                    "max_iterations",
+                    "train_size",
+                    "n_estimators",
+                    "max_depth",
+                    "random_state",
+                    "blend_step",
+                    "data_limit",
+                    "window_size",
+                    "auto_tune",
+                )
+                if key in defaults
+            }
+        except Exception:
+            return {
+                "target_accuracy": 0.90,
+                "max_iterations": 40,
+                "train_size": 0.25,
+                "n_estimators": 250,
+                "max_depth": 18,
+                "random_state": 42,
+                "blend_step": 0.05,
+                "data_limit": 0,
+                "window_size": 3,
+                "auto_tune": True,
+            }
 
     @staticmethod
     def _uses_modular_engine() -> bool:

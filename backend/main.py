@@ -25,14 +25,20 @@ async def _deferred_lm_audit():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import asyncio
+    import os
 
-    print("PocketPro:NYL backend starting up...")
+    print("PocketPro:NYL backend starting up...", flush=True)
+    # Mark ready first so /api/health responds even if ingest/LM work is slow.
+    health.APP_IS_READY = True
     install_capped_fetch(ingest_service)
     asyncio.create_task(_deferred_lm_audit())
-    start_background_ingestion()
-    health.APP_IS_READY = True
+    # Startup ingest loads embeddings and can wedge low-RAM hosts; allow skip.
+    if os.getenv("SKIP_STARTUP_INGEST", "0") != "1":
+        start_background_ingestion()
+    else:
+        print("SKIP_STARTUP_INGEST=1 — background ingest not started", flush=True)
     yield
-    print("PocketPro:NYL backend shutting down...")
+    print("PocketPro:NYL backend shutting down...", flush=True)
 
 
 app = FastAPI(lifespan=lifespan)

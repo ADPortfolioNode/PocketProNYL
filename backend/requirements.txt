@@ -29,6 +29,7 @@ opentelemetry-util-http==0.48b0
 opentelemetry-exporter-otlp-proto-common==1.27.0
 opentelemetry-exporter-otlp-proto-grpc==1.27.0
 packaging<24.0,>=23.2 # Pinned to resolve conflict with langchain-core
+hypercorn[standard]>=0.17.3,<0.18.0
 
 # AI/LLM Clients
 openai==1.35.3

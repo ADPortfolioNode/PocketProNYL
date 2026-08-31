@@ -1,13 +1,13 @@
 """
-Games API routes.
+Games API routes — dynamic catalog driven by config + live draw data.
 """
 import asyncio
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from pydantic import BaseModel
-from config import GAME_CONFIGS, GAME_TITLES, resolve_game_key
-from services.chroma_client import chroma_client
+from utils.game_catalog import get_game_catalog, get_game_detail
 from utils.validation import _require_game_key
+from services.chroma_client import chroma_client
 
 
 router = APIRouter()
@@ -18,52 +18,71 @@ CHROMA_QUERY_TIMEOUT = 8.0
 class GameSummaryResponse(BaseModel):
     game: str
     draw_count: int
+    title: str | None = None
+    has_draws: bool | None = None
+    ready_for_training: bool | None = None
+    ready_for_suggestions: bool | None = None
 
 
 @router.get("/api/games")
-async def get_games():
+async def get_games(refresh: bool = Query(False, description="Refresh live Chroma draw counts")):
     """
-    Returns list of available games for ingestion.
+    Dynamically list all configured games with rules, suggestion formats,
+    schedules, draw counts, and rule-derived training defaults.
     """
-    game_names = list(GAME_CONFIGS.keys())
-    return {
-        "games": game_names,
-        "titles": {game: GAME_TITLES.get(game, game) for game in game_names},
-    }
+    try:
+        catalog = await asyncio.wait_for(
+            asyncio.to_thread(get_game_catalog, refresh_counts=refresh),
+            timeout=CHROMA_QUERY_TIMEOUT + 2.0,
+        )
+    except asyncio.TimeoutError:
+        catalog = get_game_catalog(refresh_counts=False)
+        catalog["warning"] = "draw_count_refresh_timeout"
+    return catalog
 
 
 @router.get("/api/games/summaries")
 async def get_all_game_summaries(refresh: bool = False):
     """
-    Return draw counts for all games in one non-blocking request.
-    Pass refresh=true to bypass cached draw totals and re-query Chroma.
+    Return draw counts (+ readiness) for all games in one request.
     """
-    game_names = list(GAME_CONFIGS.keys())
     try:
-        snapshots = await asyncio.wait_for(
-            asyncio.to_thread(
-                chroma_client.get_collections_snapshot,
-                game_names,
-                CHROMA_QUERY_TIMEOUT,
-                refresh,
-            ),
-            timeout=CHROMA_QUERY_TIMEOUT,
+        catalog = await asyncio.wait_for(
+            asyncio.to_thread(get_game_catalog, refresh_counts=refresh),
+            timeout=CHROMA_QUERY_TIMEOUT + 2.0,
         )
     except asyncio.TimeoutError:
-        snapshots = [
-            {"name": game, "count": 0, "state": "timeout"}
-            for game in game_names
-        ]
-    summaries = {
-        snap["name"]: {
-            "game": snap["name"],
-            "draw_count": int(snap.get("count") or 0),
+        catalog = get_game_catalog(refresh_counts=False)
+
+    summaries = {}
+    for entry in catalog.get("catalog") or []:
+        key = entry["key"]
+        summaries[key] = {
+            "game": key,
+            "title": entry.get("title") or key,
+            "draw_count": int(entry.get("draw_count") or 0),
+            "has_draws": bool(entry.get("has_draws")),
+            "ready_for_training": bool(entry.get("ready_for_training")),
+            "ready_for_suggestions": bool(entry.get("ready_for_suggestions")),
+            "suggestion_format": entry.get("suggestion_format") or {},
+            "training_defaults": entry.get("training_defaults") or {},
         }
-        for snap in snapshots
+    return {
+        "summaries": summaries,
+        "total_games": catalog.get("total_games"),
+        "populated_games": catalog.get("populated_games"),
     }
-    for game in game_names:
-        summaries.setdefault(game, {"game": game, "draw_count": 0})
-    return {"summaries": summaries}
+
+
+@router.get("/api/games/{game}")
+async def get_game(game: str, refresh: bool = True):
+    """Full dynamic detail for one game (rules, draws, training defaults)."""
+    detail = await asyncio.to_thread(lambda: get_game_detail(game, refresh_counts=refresh))
+    if not detail:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail=f"Unknown game '{game}'")
+    return detail
 
 
 @router.get("/api/games/{game}/summary", response_model=GameSummaryResponse)
@@ -79,4 +98,12 @@ async def get_game_summary(game: str):
         )
     except asyncio.TimeoutError:
         draw_count = 0
-    return GameSummaryResponse(game=game_key, draw_count=draw_count)
+    detail = get_game_detail(game_key, refresh_counts=False) or {}
+    return GameSummaryResponse(
+        game=game_key,
+        draw_count=int(draw_count or 0),
+        title=detail.get("title"),
+        has_draws=int(draw_count or 0) > 0,
+        ready_for_training=int(draw_count or 0) >= 50,
+        ready_for_suggestions=int(draw_count or 0) >= 20,
+    )

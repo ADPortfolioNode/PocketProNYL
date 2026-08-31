@@ -20,12 +20,36 @@ _startup_count_workers = max(1, int(os.getenv("INGEST_STARTUP_COUNT_WORKERS", "4
 
 
 def _prefetch_existing_counts(games: list[str]) -> dict[str, int]:
-    """Load cached draw counts; avoid slow Chroma count calls during startup."""
-    from state.draw_counts import get_all_draw_counts
+    """
+    Resolve per-game draw totals for startup skip logic.
+
+    Prefer the persisted draw_counts cache, but if a game shows 0, probe live
+    Chroma once so rebuilds/restarts keep existing history instead of re-ingesting.
+    """
+    from state.draw_counts import get_all_draw_counts, set_draw_count
 
     counts = get_all_draw_counts(games)
     for game in games:
         counts.setdefault(game, 0)
+
+    missing = [game for game, value in counts.items() if int(value or 0) <= 0]
+    if not missing:
+        return counts
+
+    try:
+        from services.chroma_client import chroma_client
+
+        snapshots = chroma_client.get_collections_snapshot(missing, timeout_seconds=8.0, refresh=True)
+        for snap in snapshots or []:
+            name = snap.get("name")
+            live = int(snap.get("count") or 0)
+            if name and live > 0:
+                counts[name] = live
+                set_draw_count(name, live)
+                print(f"✓ Startup count refresh: {name}={live} (kept existing Chroma draws)")
+    except Exception as exc:
+        print(f"⚠ Startup could not refresh live Chroma counts: {exc}")
+
     return counts
 
 

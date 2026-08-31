@@ -68,6 +68,8 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
   const [trainProgress, setTrainProgress] = useState(0);
   const [trainStartTime, setTrainStartTime] = useState(null);
   const [games, setGames] = useState([]);
+  const [gameTitles, setGameTitles] = useState({});
+  const [gameCatalog, setGameCatalog] = useState([]);
   const [gameContents, setGameContents] = useState({});
   const [gameContentsErrorMessage, setGameContentsErrorMessage] = useState('');
   const [experiments, setExperiments] = useState([]);
@@ -354,21 +356,34 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
   useEffect(() => {
     async function fetchGamesAndContents() {
       try {
+        // Dynamic catalog from API: all configured games + draw counts + rule-derived training defaults
         const r = await axios.get(`${API_BASE}/api/games`, { timeout: 15000 });
         setGameContentsErrorMessage('');
-        const gameList = r.data.games || [];
+        const catalog = Array.isArray(r.data?.catalog) ? r.data.catalog : [];
+        const gameList = catalog.length
+          ? catalog.map((entry) => entry.key || entry.id).filter(Boolean)
+          : (r.data.games || []);
+        const titleMap = r.data?.titles || {};
+        catalog.forEach((entry) => {
+          if (entry?.key) titleMap[entry.key] = entry.title || entry.name || entry.key;
+        });
         setGames(gameList);
+        setGameTitles(titleMap);
+        setGameCatalog(catalog);
         setSelectedTrainGame((prev) => prev || gameList[0] || '');
         const contents = {};
         try {
           const summaryRes = await axios.get(`${API_BASE}/api/games/summaries`, { timeout: 20000 });
           const summaries = summaryRes.data?.summaries || {};
           for (const game of gameList) {
-            contents[game] = Number(summaries[game]?.draw_count || 0);
+            const fromSummary = summaries[game]?.draw_count;
+            const fromCatalog = catalog.find((e) => (e.key || e.id) === game)?.draw_count;
+            contents[game] = Number(fromSummary ?? fromCatalog ?? 0);
           }
         } catch {
           for (const game of gameList) {
-            contents[game] = 0;
+            const fromCatalog = catalog.find((e) => (e.key || e.id) === game)?.draw_count;
+            contents[game] = Number(fromCatalog ?? 0);
           }
         }
         setGameContents(contents);
@@ -899,7 +914,9 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
 
   const formatTrainGameOptionLabel = useCallback((game) => {
     const data = trainDataByGame[game];
-    const base = game.toUpperCase();
+    const title = gameTitles[game] || game;
+    const draws = Number(gameContents[game] || 0);
+    const base = draws > 0 ? `${title} (${draws.toLocaleString()} draws)` : title;
     if (!data) return base;
     if (data.status === 'never_trained') return `${base} — untrained data`;
     if (data.status === 'stale') {
@@ -908,7 +925,16 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
     }
     if (data.status === 'current') return `${base} — up to date`;
     return base;
-  }, [trainDataByGame]);
+  }, [trainDataByGame, gameTitles, gameContents]);
+
+  const gameSelectorOptions = useMemo(
+    () => games.map((game) => ({
+      id: game,
+      name: gameTitles[game] || game,
+      draw_count: Number(gameContents[game] || 0),
+    })),
+    [games, gameTitles, gameContents]
+  );
 
   const getGameColorScheme = (gameName) => {
     const idx = games.findIndex((name) => name === gameName);
@@ -1081,7 +1107,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
             <p>Fetch and sync lottery data from NY Open Data.</p>
             <div className="mb-3">
               <label htmlFor="gameSelect" className="form-label text-neon">Select Game</label>
-              <GameSelector games={games} onGameSelect={setSelectedGame} includeAllOption={true} allOptionValue={ALL_GAMES_VALUE} allOptionLabel="All Games" />
+              <GameSelector games={gameSelectorOptions} onGameSelect={setSelectedGame} includeAllOption={true} allOptionValue={ALL_GAMES_VALUE} allOptionLabel="All Games" />
             </div>
             <div className="form-check mb-3">
               <input
@@ -1509,12 +1535,15 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
             focusedCard={expandedCard}
             neonBorder={true}
             metadata={{
-              'Status': isTrained ? 'Model Ready' : 'Awaiting Training',
+              'Status': games.length > 0
+                ? (isTrained ? 'Ready (RF + statistical)' : 'Ready (statistical fallback)')
+                : 'No games loaded',
               'Experiments': experiments.length
             }}
             onToggle={handleCardFocus('predict')}
           >
-            <PredictionPanel games={games} disabled={!isTrained} />
+            {/* Suggestions work without a trained RF model via frequency/statistical fallback. */}
+            <PredictionPanel games={games} disabled={games.length === 0} />
           </ExpandableCard>
         </div>
 

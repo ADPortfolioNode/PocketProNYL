@@ -117,7 +117,7 @@ export default function PredictionPanel({ games = [], disabled = false }) {
     <>
       {disabled ? (
         <div className="alert alert-warning mb-0">
-          <strong>Suggestion unavailable:</strong> Train a model first for the selected game.
+          <strong>Suggestion unavailable:</strong> Load game draw history first (run ingestion), then try again.
         </div>
       ) : games.length > 0 ? (
         <>

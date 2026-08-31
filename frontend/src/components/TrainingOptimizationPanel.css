@@ -1,0 +1,233 @@
+.optimization-panel {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 12px;
+  padding: 20px;
+  margin: 20px 0;
+  color: white;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+.optimization-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.optimization-header h3 {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.optimization-badge {
+  background: rgba(255, 255, 255, 0.2);
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.optimization-reasoning {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 15px;
+}
+
+.optimization-reasoning strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.95rem;
+}
+
+.optimization-reasoning p {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  opacity: 0.95;
+}
+
+.optimization-params {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 15px;
+  margin-bottom: 15px;
+}
+
+.param-group {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.param-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.param-item:last-child {
+  margin-bottom: 0;
+}
+
+.param-item label {
+  font-size: 0.85rem;
+  opacity: 0.9;
+  font-weight: 500;
+}
+
+.param-value {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.param-value.highlight {
+  color: #ffd700;
+  font-size: 1.1rem;
+}
+
+.optimization-comparison {
+  margin-top: 15px;
+}
+
+.comparison-toggle {
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s;
+}
+
+.comparison-toggle:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.comparison-details {
+  margin-top: 12px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 12px;
+  overflow-x: auto;
+}
+
+.comparison-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.comparison-table th,
+.comparison-table td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.comparison-table th {
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+.comparison-table .param-name {
+  font-weight: 500;
+}
+
+.comparison-table .param-optimized {
+  color: #ffd700;
+  font-weight: 600;
+}
+
+.comparison-table .param-generic {
+  opacity: 0.8;
+}
+
+.comparison-table .param-diff.higher {
+  color: #4ade80;
+}
+
+.comparison-table .param-diff.lower {
+  color: #f87171;
+}
+
+.comparison-table .param-diff.same {
+  opacity: 0.7;
+}
+
+.optimization-info {
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.info-text {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  opacity: 0.9;
+}
+
+.optimization-placeholder,
+.optimization-loading,
+.optimization-error {
+  text-align: center;
+  padding: 30px 20px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.optimization-placeholder p,
+.optimization-loading p,
+.optimization-error p {
+  margin: 10px 0 0 0;
+  font-size: 0.95rem;
+}
+
+.spinner {
+  width: 30px;
+  height: 30px;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin: 0 auto;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.retry-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  margin-top: 10px;
+  transition: all 0.2s;
+}
+
+.retry-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .optimization-params {
+    grid-template-columns: 1fr;
+  }
+  
+  .comparison-table {
+    font-size: 0.75rem;
+  }
+  
+  .comparison-table th,
+  .comparison-table td {
+    padding: 6px 8px;
+  }
+}

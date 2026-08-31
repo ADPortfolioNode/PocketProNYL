@@ -346,11 +346,15 @@ def _training_worker(game_key: str, request: TrainingRequest):
 
 @router.get("/api/train_settings")
 async def get_train_settings(game: str = None):
-    defaults = trainer_service.get_training_defaults()
-    defaults["blend_step"] = float(trainer_service.blend_step)
+    from utils.training_defaults import get_game_training_defaults
 
     if game:
         game_key = _require_game_key(game)
+        game_defaults = get_game_training_defaults(game_key)
+        defaults = trainer_service.get_training_defaults(game_key)
+        defaults["blend_step"] = float(
+            defaults.get("blend_step", trainer_service.blend_step)
+        )
         incremental = trainer_service.get_incremental_training_context(
             game_key,
             requested_target=defaults["target_accuracy"],
@@ -364,6 +368,9 @@ async def get_train_settings(game: str = None):
         return {
             "game": game_key,
             "defaults": merged_defaults,
+            "optimized_defaults": game_defaults,
+            "optimization_applied": bool(game_defaults.get("optimization_applied")),
+            "optimization_reasoning": game_defaults.get("reasoning") or "",
             "dataset": _dataset_snapshot(game_key),
             "incremental": incremental,
             "training_data": training_data,
@@ -372,12 +379,17 @@ async def get_train_settings(game: str = None):
             "job": get_job(game_key),
         }
 
+    defaults = trainer_service.get_training_defaults()
+    defaults["blend_step"] = float(trainer_service.blend_step)
+
     per_game = {}
     for game_name in GAME_CONFIGS.keys():
+        game_defaults = trainer_service.get_training_defaults(game_name)
         incremental = trainer_service.get_incremental_training_context(
             game_name,
-            requested_target=defaults["target_accuracy"],
+            requested_target=game_defaults.get("target_accuracy", defaults["target_accuracy"]),
         )
+        profile = get_game_training_defaults(game_name)
         per_game[game_name] = {
             **_dataset_snapshot(game_name),
             "has_saved_model": incremental.get("has_saved_model"),
@@ -387,6 +399,7 @@ async def get_train_settings(game: str = None):
             "recreate_defaults": incremental.get("recreate_defaults") or {},
             "score_leaderboard": incremental.get("score_leaderboard") or [],
             "training_data": _training_data_status(game_name, incremental=incremental),
+            "optimized_defaults": profile,
             "job": get_job(game_name),
         }
     return {"game": None, "defaults": defaults, "per_game": per_game}
@@ -395,6 +408,15 @@ async def get_train_settings(game: str = None):
 @router.get("/api/train_settings/{game}")
 async def get_train_settings_by_path(game: str):
     return await get_train_settings(game=game)
+
+
+@router.get("/api/train_optimization/{game}")
+async def get_train_optimization(game: str):
+    """Return game-specific defaults vs generic baseline for the UI panel."""
+    from utils.training_defaults import game_training_optimizer
+
+    game_key = _require_game_key(game)
+    return game_training_optimizer.get_optimization_payload(game_key)
 
 
 @router.get("/api/train_status")

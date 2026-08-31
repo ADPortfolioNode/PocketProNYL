@@ -11,8 +11,15 @@ class ChromaRepository:
     """
 
     def __init__(self):
-        # Use default embedding function to avoid dimension mismatch
-        self.default_ef = embedding_functions.DefaultEmbeddingFunction()
+        # Lazy: DefaultEmbeddingFunction loads ONNX (~80MB) and can hang the
+        # Hypercorn worker at import time on low-RAM Docker Desktop hosts.
+        self._default_ef = None
+
+    @property
+    def default_ef(self):
+        if self._default_ef is None:
+            self._default_ef = embedding_functions.DefaultEmbeddingFunction()
+        return self._default_ef
 
     def get_or_create_collection(self, name: str) -> Collection:
         """Gets or creates a ChromaDB collection."""
@@ -24,8 +31,17 @@ class ChromaRepository:
     def get_collection(self, name: str) -> Optional[Collection]:
         """Gets a ChromaDB collection by name."""
         try:
-            return chroma_client.client.get_collection(name=name)
-        except Exception: # ChromaDB raises an exception if collection not found
+            return chroma_client.client.get_collection(
+                name=name,
+                embedding_function=self.default_ef,
+            )
+        except TypeError:
+            # Older chromadb get_collection may not accept embedding_function
+            try:
+                return chroma_client.client.get_collection(name=name)
+            except Exception:
+                return None
+        except Exception:  # ChromaDB raises if collection not found
             return None
 
     def list_collections(self) -> List[Collection]:

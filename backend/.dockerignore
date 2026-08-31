@@ -57,3 +57,7 @@ startup_*.log
 *.db
 *.sqlite
 *.sqlite3
+
+# Broken/experimental WIP — never bake into images
+_experimental_quarantine/
+config_experimental/

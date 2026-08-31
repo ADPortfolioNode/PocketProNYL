@@ -147,33 +147,70 @@ def _extract_primary_candidate(metadata: Dict[str, Any], game: str | None = None
 
     return []
 
-def _extract_rows_and_columns(data: Any) -> tuple[List[Dict[str, Any]] | List[List[Any]], List[str]]:
-    """Normalize Socrata responses to (rows, column_names) for ingestion."""
+def _rows_to_dicts(rows: List[Any], column_names: List[str]) -> List[Dict[str, Any]]:
+    """Convert list-of-lists (SODA2) or mixed rows into list-of-dicts."""
+    if not rows:
+        return []
+    if isinstance(rows[0], dict):
+        return [row for row in rows if isinstance(row, dict)]
+
+    dicts: List[Dict[str, Any]] = []
+    for row in rows:
+        if isinstance(row, dict):
+            dicts.append(row)
+            continue
+        if not isinstance(row, (list, tuple)):
+            continue
+        # SODA2 often prefixes each row with sid/id metadata cells before field values.
+        values = list(row)
+        if column_names and len(values) > len(column_names):
+            values = values[-len(column_names) :]
+        mapped: Dict[str, Any] = {}
+        for idx, value in enumerate(values):
+            key = column_names[idx] if idx < len(column_names) else f"col_{idx}"
+            mapped[key] = value
+        if mapped:
+            dicts.append(mapped)
+    return dicts
+
+
+def _extract_rows_and_columns(data: Any) -> tuple[List[Dict[str, Any]], List[str]]:
+    """Normalize Socrata responses to (rows as dicts, column_names) for ingestion."""
     if isinstance(data, dict):
         rows = data.get("data")
         if isinstance(rows, list):
-            columns_meta = data.get("meta", {}).get("view", {}).get("columns", [])
-            column_names = [col.get("fieldName", f"col_{idx}") for idx, col in enumerate(columns_meta)]
-            return rows, column_names
+            meta = data.get("meta")
+            view = meta.get("view") if isinstance(meta, dict) else {}
+            columns_meta = view.get("columns") if isinstance(view, dict) else []
+            column_names: List[str] = []
+            if isinstance(columns_meta, list):
+                for idx, col in enumerate(columns_meta):
+                    if isinstance(col, dict):
+                        column_names.append(str(col.get("fieldName") or col.get("name") or f"col_{idx}"))
+                    else:
+                        column_names.append(f"col_{idx}")
+            return _rows_to_dicts(rows, column_names), column_names
 
         # Fallback for flat-object payloads where records are under common keys
         for key in ("results", "records", "rows"):
             candidate = data.get(key)
             if isinstance(candidate, list):
                 if candidate and isinstance(candidate[0], dict):
-                    all_keys = set()
+                    all_keys: set[str] = set()
                     for item in candidate:
-                        all_keys.update(item.keys())
-                    return candidate, list(all_keys)
-                return candidate, []
+                        if isinstance(item, dict):
+                            all_keys.update(item.keys())
+                    return [item for item in candidate if isinstance(item, dict)], list(all_keys)
+                return _rows_to_dicts(candidate, []), []
 
     if isinstance(data, list):
         if data and isinstance(data[0], dict):
             all_keys = set()
             for item in data:
-                all_keys.update(item.keys())
-            return data, list(all_keys)
-        return data, [] # If data is a list but not of dicts, return it with empty column names
+                if isinstance(item, dict):
+                    all_keys.update(item.keys())
+            return [item for item in data if isinstance(item, dict)], list(all_keys)
+        return _rows_to_dicts(data, []), []
     return [], []
 
 def _extract_record_sequence(metadata: Dict[str, Any], game: str) -> List[int]:
