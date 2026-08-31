@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Concierge — PocketPro:NYL</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div data-nav></div>
+  <main id="main">
+    <section class="content-stage">
+      <img class="content-stage__photo" src="css/assets/nyl-bg/concierge.jpg" alt="" aria-hidden="true" />
+      <div class="content-stage__overlay" aria-hidden="true"></div>
+      <article class="chat-card">
+        <div id="chat-root" class="chat-empty">
+          <h2>Start a conversation</h2>
+          <p>Ask about draws, training, suggestions, or errors.</p>
+          <div class="chips" id="chips"></div>
+        </div>
+        <form class="composer" id="ask-form">
+          <label for="q" style="position:absolute;left:-9999px">Question</label>
+          <input id="q" type="text" autocomplete="off" placeholder="Ask about Take 5, training, or ingest errors…" />
+          <button class="btn btn-primary" type="submit">Ask</button>
+        </form>
+      </article>
+    </section>
+  </main>
+  <div data-footer></div>
+  <script src="js/nav.js"></script>
+  <script src="js/query-render.js"></script>
+  <script>
+    (function () {
+      var samples = ["What's hot in Take 5 lately?", "How do I train Pick 3 without a gateway timeout?", "Which games are ready for suggestions?"];
+      var chips = document.getElementById("chips");
+      var root = document.getElementById("chat-root");
+      var input = document.getElementById("q");
+      samples.forEach(function (text) {
+        var btn = document.createElement("button");
+        btn.type = "button"; btn.className = "chip"; btn.textContent = text;
+        btn.addEventListener("click", function () { run(text); });
+        chips.appendChild(btn);
+      });
+      function run(q) {
+        root.classList.remove("chat-empty");
+        window.PocketProQuery.renderQueryResult(root, null, q);
+        input.value = q;
+      }
+      document.getElementById("ask-form").addEventListener("submit", function (e) {
+        e.preventDefault();
+        if (input.value.trim()) run(input.value.trim());
+      });
+    })();
+  </script>
+</body>
+</html>

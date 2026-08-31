@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Docs — PocketPro:NYL</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div data-nav></div>
+  <main id="main" class="page">
+    <h1>PocketPro:NYL notes</h1>
+    <p class="lede">The live stack is React + FastAPI + Chroma, served with Docker Compose. This folder is the magazine front door.</p>
+    <article class="result-card"><span class="status">Chat</span><h3>Concierge stays on the dashboard</h3><p>Card bodies stay mounted. Starter questions fire the same /api/chat path as typed input.</p></article>
+    <article class="result-card"><span class="status">Train</span><h3>Background jobs</h3><p>POST /api/train returns immediately. Poll GET /api/train_status.</p></article>
+    <article class="result-card"><span class="status">Brand</span><h3>PocketPro:NYL</h3><p>New York Lottery workspace. Ingest, train, suggest, Concierge.</p></article>
+  </main>
+  <div data-footer></div>
+  <script src="js/nav.js"></script>
+</body>
+</html>

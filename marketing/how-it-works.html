@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>How it works — PocketPro:NYL</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div data-nav></div>
+  <main id="main" class="page">
+    <h1>How PocketPro:NYL runs</h1>
+    <p class="lede">Three beats. The dashboard shows all of them. Concierge talks across them.</p>
+    <div class="steps">
+      <article class="photo-card photo-card--wide">
+        <img src="css/assets/nyl-bg/bodega.jpg" alt="Night lottery counter" />
+        <div><span class="status">1 · Ingest</span><h3>Pull official draws</h3><p>Socrata feeds fill Take 5 through NY Lotto. Progress is per-game so the API stays up while history lands.</p></div>
+      </article>
+      <article class="photo-card photo-card--wide">
+        <img src="css/assets/nyl-bg/training.jpg" alt="Training dashboard" />
+        <div><span class="status">2 · Train</span><h3>Fit in the background</h3><p>POST /api/train returns immediately. Poll /api/train_status. Keep Max Iterations modest on the first run.</p></div>
+      </article>
+      <article class="photo-card photo-card--wide">
+        <img src="css/assets/nyl-bg/concierge.jpg" alt="Analyst at dual monitors" />
+        <div><span class="status">3 · Ask</span><h3>Concierge</h3><p>Answers as editorial prose with numbered references. RAG grounds them in Chroma when you toggle it on.</p><a class="btn btn-primary" href="demo.html">Try Concierge</a></div>
+      </article>
+    </div>
+  </main>
+  <div data-footer></div>
+  <script src="js/nav.js"></script>
+</body>
+</html>
