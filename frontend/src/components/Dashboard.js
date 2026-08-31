@@ -79,7 +79,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
   const [selectedTrainGame, setSelectedTrainGame] = useState('');
   const [selectedExperimentReadyGame, setSelectedExperimentReadyGame] = useState('');
   const [selectedTrainingExperimentId, setSelectedTrainingExperimentId] = useState('');
-  const [expandedCard, setExpandedCard] = useState(null);
+  const [expandedCard, setExpandedCard] = useState('chat');
   const [chatIsActive, setChatIsActive] = useState(false);
 
   // Function to trigger backend startup initialization

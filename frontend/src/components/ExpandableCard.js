@@ -93,9 +93,8 @@ export default function ExpandableCard({
         </div>
       </div>
 
-      {!isMinimized && (
-        <div className="card-body expandable-card-body">
-          {Object.keys(metadata).length > 0 && (
+      <div className="card-body expandable-card-body">
+          {expanded && Object.keys(metadata).length > 0 && (
             <div className="expandable-metadata mb-3">
               <h6 className="mb-2">Metadata</h6>
               <div className="expandable-metadata-grid">
@@ -113,7 +112,6 @@ export default function ExpandableCard({
 
           {children}
         </div>
-      )}
     </div>
   );
 }
