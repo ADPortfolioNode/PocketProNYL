@@ -26,6 +26,12 @@ const GAME_DISPLAY_NAMES = {
   nylotto: 'NY Lotto',
 };
 
+const STARTER_CHIPS = [
+  "What's hot in Take 5 lately?",
+  'How do I train Pick 3 without a gateway timeout?',
+  'Which games are ready for suggestions?',
+];
+
 async function fetchWithTimeout(url, options = {}, timeoutMs = CHAT_REQUEST_TIMEOUT_MS) {
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
@@ -109,9 +115,8 @@ const ChatPanelRAG = ({ game = null, isExpanded = false, onActivityChange = null
     });
   }, [game]);
 
-  const handleSendMessage = async (e) => {
-    e.preventDefault();
-    const text = input.trim();
+  const sendMessage = async (rawText) => {
+    const text = String(rawText || '').trim();
     if (!text || isLoading) return;
 
     setMessages((prev) => [...prev, { sender: 'user', text }]);
@@ -268,7 +273,27 @@ const ChatPanelRAG = ({ game = null, isExpanded = false, onActivityChange = null
         <div ref={messagesEndRef} />
       </div>
 
-      <form onSubmit={handleSendMessage} className="chat-input-form-rag">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          sendMessage(input);
+        }}
+        className="chat-input-form-rag"
+      >
+        {messages.length <= 1 && !isLoading && (
+          <div className="chat-chips" aria-label="Starter questions">
+            {STARTER_CHIPS.map((chip) => (
+              <button
+                key={chip}
+                type="button"
+                className="chat-chip"
+                onClick={() => sendMessage(chip)}
+              >
+                {chip}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="input-wrapper">
           <input
             type="text"

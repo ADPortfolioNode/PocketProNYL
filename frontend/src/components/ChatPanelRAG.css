@@ -327,3 +327,32 @@
     max-height: min(80vh, 640px);
   }
 }
+
+
+.chat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding: 0 0.85rem 0.55rem;
+}
+
+.chat-chip {
+  border: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  min-height: 36px;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.chat-chip:hover {
+  border-color: var(--accent-green);
+  color: var(--accent-green);
+}
+
+.chat-panel-rag.is-compact {
+  max-height: min(70vh, 640px);
+  min-height: 360px;
+}
