@@ -1071,7 +1071,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
             onToggle={handleCardFocus('chat')}
           >
             <p className="mb-3 text-muted">
-              Friendly support for Python, React, ChromaDB, and RAG workflows. Panel expands while chat is active.
+              Ask about draws, training, or errors. Toggle RAG for Chroma-grounded answers.
             </p>
             <ChatPanelRAG
               game={selectedGame}
