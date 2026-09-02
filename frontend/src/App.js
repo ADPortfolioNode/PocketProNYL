@@ -5,6 +5,7 @@ import Header from './components/Header';
 import { useStartupStatusPoll } from './hooks/useStartupStatusPoll';
 import './styles/modern.css';
 import './App.css';
+import './styles/magazine.css';
 
 export default function App() {
   const [startupComplete, setStartupComplete] = useState(false);
@@ -19,15 +20,24 @@ export default function App() {
   };
 
   return (
-    <div className="star-trek-app min-vh-100 py-3 py-md-4">
-      {!startupComplete ? (
-        <StartupProgress onComplete={handleStartupComplete} />
-      ) : (
-        <div className="container py-2 py-md-3">
-          <Header startupStatus={startupStatus} />
-          <Dashboard startupStatus={startupStatus} startupErrorMessage={startupErrorMessage} />
-        </div>
-      )}
+    <div className="magazine-app">
+      <img
+        className="magazine-photo"
+        src="/css/assets/nyl-bg/skyline.jpg"
+        alt=""
+        aria-hidden="true"
+      />
+      <div className="magazine-overlay" aria-hidden="true" />
+      <div className="magazine-shell">
+        {!startupComplete ? (
+          <StartupProgress onComplete={handleStartupComplete} />
+        ) : (
+          <>
+            <Header startupStatus={startupStatus} />
+            <Dashboard startupStatus={startupStatus} startupErrorMessage={startupErrorMessage} />
+          </>
+        )}
+      </div>
     </div>
   );
 }

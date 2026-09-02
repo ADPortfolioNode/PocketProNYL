@@ -39,6 +39,16 @@ import {
 
 const ALL_GAMES_VALUE = '__all_games__';
 const GAME_COLOR_SCHEMES = ['primary', 'success', 'warning', 'info', 'danger', 'secondary', 'dark'];
+const FILMSTRIP = [
+  { src: '/css/assets/nyl-bg/skyline.jpg', alt: 'New York skyline at blue hour', label: 'City' },
+  { src: '/css/assets/nyl-bg/bodega.jpg', alt: 'Night bodega lottery counter', label: 'Draw night' },
+  { src: '/css/assets/nyl-bg/concierge.jpg', alt: 'Analyst reviewing draw data', label: 'Concierge' },
+  { src: '/css/assets/nyl-bg/take5.jpg', alt: 'Five lottery balls on black glass', label: 'Take 5' },
+  { src: '/css/assets/nyl-bg/jackpot.jpg', alt: 'Times Square lights on wet pavement', label: 'Jackpot' },
+  { src: '/css/assets/nyl-bg/training.jpg', alt: 'Training dashboard on a laptop', label: 'Train' },
+  { src: '/css/assets/nyl-bg/dashboard.jpg', alt: 'Operations wall of lottery dashboards', label: 'Dashboard' },
+  { src: '/css/assets/nyl-bg/subway.jpg', alt: 'Subway commuter checking a phone', label: 'On the go' },
+];
 
 export default function Dashboard({ startupStatus = { status: 'unknown', progress: 0, total: 0, elapsed_s: 0 }, startupErrorMessage = '' }) {
   const API_BASE = getApiBase();
@@ -1008,8 +1018,53 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
     );
   };
   
+  const conciergeCard = (
+        <div className={getFocusColClass('chat')}>
+          <ExpandableCard
+            title="PocketPro Concierge"
+            cardKey="chat"
+            focusedCard={expandedCard}
+            neonBorder={true}
+            isActive={chatIsActive}
+            metadata={{
+              'Game Context': selectedGame || 'All games',
+              'Status': chatIsActive ? 'Responding' : 'Ready',
+            }}
+            onToggle={handleCardFocus('chat')}
+          >
+            <p className="mb-3 text-muted">
+              Ask about draws, training, or errors. Toggle RAG for Chroma-grounded answers.
+            </p>
+            <ChatPanelRAG
+              game={selectedGame}
+              isExpanded={expandedCard === 'chat' || chatIsActive}
+              onActivityChange={setChatIsActive}
+            />
+          </ExpandableCard>
+        </div>
+  );
+
   return (
-    <div className="container-fluid">
+    <div className="magazine-desk">
+      <section className="hero-split">
+        <div className="hero-copy">
+          <p className="magazine-badge">New York Lottery workspace</p>
+          <h1>PocketPro:NYL Concierge</h1>
+          <p className="lead">
+            Ask about Take 5, Pick 3, Powerball, Mega Millions, and the rest of the NYL slate. RAG grounds answers in ingested draw history.
+          </p>
+        </div>
+        {conciergeCard}
+      </section>
+      <section className="filmstrip" aria-label="Layout photography">
+        {FILMSTRIP.map((photo) => (
+          <figure key={photo.src}>
+            <img src={photo.src} alt={photo.alt} />
+            <figcaption>{photo.label}</figcaption>
+          </figure>
+        ))}
+      </section>
+      <div className="container-fluid magazine-tools">
       <div className="card mb-4">
         <div className="card-body">
           <h4 className="text-neon mb-2">Lottery Data Initialization</h4>
@@ -1056,31 +1111,6 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
       </div>
 
       <div className="focus-cards-row">
-        {/* Mensa Concierge */}
-        <div className={getFocusColClass('chat')}>
-          <ExpandableCard
-            title="PocketPro Concierge"
-            cardKey="chat"
-            focusedCard={expandedCard}
-            neonBorder={true}
-            isActive={chatIsActive}
-            metadata={{
-              'Game Context': selectedGame || 'All games',
-              'Status': chatIsActive ? 'Responding' : 'Ready',
-            }}
-            onToggle={handleCardFocus('chat')}
-          >
-            <p className="mb-3 text-muted">
-              Ask about draws, training, or errors. Toggle RAG for Chroma-grounded answers.
-            </p>
-            <ChatPanelRAG
-              game={selectedGame}
-              isExpanded={expandedCard === 'chat' || chatIsActive}
-              onActivityChange={setChatIsActive}
-            />
-          </ExpandableCard>
-        </div>
-
         {/* Data Ingestion Card */}
         <div className={getFocusColClass('ingest')}>
           <ExpandableCard
@@ -1601,6 +1631,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
             <ExperimentsPanel experiments={experiments} />
           </ExpandableCard>
         </div>
+      </div>
       </div>
     </div>
   );
