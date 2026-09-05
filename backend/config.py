@@ -104,6 +104,44 @@ GAME_CONFIGS = {
         "bonus_min": 1,
         "bonus_max": 59,
         "bonus_keys": ["bonus"],
+    },
+    "numbers": {
+        "primary_count": 3,
+        "primary_min": 0,
+        "primary_max": 9,
+        "primary_unique": False,
+        "bonus_count": 0,
+        "expansion": {
+            "type": "field_to_record",
+            "fields": {"midday_daily": {"draw_session": "midday"}, "evening_daily": {"draw_session": "evening"}},
+            "parser": "pick3_digits",
+            "value_field": "winning_numbers",
+            "id_fields": ["draw_date", "draw_session", "winning_numbers"],
+        },
+    },
+    "win4": {
+        "primary_count": 4,
+        "primary_min": 0,
+        "primary_max": 9,
+        "primary_unique": False,
+        "bonus_count": 0,
+        "expansion": {
+            "type": "field_to_record",
+            "fields": {"midday_win_4": {"draw_session": "midday"}, "evening_win_4": {"draw_session": "evening"}},
+            "parser": "pick4_digits",
+            "value_field": "winning_numbers",
+            "id_fields": ["draw_date", "draw_session", "winning_numbers"],
+        },
+    },
+    "millionaireforlife": {
+        "primary_count": 5,
+        "primary_min": 1,
+        "primary_max": 58,
+        "primary_unique": True,
+        "bonus_count": 1,
+        "bonus_min": 1,
+        "bonus_max": 5,
+        "bonus_keys": ["mill_ball", "millball"],
     }
 }
 
@@ -116,6 +154,9 @@ GAME_TITLES = {
     "cash4life": "Cash4Life",
     "quickdraw": "Quick Draw",
     "nylotto": "NY Lotto",
+    "numbers": "Numbers",
+    "win4": "Win 4",
+    "millionaireforlife": "Millionaire for Life",
 }
 
 GAME_ALIASES = {
@@ -127,6 +168,9 @@ GAME_ALIASES = {
     "cash4life": ["cash 4 life", "cash-for-life", "cash for life"],
     "quickdraw": ["quick draw", "quick-draw"],
     "nylotto": ["ny lotto", "new york lotto", "newyorklotto"],
+    "numbers": ["daily numbers", "lottery numbers"],
+    "win4": ["win 4", "win-four", "win4"],
+    "millionaireforlife": ["millionaire for life", "millionaire-for-life"],
 }
 
 GAME_PREDICTION_FORMATS = {
@@ -214,15 +258,49 @@ GAME_PREDICTION_FORMATS = {
         "main_label": "Main Numbers",
         "bonus_label": "Bonus Number",
     },
+    "numbers": {
+        "main_count": 3,
+        "main_min": 0,
+        "main_max": 9,
+        "bonus_count": 0,
+        "unique_main": False,
+        "sort_main": False,
+        "main_label": "Digits",
+    },
+    "win4": {
+        "main_count": 4,
+        "main_min": 0,
+        "main_max": 9,
+        "bonus_count": 0,
+        "unique_main": False,
+        "sort_main": False,
+        "main_label": "Digits",
+    },
+    "millionaireforlife": {
+        "main_count": 5,
+        "main_min": 1,
+        "main_max": 58,
+        "bonus_count": 1,
+        "bonus_min": 1,
+        "bonus_max": 5,
+        "unique_main": True,
+        "sort_main": True,
+        "main_label": "White Balls",
+        "bonus_label": "Millionaire Ball",
+    },
 }
 
 GAME_PREDICTION_SCHEDULES = {
     "take5": {
         "daily_draws": 2,
+        "draw_times": ["14:30", "22:30"],
+        "draw_sessions": ["midday", "evening"],
         "weekday_draws": {},
     },
     "pick3": {
         "daily_draws": 2,
+        "draw_times": ["14:30", "22:30"],
+        "draw_sessions": ["midday", "evening"],
         "weekday_draws": {},
     },
     "powerball": {
@@ -260,6 +338,9 @@ GAME_PREDICTION_SCHEDULES = {
             5: 1,
         },
     },
+    "numbers": {"daily_draws": 2, "weekday_draws": {}},
+    "win4": {"daily_draws": 2, "weekday_draws": {}},
+    "millionaireforlife": {"daily_draws": 0, "weekday_draws": {0: 1, 2: 1, 5: 1}},
 }
 
 
@@ -299,5 +380,8 @@ DATASET_ENDPOINTS = {
     "pick10": ["https://data.ny.gov/api/views/bycu-cw7c/rows.json?accessType=DOWNLOAD"],
     "cash4life": ["https://data.ny.gov/api/views/kwxv-fwze/rows.json?accessType=DOWNLOAD"],
     "quickdraw": ["https://data.ny.gov/api/views/7sqk-ycpk/rows.json?accessType=DOWNLOAD"],
-    "nylotto": ["https://data.ny.gov/api/views/6nbc-h7bj/rows.json?accessType=DOWNLOAD"]
+    "nylotto": ["https://data.ny.gov/api/views/6nbc-h7bj/rows.json?accessType=DOWNLOAD"],
+    "numbers": ["https://data.ny.gov/api/views/hsys-3def/rows.json?accessType=DOWNLOAD"],
+    "win4": ["https://data.ny.gov/api/views/hsys-3def/rows.json?accessType=DOWNLOAD"],
+    "millionaireforlife": ["https://data.ny.gov/api/views/a4w9-a3tp/rows.json?accessType=DOWNLOAD"],
 }

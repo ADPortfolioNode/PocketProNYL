@@ -317,6 +317,12 @@ monitor_startup_with_regression_tests() {
     
     log_event "INFO" "Stopping existing containers..."
     compose_cmd down --remove-orphans 2>/dev/null || true
+    for stale_container in pocketpro_nyl_chroma pocketpro_nyl_backend pocketpro_nyl_frontend; do
+        if docker container inspect "${stale_container}" >/dev/null 2>&1; then
+            log_event "INFO" "Removing stale container ${stale_container}..."
+            docker rm -f "${stale_container}" >/dev/null
+        fi
+    done
     docker system prune -f 2>/dev/null || true
     log_event "SUCCESS" "Cleanup completed"
     

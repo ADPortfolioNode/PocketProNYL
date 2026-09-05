@@ -79,6 +79,8 @@ class LotteryPredictionEngine:
 
     def _resolve_weights(self, game: str, config: GamePredictionConfig) -> dict[str, float]:
         state = self.weight_store.load(game, initial_weights=config.ensemble.initial_weights)
+        if state.best_weights:
+            return state.best_weights
         if state.weights:
             return state.weights
         weights = dict(config.ensemble.initial_weights)
@@ -139,8 +141,24 @@ class LotteryPredictionEngine:
                     nn_scores = nn.predict_scores(history, rules)
                     nn_weight = float(config.nn.blend_weight)
                 except Exception:
-                    nn_scores = None
-                    nn_weight = 0.0
+                    # Keep the preferred RNN default usable in the core image,
+                    # which intentionally does not install TensorFlow.
+                    if config.nn.backend == "lstm":
+                        try:
+                            nn = FeedforwardNN(
+                                lookback=config.nn.lookback,
+                                hidden_layers=config.nn.hidden_layers,
+                                max_iter=config.nn.max_iter,
+                            )
+                            nn.fit(history, rules)
+                            nn_scores = nn.predict_scores(history, rules)
+                            nn_weight = float(config.nn.blend_weight)
+                        except Exception:
+                            nn_scores = None
+                            nn_weight = 0.0
+                    else:
+                        nn_scores = None
+                        nn_weight = 0.0
 
         ticket = build_ticket(
             game=game,
@@ -153,13 +171,30 @@ class LotteryPredictionEngine:
         ticket.strategy_used = strategy_name
         return ticket
 
-    def update_weights(self, game: str, actual: Draw, history: list[Draw] | None = None) -> dict:
+    def update_weights(
+        self,
+        game: str,
+        actual: Draw,
+        history: list[Draw] | None = None,
+        validation_accuracy: float | None = None,
+    ) -> dict:
         """Update ensemble weights after a real draw result."""
         config = self._load_config(game)
         rules = game_rules_from_config(game)
         if history is None:
             history = from_chroma(game, limit=500)
-        outputs = self._collect_outputs(history, config)
+        state = self.weight_store.load(game, initial_weights=config.ensemble.initial_weights)
+        if actual.draw_id and state.last_draw_id == actual.draw_id:
+            return {"game": game, "weights": state.weights, "updated_at": state.updated_at, "skipped": True}
+
+        # Evaluate picks made before the draw; never let the actual result
+        # influence the strategy output being scored.
+        prior_history = list(history or [])
+        if actual.draw_id:
+            prior_history = [draw for draw in prior_history if draw.draw_id != actual.draw_id]
+        elif prior_history and prior_history[-1].primary == actual.primary:
+            prior_history = prior_history[:-1]
+        outputs = self._collect_outputs(prior_history, config)
         state = self.weight_updater.update(
             game=game,
             actual=actual,
@@ -168,8 +203,16 @@ class LotteryPredictionEngine:
             learning_rate=config.ensemble.learning_rate,
             min_weight=config.ensemble.min_weight,
             initial_weights=config.ensemble.initial_weights,
+            validation_accuracy=validation_accuracy,
         )
-        return {"game": game, "weights": state.weights, "updated_at": state.updated_at}
+        return {
+            "game": game,
+            "weights": state.weights,
+            "best_weights": state.best_weights,
+            "best_validation_accuracy": state.best_validation_accuracy,
+            "promoted": bool(state.history and state.history[-1].get("promoted")),
+            "updated_at": state.updated_at,
+        }
 
     def backtest(self, game: str, history: list[Draw] | None = None) -> dict:
         """Walk-forward backtest with honest metrics."""
@@ -187,6 +230,14 @@ class LotteryPredictionEngine:
             predict_fn=predict_fn,
             window=config.metrics.backtest_window,
             min_draws=config.metrics.min_backtest_draws,
+            target_accuracy=config.metrics.target_accuracy,
+            verification_rounds=config.metrics.verification_rounds,
+            update_fn=lambda actual, train_hist, validation_accuracy: self.update_weights(
+                game,
+                actual,
+                history=train_hist,
+                validation_accuracy=validation_accuracy,
+            ),
         )
 
 

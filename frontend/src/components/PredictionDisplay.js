@@ -86,8 +86,15 @@ const PredictionDisplay = ({ prediction }) => {
               {draw.prediction_date && (
                 <span className="text-muted prediction-draw-date">
                   {draw.prediction_date}
+                  {draw.draw_time ? ` at ${draw.draw_time}` : ''}
+                  {draw.draw_session ? ` (${draw.draw_session})` : ''}
                   {draw.prediction_weekday ? ` (${draw.prediction_weekday})` : ''}
                   {draw.prediction_timezone ? ` [${draw.prediction_timezone}]` : ''}
+                </span>
+              )}
+              {draw.spacing_from_previous_minutes != null && (
+                <span className="text-muted prediction-draw-spacing">
+                  {` +${draw.spacing_from_previous_minutes} min`}
                 </span>
               )}
             </div>

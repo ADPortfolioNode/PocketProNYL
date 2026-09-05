@@ -6,7 +6,9 @@ ensemble:
 
 nn:
   enabled: true
-  backend: feedforward
+  # Prefer the recurrent sequence model; the engine falls back to MLP when
+  # TensorFlow is not installed or LSTM fitting fails.
+  backend: lstm
   lookback: 30
   blend_weight: 0.15
   hidden_layers: [64, 32]
@@ -16,6 +18,8 @@ metrics:
   backtest_window: 200
   min_backtest_draws: 50
   random_trials: 500
+  target_accuracy: 0.98
+  verification_rounds: 1
 
 strategies:
   hot_cold:

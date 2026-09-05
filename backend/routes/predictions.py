@@ -2,12 +2,14 @@
 Predictions API routes.
 """
 import asyncio # Keep asyncio for async operations
+import os
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 from services.predictor import PredictorService # Import the class
 from services.predictor import predictor_service
+from services.prediction_adapter import prediction_adapter
 from experiments.store import ExperimentStore
 from utils.validation import _require_game_key
 from utils.timestamps import normalize_experiment_record, runtime_timestamp_fields
@@ -181,6 +183,12 @@ async def make_prediction(request: PredictionRequest):
     try:
         game_key = _require_game_key(request.game)
         def _run_prediction():
+            if (
+                os.environ.get("PREDICTION_ENGINE", "modular").lower() != "legacy"
+                and request.strategy in (None, "", "ensemble")
+                and request.target_draw_date is None
+            ):
+                return prediction_adapter.predict_next_draw(game_key, request.recent_k)
             if hasattr(predictor_service, "predict_next_draw"):
                 return predictor_service.predict_next_draw(
                     game_key,

@@ -119,6 +119,43 @@ class PredictorService:
 
         return draw_count
 
+    def _resolve_session_draw_datetimes(self, game: str, target_draw_date: date, count: int) -> list[datetime]:
+        """Resolve each scheduled draw to a timezone-aware datetime when configured."""
+        schedule = GAME_PREDICTION_SCHEDULES.get(game, {}) or {}
+        raw_times = schedule.get("draw_times") or []
+        sessions = schedule.get("draw_sessions") or []
+        result: list[datetime] = []
+        timezone = ZoneInfo(self.prediction_timezone)
+        for index in range(max(1, count)):
+            draw_time = None
+            if index < len(raw_times):
+                try:
+                    draw_time = datetime.strptime(str(raw_times[index]), "%H:%M").time()
+                except ValueError:
+                    draw_time = None
+            draw_datetime = datetime.combine(target_draw_date, draw_time or datetime.min.time(), tzinfo=timezone)
+            result.append(draw_datetime)
+        return result
+
+    def _session_metadata(self, game: str, target_draw_date: date, count: int) -> list[dict]:
+        schedule = GAME_PREDICTION_SCHEDULES.get(game, {}) or {}
+        sessions = schedule.get("draw_sessions") or []
+        datetimes = self._resolve_session_draw_datetimes(game, target_draw_date, count)
+        metadata: list[dict] = []
+        previous = None
+        for index, draw_datetime in enumerate(datetimes):
+            spacing = None
+            if previous is not None:
+                spacing = int((draw_datetime - previous).total_seconds() // 60)
+            metadata.append({
+                "draw_datetime": draw_datetime.isoformat(),
+                "draw_time": draw_datetime.strftime("%H:%M"),
+                "draw_session": sessions[index] if index < len(sessions) else None,
+                "spacing_from_previous_minutes": spacing,
+            })
+            previous = draw_datetime
+        return metadata
+
     def _resolve_next_scheduled_datetime(self, game: str, when: datetime | None = None) -> datetime:
         """Pick the next calendar day (today first) that has scheduled draws for the game."""
         base = when or self._current_prediction_datetime()
@@ -587,6 +624,7 @@ class PredictorService:
             suggested_numbers = primary_numbers + bonus_numbers
             normalized_flat = [int(n) for n in (primary_numbers + bonus_numbers)]
 
+        session_metadata = self._session_metadata(game_key, target_draw_date, 1)
         session_predictions = [{
             "draw_index": 1,
             "prediction_date": target_draw_date.isoformat(),
@@ -599,6 +637,7 @@ class PredictorService:
             "strategy_used": strategy,
             "generated_at": generated_at.isoformat(),
             "predicted_for_date": target_draw_date.isoformat(), # Added for consistency
+            **session_metadata[0],
         }]
 
         return {
@@ -663,6 +702,7 @@ class PredictorService:
         bonus_count = int(rules.get("bonus_count", 0) or 0)
         include_bonus = bonus_count > 0 and output_len >= (primary_count + bonus_count)
 
+        session_metadata = self._session_metadata(game_key, target_draw_date, session_draw_count)
         session_predictions = []
         rolling_sequences = sequences_for_rf[-window_size:]
 
@@ -737,6 +777,7 @@ class PredictorService:
                 "strategy_used": strategy_used_in_response, # New field
                 "generated_at": generated_at.isoformat(), # New field
                 "predicted_for_date": target_draw_date.isoformat(), # Added for consistency
+                **session_metadata[draw_index],
             })
 
             rolling_sequences = (rolling_sequences + [list(normalized_flat)])[-window_size:]

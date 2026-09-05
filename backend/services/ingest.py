@@ -4,6 +4,7 @@ import time
 import os
 import re
 import signal
+from datetime import datetime
 from functools import wraps
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 import json # Added for json.dumps
@@ -75,6 +76,35 @@ class IngestService:
             key: f"new york {GAME_TITLES.get(key, key)} lottery"
             for key in DATASET_ENDPOINTS.keys()
         }
+
+    def _normalize_draw_metadata(self, metadata: dict) -> dict:
+        """Store one canonical draw date and preserve a source timestamp when present."""
+        normalized = dict(metadata or {})
+        raw_date = next(
+            (
+                value
+                for key, value in normalized.items()
+                if str(key).lower() in {"draw_date", "drawdate", "date", "drawn_at", "draw_datetime"}
+                and value not in (None, "")
+            ),
+            None,
+        )
+        if raw_date is None:
+            return normalized
+
+        raw_text = str(raw_date).strip().replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(raw_text)
+        except ValueError:
+            try:
+                parsed = datetime.strptime(raw_text[:10], "%Y-%m-%d")
+            except ValueError:
+                return normalized
+
+        normalized["draw_date"] = parsed.date().isoformat()
+        if parsed.time() != datetime.min.time() or "T" in raw_text or " " in raw_text:
+            normalized["draw_datetime"] = parsed.isoformat()
+        return normalized
 
     def _normalize_text(self, value: str) -> str:
         return re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).strip()
@@ -187,12 +217,16 @@ class IngestService:
         parsed_digits = parse_pick3_digits_util(raw_value)
         return "".join(str(d) for d in parsed_digits) if len(parsed_digits) == 3 else None
 
+    def _pick4_digit_string(self, raw_value) -> str | None:
+        digits = re.findall(r"\d", str(raw_value or ""))
+        return "".join(digits[-4:]) if len(digits) >= 4 else None
+
     def _process_api_row(self, row_dict: dict, game: str, column_names: list[str], existing_ids: set[str]) -> list[tuple[str, dict, str]]:
         """
         Process a single row from the API, normalize it, and prepare for ChromaDB.
         This method was restored to fix a regression where it was missing.
         """
-        metadata_item = row_dict
+        metadata_item = self._normalize_draw_metadata(row_dict)
         
         # Generate a base ID for records that don't get expanded
         draw_date = metadata_item.get("draw_date")
@@ -235,6 +269,8 @@ class IngestService:
                 
                 if parser_name == "pick3_digits":
                     value_for_record = self._pick3_digit_string(raw_value)
+                elif parser_name == "pick4_digits":
+                    value_for_record = self._pick4_digit_string(raw_value)
                 else: # Default parser just stringifies the value
                     value_for_record = str(raw_value or "").strip()
 
@@ -647,12 +683,18 @@ class IngestService:
         )
         if total_rows_added > 0 and os.environ.get("PREDICTION_ENGINE", "modular").lower() != "legacy":
             try:
-                latest = chroma_repository.get_documents(collection_name, limit=1, include=["metadatas", "ids"])
+                latest = chroma_repository.get_documents(
+                    collection_name,
+                    limit=max(1, total_rows_added),
+                    include=["metadatas", "ids"],
+                )
                 metas = latest.get("metadatas") or []
                 ids = latest.get("ids") or []
                 if metas:
                     from prediction.adapter_hooks import on_new_draw_metadata
-                    on_new_draw_metadata(game_key, metas[0], ids[0] if ids else None)
+                    for index, metadata in enumerate(metas):
+                        draw_id = ids[index] if index < len(ids) else None
+                        on_new_draw_metadata(game_key, metadata, draw_id)
             except Exception as hook_error:
                 print(f"⚠ [{game_key.upper()}] Weight update hook skipped: {hook_error}")
 

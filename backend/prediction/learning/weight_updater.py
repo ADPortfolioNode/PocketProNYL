@@ -25,9 +25,10 @@ class WeightUpdater:
         learning_rate: float = 0.05,
         min_weight: float = 0.01,
         initial_weights: dict[str, float] | None = None,
+        validation_accuracy: float | None = None,
     ) -> WeightState:
         state = self.store.load(game, initial_weights=initial_weights)
-        weights = dict(state.weights)
+        weights = dict(state.best_weights or state.weights)
 
         if not weights and initial_weights:
             weights = dict(initial_weights)
@@ -53,6 +54,14 @@ class WeightUpdater:
             weights = {k: v / total for k, v in weights.items()}
 
         state.weights = weights
+        promoted = False
+        if validation_accuracy is not None:
+            score = float(validation_accuracy)
+            if state.best_validation_accuracy is None or score >= state.best_validation_accuracy:
+                state.best_weights = dict(weights)
+                state.best_validation_accuracy = score
+                state.best_validation_at = time.time()
+                promoted = True
         state.updated_at = time.time()
         state.last_draw_id = actual.draw_id
         state.history.append({
@@ -60,6 +69,8 @@ class WeightUpdater:
             "draw_id": actual.draw_id,
             "plugin_scores": scores,
             "mean_score": round(mean_score, 4),
+            "validation_accuracy": validation_accuracy,
+            "promoted": promoted,
         })
         self.store.save(state)
         return state

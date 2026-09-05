@@ -26,6 +26,9 @@ class WeightStore:
             return WeightState(
                 game=game,
                 weights=data.get("weights", initial_weights or {}),
+                best_weights=data.get("best_weights", {}),
+                best_validation_accuracy=data.get("best_validation_accuracy"),
+                best_validation_at=float(data.get("best_validation_at", 0)),
                 updated_at=float(data.get("updated_at", 0)),
                 last_draw_id=data.get("last_draw_id"),
                 history=data.get("history", []),
@@ -43,6 +46,9 @@ class WeightStore:
         payload = {
             "game": state.game,
             "weights": state.weights,
+            "best_weights": state.best_weights,
+            "best_validation_accuracy": state.best_validation_accuracy,
+            "best_validation_at": state.best_validation_at,
             "updated_at": state.updated_at or time.time(),
             "last_draw_id": state.last_draw_id,
             "history": state.history[-50:],  # keep last 50 updates

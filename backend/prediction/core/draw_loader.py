@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date, datetime
 from typing import Any
 
 from prediction.config.loader import game_rules_from_config
@@ -53,6 +54,25 @@ def _extract_bonus_values(metadata: dict, rules: GameRules) -> list[int]:
 GAME_BONUS_KEYS: dict[str, list[str]] = {}
 
 
+def _extract_draw_date(metadata: dict) -> date | None:
+    """Extract the calendar date shared by all draw metadata variants."""
+    for key, value in (metadata or {}).items():
+        key_lower = str(key).lower()
+        if key_lower not in {"draw_date", "drawdate", "date", "drawn_at", "draw_datetime"}:
+            continue
+        if value in (None, ""):
+            continue
+        raw = str(value).strip().replace("Z", "+00:00")
+        try:
+            return datetime.fromisoformat(raw).date()
+        except ValueError:
+            try:
+                return date.fromisoformat(raw[:10])
+            except ValueError:
+                continue
+    return None
+
+
 def _ensure_bonus_keys() -> None:
     global GAME_BONUS_KEYS
     if GAME_BONUS_KEYS:
@@ -91,7 +111,13 @@ def metadata_to_draw(metadata: dict, game: str, draw_id: str | None = None) -> D
             if rules.bonus_min <= int(n) <= rules.bonus_max
         ][: rules.bonus_count]
 
-    return Draw(primary=primary, bonus=bonus, draw_id=draw_id, metadata=dict(metadata))
+    return Draw(
+        primary=primary,
+        bonus=bonus,
+        draw_id=draw_id,
+        metadata=dict(metadata),
+        date=_extract_draw_date(metadata),
+    )
 
 
 GAME_CONFIGS_EMBEDDED: dict[str, bool] = {}

@@ -26,7 +26,7 @@ class EnsembleConfig(BaseModel):
 
 class NNConfig(BaseModel):
     enabled: bool = True
-    backend: str = "feedforward"
+    backend: str = "lstm"
     lookback: int = 30
     blend_weight: float = 0.15
     hidden_layers: list[int] = Field(default_factory=lambda: [64, 32])
@@ -37,6 +37,8 @@ class MetricsConfig(BaseModel):
     backtest_window: int = 200
     min_backtest_draws: int = 50
     random_trials: int = 500
+    target_accuracy: float = 0.98
+    verification_rounds: int = 1
 
 
 class GamePredictionConfig(BaseModel):

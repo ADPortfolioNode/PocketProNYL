@@ -4,8 +4,6 @@ import { getApiBase } from '../utils/apiBase';
 import { analyzeError, ErrorCategory } from '../utils/errorUtils';
 import { startPolling } from '../utils/polling';
 
-const KNOWN_GAMES = ['take5', 'pick3', 'powerball', 'megamillions', 'pick10', 'cash4life', 'quickdraw', 'nylotto'];
-
 const StartupProgress = ({ onComplete }) => {
     const [status, setStatus] = useState(null);
     const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -53,10 +51,10 @@ const StartupProgress = ({ onComplete }) => {
         .replace(/[_-]+/g, ' ')
         .replace(/\b\w/g, (c) => c.toUpperCase());
 
+    const games = status?.games || {};
     const availableGames = Array.isArray(status?.available_games) && status.available_games.length
         ? status.available_games
-        : KNOWN_GAMES;
-    const games = status?.games || {};
+        : Object.keys(games);
     const currentGame = status?.current_game;
     const gameEntries = availableGames.map((game) => {
         const raw = games[game] || {};
@@ -72,7 +70,7 @@ const StartupProgress = ({ onComplete }) => {
     });
 
     const progressVal = Number(status?.progress ?? 0);
-    const totalVal = Number(status?.total ?? 8) || 8;
+    const totalVal = Number(status?.total) || availableGames.length || 1;
     let rowsFetched = Number(status?.current_game_rows_fetched ?? 0);
     let rowsTotal = Number(status?.current_game_rows_total ?? 0);
     if (rowsFetched > rowsTotal) rowsTotal = rowsFetched;

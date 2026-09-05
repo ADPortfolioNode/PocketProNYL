@@ -205,6 +205,7 @@ class PredictionAdapter:
                 "game": game,
                 "trained_at": time.time(),
                 "metrics": metrics,
+                "suggestion_history": metrics.get("suggestion_history", []),
                 "engine": "modular",
                 "record_count": dataset.get("record_count"),
                 "dataset_hash": dataset.get("dataset_hash"),
@@ -240,6 +241,7 @@ class PredictionAdapter:
             "game": game,
             "trained_at": time.time(),
             "metrics": metrics,
+            "suggestion_history": metrics.get("suggestion_history", []),
             "engine": "modular",
             "record_count": dataset.get("record_count"),
             "dataset_hash": dataset.get("dataset_hash"),
@@ -276,8 +278,12 @@ class PredictionAdapter:
             "engine": "modular",
             "last_prediction": data.get("trained_at"),
             "accuracy": metrics.get("mean_partial_hits"),
+            "accuracy_percent": metrics.get("accuracy_percent"),
+            "target_accuracy": metrics.get("target_accuracy"),
+            "target_reached": metrics.get("target_reached", False),
             "lift_vs_random": metrics.get("lift_vs_random"),
             "metrics": metrics,
+            "suggestion_history": metrics.get("suggestion_history", []),
         }
 
     def on_new_draw(self, game: str, metadata: dict, draw_id: str | None = None) -> dict | None:

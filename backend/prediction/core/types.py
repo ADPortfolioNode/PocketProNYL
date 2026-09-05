@@ -26,7 +26,15 @@ class Draw:
     def draw_date(self) -> date | None:
         if self.date is not None:
             return self.date
-        raw = self.metadata.get("draw_date")
+        raw = next(
+            (
+                value
+                for key, value in self.metadata.items()
+                if str(key).lower() in {"draw_date", "drawdate", "date", "drawn_at", "draw_datetime"}
+                and value not in (None, "")
+            ),
+            None,
+        )
         if isinstance(raw, date) and not isinstance(raw, datetime):
             return raw
         if isinstance(raw, datetime):
@@ -91,6 +99,9 @@ class WeightState:
 
     game: str
     weights: dict[str, float]
+    best_weights: dict[str, float] = field(default_factory=dict)
+    best_validation_accuracy: float | None = None
+    best_validation_at: float = 0.0
     updated_at: float = 0.0
     last_draw_id: str | None = None
     history: list[dict[str, Any]] = field(default_factory=list)

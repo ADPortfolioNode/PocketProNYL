@@ -49,6 +49,11 @@ def _parse_pick3_digits(raw_value: Any) -> List[int]:
     padded = "".join(all_digits).zfill(3)[-3:]
     return [int(digit) for digit in padded]
 
+def _parse_fixed_digits(raw_value: Any, count: int) -> List[int]:
+    """Parse a fixed-width lottery digit result while preserving leading zeroes."""
+    digits = re.findall(r"\d", str(raw_value or ""))
+    return [int(digit) for digit in digits[-count:]] if len(digits) >= count else []
+
 def _get_rules(game: str) -> Dict[str, Any]:
     """Returns the game rules, merging defaults with configured values."""
     base = {
@@ -131,10 +136,13 @@ def _extract_primary_candidate(metadata: Dict[str, Any], game: str | None = None
         elif "numbers" in key_lower or "result" in key_lower:
             fallback.append(value)
 
-    parse_value = _parse_pick3_digits if str(game or "").lower() == "pick3" else _parse_numbers
+    normalized_game = str(game or "").lower()
+    parse_value = _parse_pick3_digits if normalized_game in ("pick3", "numbers") else _parse_numbers
+    if normalized_game == "win4":
+        parse_value = lambda value: _parse_fixed_digits(value, 4)
 
     # For pick3, prioritize specific daily fields if winning_numbers is not immediately parsable
-    if str(game or "").lower() == "pick3":
+    if normalized_game in ("pick3", "numbers", "win4"):
         for candidate in preferred + pick3_specific_fields + fallback:
             numbers = parse_value(candidate)
             if len(numbers) == 3: # Ensure exactly 3 digits for pick3
