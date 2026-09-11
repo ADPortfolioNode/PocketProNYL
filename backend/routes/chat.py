@@ -1,7 +1,13 @@
 """
 Chat API routes with RAG support.
 """
+from io import BytesIO
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from services.lm_router import lm_router
@@ -13,8 +19,53 @@ from utils.chat_tools import _render_tool_response, execute_chat_tool
 router = APIRouter()
 
 
+@router.get("/api/tuning_status")
+async def tuning_status():
+    """Return current background per-game suggestion-tuning activity."""
+    from services.game_tuner import game_tuner
+
+    return game_tuner.status()
+
+
+@router.get("/api/tuning_chart")
+async def tuning_chart():
+    """Render current tuning telemetry as a small cacheable PNG for the hero panel."""
+    from services.game_tuner import game_tuner
+
+    status = game_tuner.status()
+    total = max(int(status.get("games_total") or 0), 0)
+    completed = min(max(int(status.get("games_completed") or 0), 0), total) if total else 0
+    relative_progress = completed / total if total else 0
+    state = str(status.get("status") or "idle").upper()
+    active_game = str(status.get("current_game") or status.get("game") or "all games")
+    task = str(status.get("current_task") or "waiting")
+
+    figure, axis = plt.subplots(figsize=(7.2, 2.25), dpi=140)
+    figure.patch.set_facecolor("#10182b")
+    axis.set_facecolor("#10182b")
+    axis.barh([0], [1], color="#273552", height=0.22)
+    axis.barh([0], [relative_progress], color="#d38b52" if state == "RUNNING" else "#6ea8fe", height=0.22)
+    axis.set_xlim(0, 1)
+    axis.set_yticks([])
+    axis.set_xticks([0, 0.25, 0.5, 0.75, 1])
+    axis.set_xticklabels(["0%", "25%", "50%", "75%", "100%"], color="#b7c6df", fontsize=8)
+    axis.tick_params(axis="x", length=0, pad=5)
+    for spine in axis.spines.values():
+        spine.set_visible(False)
+    axis.text(0, 0.42, "LIVE TUNING TELEMETRY", color="#dbe9ff", fontsize=9, fontweight="bold", transform=axis.transAxes)
+    axis.text(0, 0.23, f"{active_game.upper()}  /  {task.replace('_', ' ').upper()}", color="#b7c6df", fontsize=8, transform=axis.transAxes)
+    axis.text(1, 0.42, f"{completed}/{total}  {state}", color="#d38b52" if state == "RUNNING" else "#dbe9ff", fontsize=9, fontweight="bold", ha="right", transform=axis.transAxes)
+    figure.tight_layout(pad=0.8)
+
+    image = BytesIO()
+    figure.savefig(image, format="png", transparent=False)
+    plt.close(figure)
+    image.seek(0)
+    return StreamingResponse(image, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
 class ChatRequest(BaseModel):
-    text: str
+    text: str = ""
     game: str = None
     use_rag: bool = True
     lm_provider: str = "auto"

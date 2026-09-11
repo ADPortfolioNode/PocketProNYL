@@ -3,6 +3,7 @@ import axios from 'axios';
 import { getApiBase } from '../utils/apiBase';
 import { analyzeError, ErrorCategory } from '../utils/errorUtils';
 import { startPolling } from '../utils/polling';
+import ProgressiveProgressBar from './ProgressiveProgressBar';
 
 const StartupProgress = ({ onComplete }) => {
     const [status, setStatus] = useState(null);
@@ -115,18 +116,14 @@ const StartupProgress = ({ onComplete }) => {
                     <span className="small text-muted"> ({progressVal.toFixed(1)} / {totalVal} games)</span>
                     {rowLabel && <span className="small text-muted"> · {rowLabel}{currentGame ? ` in ${formatGameLabel(currentGame)}` : ''}</span>}
                 </h4>
-                <div className="progress" style={{ height: '1.5rem' }}>
-                    <div
-                        className={`progress-bar ${isCompleted ? 'bg-success' : 'bg-warning progress-bar-striped progress-bar-animated'}`}
-                        style={{ width: `${Math.max(overallProgress, isIngesting && overallProgress < 2 ? 6 : 0)}%` }}
-                        role="progressbar"
-                        aria-valuenow={overallProgress}
-                        aria-valuemin="0"
-                        aria-valuemax="100"
-                    >
-                        {Math.round(overallProgress)}%
-                    </div>
-                </div>
+                <ProgressiveProgressBar
+                    current={overallProgress}
+                    total={100}
+                    status={isCompleted ? 'completed' : isIngesting ? 'active' : 'idle'}
+                    label="Download graph"
+                    showMetadata={false}
+                    colorScheme={isCompleted ? 'success' : 'warning'}
+                />
             </div>
 
             <h4>Game download status</h4>
@@ -153,11 +150,14 @@ const StartupProgress = ({ onComplete }) => {
                                         : '—'}
                                 </td>
                                 <td>
-                                    <div className="progress" style={{ height: '0.6rem' }}>
-                                        <div
-                                            className={`progress-bar ${gameData.status === 'completed' ? 'bg-success' : 'bg-warning'}`}
-                                            style={{ width: `${Math.max(0, Math.min(gameData.percent, 100))}%` }}
-                                        />
+                                    <div className="startup-game-chart" role="img" aria-label={`${formatGameLabel(game)}: ${Math.round(gameData.percent)}% complete`}>
+                                        <svg viewBox="0 0 120 24" preserveAspectRatio="none" aria-hidden="true">
+                                            <line className="startup-game-chart-grid" x1="2" y1="21" x2="118" y2="21" />
+                                            <polyline
+                                                className={`startup-game-chart-line ${gameData.status === 'completed' ? 'is-complete' : 'is-active'}`}
+                                                points={`2,21 ${2 + (116 * Math.max(0, Math.min(gameData.percent, 100))) / 100},${21 - Math.max(2, (18 * Math.max(0, Math.min(gameData.percent, 100))) / 100)}`}
+                                            />
+                                        </svg>
                                     </div>
                                 </td>
                             </tr>

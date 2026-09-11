@@ -175,6 +175,14 @@ def get_ingestion_status():
         "completed_games": completed_count,
         "populated_games": populated_count,
         "draw_counts": draw_counts,
+        "tuning": ss.get("tuning") or {
+            "status": "idle",
+            "game": None,
+            "games_total": 0,
+            "games_completed": 0,
+            "current_game": None,
+            "current_task": None,
+        },
     }
 
 

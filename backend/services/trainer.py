@@ -123,9 +123,18 @@ class TrainerService:
         if exact_rate is None:
             exact_rate = modular_metrics.get("exact_match_rate")
 
+        candidate_accuracy = modular_metrics.get("accuracy")
+        try:
+            candidate_accuracy = float(candidate_accuracy) if candidate_accuracy is not None else None
+        except (TypeError, ValueError):
+            candidate_accuracy = None
+
         has_prior = baseline is not None
         training_target = max(float(self.target_accuracy or 0.0), baseline or 0.0)
-        highest_accuracy = baseline
+        highest_accuracy = max(
+            [value for value in (baseline, candidate_accuracy) if value is not None],
+            default=None,
+        )
 
         refreshed = bool(result.get("refreshed"))
         message = "Modular engine backtest complete."
@@ -139,10 +148,11 @@ class TrainerService:
                 f"Modular engine backtest complete. "
                 f"Record accuracy held at {highest_accuracy * 100:.2f}%."
             )
-        elif mean_hits is not None:
+        elif candidate_accuracy is not None:
             lift_text = f"{float(lift):.4f}" if lift is not None else "n/a"
             message = (
                 f"Modular engine backtest complete. "
+                f"accuracy={candidate_accuracy * 100:.2f}%, "
                 f"mean_partial_hits={mean_hits:.4f}, lift_vs_random={lift_text}."
             )
 
@@ -158,7 +168,11 @@ class TrainerService:
             "used_previous_training": has_prior,
             "retained_previous_model": has_prior,
             "previous_accuracy": baseline,
-            "candidate_accuracy": mean_hits,
+            "candidate_accuracy": candidate_accuracy,
+            "accuracy_percent": modular_metrics.get("accuracy_percent"),
+            "target_reached": modular_metrics.get("target_reached", False),
+            "suggestion_history": modular_metrics.get("suggestion_history", []),
+            "highest_suggestion": modular_metrics.get("highest_suggestion"),
             "modular_metrics": modular_metrics,
             "mean_partial_hits": mean_hits,
             "lift_vs_random": lift,

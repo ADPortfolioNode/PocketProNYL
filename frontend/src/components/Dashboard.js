@@ -91,6 +91,17 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
   const [selectedTrainingExperimentId, setSelectedTrainingExperimentId] = useState('');
   const [expandedCard, setExpandedCard] = useState('chat');
   const [chatIsActive, setChatIsActive] = useState(false);
+  const [tuningStatus, setTuningStatus] = useState({
+    status: 'idle',
+    game: null,
+    games_total: 0,
+    games_completed: 0,
+    current_game: null,
+    current_task: null,
+    updated_at: Date.now(),
+  });
+  const [tuningErrorMessage, setTuningErrorMessage] = useState('');
+  const [selectedTuningGame, setSelectedTuningGame] = useState(ALL_GAMES_VALUE);
 
   // Function to trigger backend startup initialization
   const triggerBackendStartupInit = useCallback(async () => {
@@ -1005,6 +1016,78 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
     setExpandedCard(expanded ? cardKey : null);
   };
 
+  useEffect(() => {
+    if (!selectedGame) {
+      setSelectedTuningGame(ALL_GAMES_VALUE);
+      return;
+    }
+    setSelectedTuningGame((prev) => {
+      if (prev === ALL_GAMES_VALUE || games.includes(prev)) return prev;
+      return selectedGame;
+    });
+  }, [selectedGame, games]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadTuningStatus = async () => {
+      try {
+        const response = await axios.get(`${API_BASE}/api/tuning_status`, { timeout: 30000 });
+        if (!cancelled) {
+          setTuningStatus(response.data || { status: 'idle' });
+          setTuningErrorMessage('');
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setTuningErrorMessage(formatApiError(error, 'Unable to fetch tuning status'));
+        }
+      }
+    };
+
+    loadTuningStatus();
+    const stopPolling = startPolling({
+      intervalMs: 6000,
+      tick: loadTuningStatus,
+    });
+
+    return () => {
+      cancelled = true;
+      stopPolling();
+    };
+  }, [API_BASE]);
+
+  const startSuggestionTuning = useCallback(async (scopeOverride = null) => {
+    const requestedScope = scopeOverride === null ? selectedTuningGame : scopeOverride;
+    const normalizedScope = requestedScope === ALL_GAMES_VALUE ? 'all' : (requestedScope || selectedGame || 'all');
+
+    setTuningErrorMessage('');
+    try {
+      const response = await axios.post(`${API_BASE}/api/chat`, {
+        text: '',
+        tool: {
+          name: 'optimize_suggestions',
+          params: { game: normalizedScope },
+        },
+      }, { timeout: 120000 });
+
+      const result = response?.data?.tool_result || { status: 'started' };
+      setTuningStatus((prev) => ({
+        ...prev,
+        status: result.status === 'already_running' ? 'running' : (result.status || 'started'),
+        game: normalizedScope,
+        current_game: result.current_game || normalizedScope,
+        games_total: result.games_total || prev.games_total || 0,
+        games_completed: result.games_completed || prev.games_completed || 0,
+      }));
+
+      return response.data;
+    } catch (error) {
+      const message = formatApiError(error, 'Suggestion tuning could not start');
+      setTuningErrorMessage(message);
+      throw error;
+    }
+  }, [API_BASE, selectedGame, selectedTuningGame]);
+
   const getFocusColClass = (cardKey) => (
     `focus-cards-col${expandedCard === cardKey ? ' focus-cards-col-maximized' : ''}`
   );
@@ -1053,6 +1136,16 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
           <p className="lead">
             Ask about Take 5, Pick 3, Powerball, Mega Millions, and the rest of the NYL slate. RAG grounds answers in ingested draw history.
           </p>
+          <div className="tuning-hero-telemetry" aria-live="polite">
+            <div className="tuning-hero-meta">
+              <span>Suggestion tuning</span>
+              <strong>{String(tuningStatus.status || 'idle').toUpperCase()}</strong>
+            </div>
+            <img
+              src={`${API_BASE}/api/tuning_chart?updated=${encodeURIComponent(tuningStatus.updated_at || '0')}`}
+              alt={`Live tuning telemetry: ${tuningStatus.current_game || tuningStatus.game || 'all games'}, ${tuningStatus.games_completed || 0} of ${tuningStatus.games_total || 0} games complete`}
+            />
+          </div>
         </div>
         {conciergeCard}
       </section>
@@ -1554,6 +1647,74 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
               {trainStatus === 'in progress' ? 'Training...' : 'Start Training'}
             </button>
             {renderCardErrorAlert('Training Error', trainErrorMessage, 'mt-3 mb-0')}
+          </ExpandableCard>
+        </div>
+
+        {/* Suggestion Tuning */}
+        <div className={getFocusColClass('tuning')}>
+          <ExpandableCard
+            title="Suggestion Tuning"
+            cardKey="tuning"
+            focusedCard={expandedCard}
+            neonBorder={true}
+            metadata={{
+              'Status': tuningStatus.status || 'idle',
+              'Selected Scope': selectedTuningGame === ALL_GAMES_VALUE ? 'All games' : (selectedTuningGame || selectedGame || 'All games'),
+              'Tuning Graph': tuningStatus.games_total > 0
+                ? `${Number(tuningStatus.games_completed || 0)}/${Number(tuningStatus.games_total || 0)}`
+                : 'n/a',
+              ...(tuningErrorMessage ? { 'Error Message': tuningErrorMessage } : {}),
+            }}
+            statusBadge={
+              <span className={`badge ${tuningStatus.status === 'running' ? 'bg-warning text-dark' : tuningStatus.status === 'completed' ? 'bg-success' : tuningStatus.status === 'error' ? 'bg-danger' : 'bg-secondary'}`}>
+                {tuningStatus.status || 'idle'}
+              </span>
+            }
+            onToggle={handleCardFocus('tuning')}
+          >
+            <p className="mb-3 text-muted">
+              Run the iterative draw-history tuner to promote the best validated weights for the selected game or the full slate.
+            </p>
+            <div className="mb-3">
+              <label htmlFor="tuningGameSelect" className="form-label text-neon">Game for tuning</label>
+              <select
+                id="tuningGameSelect"
+                className="form-select"
+                value={selectedTuningGame}
+                onChange={(e) => setSelectedTuningGame(e.target.value)}
+                disabled={tuningStatus.status === 'running'}
+              >
+                <option value={ALL_GAMES_VALUE}>All games</option>
+                {games.map((game) => (
+                  <option key={game} value={game}>{game.toUpperCase()}</option>
+                ))}
+              </select>
+            </div>
+            <div className="d-flex gap-2 flex-wrap mb-3">
+              <button
+                className="btn btn-warning text-dark"
+                onClick={() => startSuggestionTuning(selectedTuningGame)}
+                disabled={tuningStatus.status === 'running' || games.length === 0}
+              >
+                {tuningStatus.status === 'running' ? 'Tuning...' : 'Run Tuning'}
+              </button>
+              <button
+                className="btn btn-outline-light"
+                onClick={() => startSuggestionTuning(ALL_GAMES_VALUE)}
+                disabled={tuningStatus.status === 'running' || games.length === 0}
+              >
+                Tune All Games
+              </button>
+            </div>
+            {tuningStatus.status === 'running' && (
+              <div className="small text-neon">
+                Active: {tuningStatus.current_game || tuningStatus.game || (selectedTuningGame === ALL_GAMES_VALUE ? 'all games' : selectedTuningGame)}
+                {tuningStatus.games_total > 0 && (
+                  <span className="ms-2">({Number(tuningStatus.games_completed || 0)}/{Number(tuningStatus.games_total || 0)})</span>
+                )}
+              </div>
+            )}
+            {renderCardErrorAlert('Tuning Error', tuningErrorMessage, 'mt-3 mb-0')}
           </ExpandableCard>
         </div>
 

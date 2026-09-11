@@ -65,6 +65,14 @@ async def _tool_self_diagnostics(_params: Dict[str, Any]) -> Dict[str, Any]:
     return await collect_runtime_diagnostics()
 
 
+def _tool_optimize_suggestions(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Tune one game or all games against their chronological draw history."""
+    from services.game_tuner import game_tuner
+
+    game = params.get("game")
+    return game_tuner.start(game=game)
+
+
 def _tool_internet_search(params: Dict[str, Any]) -> Dict[str, Any]:
     query = (params.get("query") or "").strip()
     if not query:
@@ -107,6 +115,9 @@ async def execute_chat_tool(tool_name: str, params: Optional[Dict[str, Any]] = N
     if tool_name == "self_diagnostics":
         return await _tool_self_diagnostics(normalized)
 
+    if tool_name == "optimize_suggestions":
+        return _tool_optimize_suggestions(normalized)
+
     if tool_name == "internet_search":
         return _tool_internet_search(normalized)
 
@@ -141,5 +152,14 @@ def _render_tool_response(tool_name: str, tool_result: Dict[str, Any]) -> str:
         from utils.diagnostics import format_diagnostics_summary
 
         return format_diagnostics_summary(tool_result)
+    elif tool_name == "optimize_suggestions":
+        games = tool_result.get("games") or []
+        if tool_result.get("status") in {"started", "running"}:
+            scope = tool_result.get("game") or "all games"
+            return f"Suggestion tuning started for {scope}. Poll /api/tuning_status for live progress."
+        if tool_result.get("status") == "already_running":
+            return "Suggestion tuning is already running. Poll /api/tuning_status for live progress."
+        successful = sum(1 for game in games if game.get("status") == "ok")
+        return f"Suggestion tuning completed for {successful}/{len(games)} game(s); report saved to the prediction state directory."
     else:
         return f"Tool '{tool_name}' completed successfully"

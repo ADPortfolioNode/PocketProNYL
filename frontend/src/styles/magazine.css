@@ -143,6 +143,37 @@ body {
   font-size: 1.05rem;
 }
 
+.tuning-hero-telemetry {
+  width: min(100%, 560px);
+  margin-top: 1.35rem;
+  padding: 0.75rem;
+  border: 1px solid rgba(219, 233, 255, 0.2);
+  border-radius: 0.85rem;
+  background: rgba(7, 13, 31, 0.58);
+}
+
+.tuning-hero-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0 0 0.35rem;
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.tuning-hero-meta strong {
+  color: var(--copper);
+}
+
+.tuning-hero-telemetry img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 0.45rem;
+}
+
 .magazine-badge {
   display: inline-flex;
   padding: 0.28rem 0.7rem;
@@ -150,6 +181,81 @@ body {
   background: rgba(110, 168, 254, 0.16);
   color: var(--cream);
   font-size: 0.78rem;
+.progressive-progress-chart {
+  position: relative;
+  min-height: 72px;
+  border: 1px solid var(--line);
+  background: rgba(7, 13, 31, 0.62);
+}
+.progressive-progress-chart svg {
+  display: block;
+  width: 100%;
+  height: 72px;
+}
+.progressive-progress-chart-grid {
+  stroke: rgba(219, 233, 255, 0.22);
+  stroke-width: 1;
+}
+.progressive-progress-chart-line {
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: points 300ms ease;
+}
+.progressive-progress-chart-line.bg-primary,
+.progressive-progress-chart-point.bg-primary { stroke: #6ea8fe; fill: #6ea8fe; }
+.progressive-progress-chart-line.bg-success,
+.progressive-progress-chart-point.bg-success { stroke: #85e3b0; fill: #85e3b0; }
+.progressive-progress-chart-line.bg-warning,
+.progressive-progress-chart-point.bg-warning { stroke: #ffd88e; fill: #ffd88e; }
+.progressive-progress-chart-line.bg-danger,
+.progressive-progress-chart-point.bg-danger { stroke: #ff9f9f; fill: #ff9f9f; }
+.progressive-progress-chart-line.bg-secondary,
+.progressive-progress-chart-point.bg-secondary { stroke: #a8bddf; fill: #a8bddf; }
+.progressive-progress-chart-line.is-active {
+  filter: drop-shadow(0 0 4px currentColor);
+  animation: progressive-chart-pulse 1.8s ease-in-out infinite;
+}
+.progressive-progress-chart-percent {
+  position: absolute;
+  top: 7px;
+  right: 9px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+@keyframes progressive-chart-pulse {
+  0%, 100% { opacity: 0.72; }
+  50% { opacity: 1; }
+}
+
+.startup-game-chart {
+  width: 120px;
+  height: 24px;
+}
+
+.startup-game-chart svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.startup-game-chart-grid {
+  stroke: rgba(219, 233, 255, 0.22);
+  stroke-width: 1;
+}
+
+.startup-game-chart-line {
+  fill: none;
+  stroke: #ffd88e;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.startup-game-chart-line.is-complete { stroke: #85e3b0; }
+.startup-game-chart-line.is-active { animation: progressive-chart-pulse 1.8s ease-in-out infinite; }
   letter-spacing: 0.08em;
   text-transform: uppercase;
   font-weight: 600;

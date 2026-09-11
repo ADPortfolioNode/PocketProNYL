@@ -30,6 +30,8 @@ const STARTER_CHIPS = [
   "What's hot in Take 5 lately?",
   'How do I train Pick 3 without a gateway timeout?',
   'Which games are ready for suggestions?',
+  'Optimize suggestions for Take 5',
+  'Tune all games for the next suggestion pass',
 ];
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = CHAT_REQUEST_TIMEOUT_MS) {
@@ -64,6 +66,30 @@ function renderMarkdown(text) {
 
 function providerLabel(value) {
   return LM_OPTIONS.find((opt) => opt.value === value)?.label || value || 'Auto';
+}
+
+function detectGameFromPrompt(text, selectedGame) {
+  const normalized = String(text || '').toLowerCase();
+  if (!normalized) return selectedGame || 'all';
+
+  const aliases = {
+    take5: ['take 5', 'take5', 'take-five'],
+    pick3: ['pick 3', 'pick3'],
+    powerball: ['powerball'],
+    megamillions: ['mega millions', 'megamillions'],
+    pick10: ['pick 10', 'pick10'],
+    cash4life: ['cash 4 life', 'cash4life'],
+    quickdraw: ['quick draw', 'quickdraw'],
+    nylotto: ['ny lotto', 'nylotto'],
+  };
+
+  for (const [gameKey, patterns] of Object.entries(aliases)) {
+    if (patterns.some((pattern) => normalized.includes(pattern))) {
+      return gameKey;
+    }
+  }
+
+  return selectedGame || 'all';
 }
 
 const ChatPanelRAG = ({ game = null, isExpanded = false, onActivityChange = null }) => {
@@ -119,20 +145,33 @@ const ChatPanelRAG = ({ game = null, isExpanded = false, onActivityChange = null
     const text = String(rawText || '').trim();
     if (!text || isLoading) return;
 
+    const tuningIntent = /(optimi[sz]e|tune|tuning|retune|re-tune|suggestion)/i.test(text);
+    const toolGame = detectGameFromPrompt(text, game);
+
     setMessages((prev) => [...prev, { sender: 'user', text }]);
     setInput('');
     setIsLoading(true);
 
     try {
+      const payload = tuningIntent
+        ? {
+              text,
+            tool: {
+              name: 'optimize_suggestions',
+              params: { game: toolGame === 'all' ? 'all' : toolGame },
+            },
+          }
+        : {
+            text,
+            game,
+            use_rag: useRag,
+            lm_provider: lmProvider || 'auto',
+          };
+
       const response = await fetchWithTimeout(`${API_BASE}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text,
-          game,
-          use_rag: useRag,
-          lm_provider: lmProvider || 'auto',
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await response.json().catch(() => ({}));

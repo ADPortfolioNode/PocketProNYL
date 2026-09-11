@@ -115,8 +115,10 @@ $endpoints = @(
     @{ url = "$frontendBase/api/startup_status"; desc = "/api/startup_status (proxy)"; optional = $false }
     @{ url = "$frontendBase/api/chroma/collections"; desc = "/api/chroma/collections (proxy)"; optional = $false }
     @{ url = "$frontendBase/api/experiments"; desc = "/api/experiments (proxy)"; optional = $false }
+    @{ url = "$frontendBase/api/tuning_status"; desc = "/api/tuning_status (proxy)"; optional = $false }
     @{ url = "$backendBase/api/health"; desc = "/api/health (direct host)"; optional = $true }
     @{ url = "$backendBase/api/train_settings?game=pick3"; desc = "/api/train_settings (direct host)"; optional = $true; timeout = 20 }
+    @{ url = "$backendBase/api/tuning_status"; desc = "/api/tuning_status (direct host)"; optional = $true }
 )
 $apiPassCount = 0; $apiRequired = 0; $apiRequiredPass = 0
 foreach ($endpoint in $endpoints) {
@@ -154,7 +156,24 @@ try {
 }
 Write-Report ""
 
-Write-Report "[5] REGRESSION CHECKS" -Color Yellow
+Write-Report "[5] TUNING CONTRACT CHECK" -Color Yellow
+Write-Report "------------------------------------------------------------"
+try {
+    $tuningStatus = (Invoke-WebRequest -Uri "$frontendBase/api/tuning_status" -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop).Content | ConvertFrom-Json
+    $requiredTuningFields = @("status", "games_total", "games_completed", "current_game", "current_task", "updated_at")
+    $missingTuningFields = @($requiredTuningFields | Where-Object { -not ($tuningStatus.PSObject.Properties.Name -contains $_) })
+    $validCounters = ($tuningStatus.games_total -is [int] -or $tuningStatus.games_total -is [long]) -and ($tuningStatus.games_completed -is [int] -or $tuningStatus.games_completed -is [long])
+    if ($missingTuningFields.Count -eq 0 -and $validCounters) {
+        Write-Report "  [PASS] Tuning status contract is valid (status=$($tuningStatus.status), completed=$($tuningStatus.games_completed)/$($tuningStatus.games_total), task=$($tuningStatus.current_task))" -Color Green
+    } else {
+        Write-Report "  [FAIL] Tuning status contract is invalid (missing=$($missingTuningFields -join ', '))" -Color Red
+    }
+} catch {
+    Write-Report "  [FAIL] Could not validate /api/tuning_status: $($_.Exception.Message)" -Color Red
+}
+Write-Report ""
+
+Write-Report "[6] REGRESSION CHECKS" -Color Yellow
 Write-Report "------------------------------------------------------------"
 try {
     $htmlResp = Invoke-WebRequest -Uri "$frontendBase" -UseBasicParsing -TimeoutSec 8 -ErrorAction Stop
@@ -165,7 +184,7 @@ try {
 }
 Write-Report ""
 
-Write-Report "[6] CONNECTIVITY" -Color Yellow
+Write-Report "[7] CONNECTIVITY" -Color Yellow
 Write-Report "------------------------------------------------------------"
 @(
     @{ host = $bindHost; port = $frontendPort; service = "Frontend (Nginx)"; optional = $false }

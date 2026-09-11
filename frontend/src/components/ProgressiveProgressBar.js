@@ -69,6 +69,14 @@ export default function ProgressiveProgressBar({
     }
   };
 
+  const chartWidth = 320;
+  const chartHeight = 72;
+  const chartPadding = 8;
+  const chartProgress = chartPadding + ((chartWidth - chartPadding * 2) * clampedPercentage) / 100;
+  const chartBase = chartHeight - chartPadding;
+  const chartPeak = chartBase - (chartHeight - chartPadding * 2) * Math.max(clampedPercentage, 4) / 100;
+  const chartPoints = `${chartPadding},${chartBase} ${chartProgress},${chartPeak}`;
+
   return (
     <div className="progressive-progress mb-3">
       {/* Header with label and status */}
@@ -81,16 +89,14 @@ export default function ProgressiveProgressBar({
         </span>
       </div>
 
-      {/* Progress Bar */}
-      <div className="progressive-progress-track">
-        <progress
-          className={`progressive-progress-native ${getBarColor()} ${status === 'active' ? 'is-active' : ''}`}
-          value={clampedPercentage}
-          max="100"
-        />
-        {clampedPercentage > 15 && (
-          <span className="progressive-progress-overlay">{clampedPercentage}%</span>
-        )}
+      {/* Progress chart */}
+      <div className="progressive-progress-chart" role="img" aria-label={`${label}: ${clampedPercentage}% complete`}>
+        <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} preserveAspectRatio="none" aria-hidden="true">
+          <line className="progressive-progress-chart-grid" x1={chartPadding} y1={chartBase} x2={chartWidth - chartPadding} y2={chartBase} />
+          <polyline className={`progressive-progress-chart-line ${getBarColor()} ${status === 'active' ? 'is-active' : ''}`} points={chartPoints} />
+          <circle className={`progressive-progress-chart-point ${getBarColor()}`} cx={chartProgress} cy={chartPeak} r="4" />
+        </svg>
+        <span className="progressive-progress-chart-percent">{clampedPercentage}%</span>
       </div>
 
       {/* Metadata */}

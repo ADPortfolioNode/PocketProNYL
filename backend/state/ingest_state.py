@@ -137,7 +137,11 @@ def get_manual_ingest_state(game_key: str) -> Dict[str, Any]:
 
 def get_startup_state() -> Dict[str, Any]:
     """Get current startup state."""
-    return startup_state
+    try:
+        from services.game_tuner import game_tuner
+        return {**startup_state, "tuning": game_tuner.status()}
+    except Exception:
+        return startup_state
 
 
 def reset_startup_state():
