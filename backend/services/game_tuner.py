@@ -11,6 +11,7 @@ from typing import Any
 
 from config import GAME_CONFIGS
 from prediction.engine import LotteryPredictionEngine
+from prediction.state.weight_store import WeightStore
 
 
 class GameTuner:
@@ -49,7 +50,8 @@ class GameTuner:
         try:
             self._set_status(current_task="iterative_validation")
             metrics = LotteryPredictionEngine(str(self.state_dir)).backtest(game_key)
-            return {
+            weights = WeightStore(str(self.state_dir)).load(game_key)
+            result = {
                 "status": metrics.get("status", "ok"),
                 "game": game_key,
                 "training_draws": (metrics.get("split") or {}).get("training_draws"),
@@ -61,9 +63,26 @@ class GameTuner:
                 "target_reached": metrics.get("target_reached", False),
                 "verification_rounds": metrics.get("verification_rounds", 0),
                 "suggestion_history_count": len(metrics.get("suggestion_history") or []),
+                "suggestion_history": (metrics.get("suggestion_history") or [])[-25:],
                 "training_seconds": round(time.time() - started, 2),
                 "message": metrics.get("note"),
             }
+            self._set_status(
+                current_game=game_key,
+                latest_result=result,
+                tuning_metrics={
+                    "accuracy_percent": result.get("accuracy_percent"),
+                    "highest_accuracy_percent": result.get("highest_accuracy_percent"),
+                    "target_accuracy_percent": metrics.get("target_accuracy_percent"),
+                    "random_baseline": metrics.get("random_baseline"),
+                    "lift_vs_random": metrics.get("lift_vs_random"),
+                    "suggestion_history_count": result.get("suggestion_history_count"),
+                    "suggestion_history": result.get("suggestion_history", []),
+                    "weights": weights.weights,
+                    "best_weights": weights.best_weights,
+                },
+            )
+            return result
         except Exception as exc:
             return {
                 "status": "error",

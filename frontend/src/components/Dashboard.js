@@ -50,6 +50,110 @@ const FILMSTRIP = [
   { src: '/css/assets/nyl-bg/subway.jpg', alt: 'Subway commuter checking a phone', label: 'On the go' },
 ];
 
+function TuningMetricsChart({ status, selectedGame }) {
+  const metrics = status?.tuning_metrics || {};
+  const latestGame = status?.latest_result?.game || status?.current_game;
+  const game = selectedGame === ALL_GAMES_VALUE ? latestGame : selectedGame;
+  const hasMatchingMetrics = !latestGame || selectedGame === ALL_GAMES_VALUE || latestGame === selectedGame;
+  const weights = hasMatchingMetrics ? (metrics.best_weights || metrics.weights || {}) : {};
+  const values = [
+    ['Current accuracy', hasMatchingMetrics ? Number(metrics.accuracy_percent) : NaN],
+    ['Best accuracy', hasMatchingMetrics ? Number(metrics.highest_accuracy_percent) : NaN],
+    ['Target floor', hasMatchingMetrics ? Number(metrics.target_accuracy_percent) : NaN],
+  ].filter(([, value]) => Number.isFinite(value));
+
+  if (!values.length) {
+    return <div className="tuning-metrics-empty">Run tuning to chart this game's validated accuracy floor.</div>;
+  }
+
+  return (
+    <div className="tuning-metrics-chart" aria-label={`Tuning metadata chart for ${game || 'selected game'}`}>
+      <div className="tuning-metrics-heading">
+        <span>{String(game || 'selected game').toUpperCase()}</span>
+        <strong>VALIDATED ACCURACY</strong>
+      </div>
+      <div className="tuning-metrics-bars">
+        {values.map(([label, value]) => (
+          <div className="tuning-metric-row" key={label}>
+            <span>{label}</span>
+            <div className="tuning-metric-track">
+              <span className={`tuning-metric-fill ${label === 'Target floor' ? 'is-target' : ''}`} style={{ width: `${Math.max(0, Math.min(value, 100))}%` }} />
+            </div>
+            <strong>{value.toFixed(1)}%</strong>
+          </div>
+        ))}
+      </div>
+      <div className="tuning-metrics-meta">
+        <span>Random baseline: {hasMatchingMetrics && Number.isFinite(Number(metrics.random_baseline?.mean_partial_hits)) ? Number(metrics.random_baseline.mean_partial_hits).toFixed(2) : 'n/a'} hits</span>
+        <span>Lift: {hasMatchingMetrics && Number.isFinite(Number(metrics.lift_vs_random)) ? `${Number(metrics.lift_vs_random).toFixed(2)}x` : 'n/a'}</span>
+        <span>Batches: {hasMatchingMetrics ? (metrics.suggestion_history_count ?? 'n/a') : 'n/a'}</span>
+      </div>
+      {Object.keys(weights).length > 0 && (
+        <div className="tuning-weight-chart">
+          <span className="tuning-weight-title">BEST WEIGHT BALANCE</span>
+          {Object.entries(weights).map(([name, value]) => (
+            <div className="tuning-weight-row" key={name}>
+              <span>{name}</span>
+              <div className="tuning-weight-track"><span style={{ width: `${Math.max(0, Math.min(Number(value) * 100, 100))}%` }} /></div>
+              <strong>{(Number(value) * 100).toFixed(0)}%</strong>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TuningValidationLedger({ status, selectedGame }) {
+  const latestGame = status?.latest_result?.game || status?.current_game;
+  const game = selectedGame === ALL_GAMES_VALUE ? latestGame : selectedGame;
+  const hasMatchingHistory = !latestGame || selectedGame === ALL_GAMES_VALUE || latestGame === selectedGame;
+  const history = hasMatchingHistory ? (status?.tuning_metrics?.suggestion_history || []) : [];
+
+  if (!history.length) return null;
+
+  return (
+    <div className="tuning-validation-ledger">
+      <div className="tuning-ledger-heading">
+        <span>{String(game || 'selected game').toUpperCase()} VALIDATION LEDGER</span>
+        <span>Recent {history.length}</span>
+      </div>
+      <div className="table-responsive">
+        <table className="table table-sm align-middle mb-0 tuning-ledger-table">
+          <thead>
+            <tr>
+              <th>Suggestion date</th>
+              <th>Ground-truth draw date</th>
+              <th>Lead</th>
+              <th>Suggested numbers</th>
+              <th>Ground-truth numbers</th>
+              <th>Winning numbers</th>
+              <th>Bonus</th>
+              <th>Accuracy</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[...history].reverse().map((entry, index) => (
+              <tr key={`${entry.draw_id || entry.draw_date || 'draw'}-${index}`}>
+                <td>{entry.suggestion_date || 'n/a'}</td>
+                <td>{entry.ground_truth_draw_date || entry.actual_draw_date || entry.draw_date || 'n/a'}</td>
+                <td>{Number.isFinite(Number(entry.lead_days)) ? `${Number(entry.lead_days)} day${Number(entry.lead_days) === 1 ? '' : 's'}` : 'n/a'}</td>
+                <td>{(entry.predicted_numbers || []).join(', ') || 'n/a'}</td>
+                <td>{(entry.ground_truth_numbers || entry.actual_numbers || []).join(', ') || 'n/a'}</td>
+                <td className={entry.validation_status === 'hit' ? 'text-success fw-semibold' : 'text-muted'}>
+                  {entry.winning_numbers_count ?? entry.numbers_won ?? entry.partial_hits ?? 0} / {entry.winning_numbers_possible ?? 'n/a'}
+                </td>
+                <td>{entry.bonus_possible ? `${entry.bonus_hits ?? 0} / ${entry.bonus_possible}` : 'n/a'}</td>
+                <td>{Number.isFinite(Number(entry.accuracy_percent)) ? `${Number(entry.accuracy_percent).toFixed(1)}%` : 'n/a'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard({ startupStatus = { status: 'unknown', progress: 0, total: 0, elapsed_s: 0 }, startupErrorMessage = '' }) {
   const API_BASE = getApiBase();
   // Use runtime-computed API base
@@ -1675,6 +1779,8 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
             <p className="mb-3 text-muted">
               Run the iterative draw-history tuner to promote the best validated weights for the selected game or the full slate.
             </p>
+            <TuningMetricsChart status={tuningStatus} selectedGame={selectedTuningGame === ALL_GAMES_VALUE ? selectedGame : selectedTuningGame} />
+            <TuningValidationLedger status={tuningStatus} selectedGame={selectedTuningGame === ALL_GAMES_VALUE ? selectedGame : selectedTuningGame} />
             <div className="mb-3">
               <label htmlFor="tuningGameSelect" className="form-label text-neon">Game for tuning</label>
               <select

@@ -121,11 +121,13 @@ def walk_forward_backtest(
             try:
                 ticket = predict_fn(train_hist)
                 predicted = ticket.primary if isinstance(ticket, PredictionTicket) else ticket
+                predicted_bonus = ticket.bonus if isinstance(ticket, PredictionTicket) else []
             except Exception:
                 verification_history = verification_history + [actual]
                 continue
 
             hits = _partial_hits(predicted, actual.primary)
+            bonus_hits = _partial_hits(predicted_bonus, actual.bonus) if predicted_bonus and actual.bonus else 0
             partial_hits.append(hits)
             exact_match = _exact_match(predicted, actual.primary)
             if exact_match:
@@ -133,6 +135,11 @@ def walk_forward_backtest(
             sum_errors.append(abs(sum(predicted) - sum(actual.primary)))
             evaluated += 1
             accuracy = hits / max(rules.primary_count, 1)
+            suggestion_date = train_hist[-1].draw_date.isoformat() if train_hist and train_hist[-1].draw_date else None
+            actual_draw_date = actual.draw_date.isoformat() if actual.draw_date else None
+            lead_days = None
+            if train_hist and train_hist[-1].draw_date and actual.draw_date:
+                lead_days = (actual.draw_date - train_hist[-1].draw_date).days
             suggestion_history.append({
                 "round": round_index + 1,
                 "iteration": evaluated,
@@ -140,15 +147,29 @@ def walk_forward_backtest(
                 "previous_iteration_accuracy_percent": previous_accuracy_percent,
                 "draw_index": index,
                 "draw_id": actual.draw_id,
-                "draw_date": actual.draw_date.isoformat() if actual.draw_date else None,
+                "suggestion_date": suggestion_date,
+                "draw_date": actual_draw_date,
+                "actual_draw_date": actual_draw_date,
+                "lead_days": lead_days,
                 "draw_datetime": actual.metadata.get("draw_datetime") if actual.metadata else None,
                 "predicted_numbers": list(predicted),
                 "actual_numbers": list(actual.primary),
+                "ground_truth_numbers": list(actual.primary),
+                "ground_truth_draw_date": actual_draw_date,
                 "partial_hits": hits,
+                "numbers_won": hits,
+                "primary_hits": hits,
+                "primary_possible": rules.primary_count,
+                "predicted_bonus_numbers": list(predicted_bonus),
+                "actual_bonus_numbers": list(actual.bonus),
+                "bonus_hits": bonus_hits,
+                "bonus_possible": rules.bonus_count,
+                "winning_numbers_count": hits + bonus_hits,
+                "winning_numbers_possible": rules.primary_count + rules.bonus_count,
                 "accuracy": round(accuracy, 6),
                 "accuracy_percent": round(accuracy * 100, 2),
                 "exact_match": exact_match,
-                "validation_status": "hit" if hits > 0 else "miss",
+                "validation_status": "hit" if hits + bonus_hits > 0 else "miss",
             })
             current_suggestion = suggestion_history[-1]
             if highest_suggestion is None or (
