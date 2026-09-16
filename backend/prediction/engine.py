@@ -79,10 +79,11 @@ class LotteryPredictionEngine:
 
     def _resolve_weights(self, game: str, config: GamePredictionConfig) -> dict[str, float]:
         state = self.weight_store.load(game, initial_weights=config.ensemble.initial_weights)
-        if state.best_weights:
-            return state.best_weights
+        # Use the live challenger mix during tuning so a new balance is actually tested.
         if state.weights:
             return state.weights
+        if state.best_weights:
+            return state.best_weights
         weights = dict(config.ensemble.initial_weights)
         total = sum(weights.values())
         if total > 0:
@@ -95,6 +96,7 @@ class LotteryPredictionEngine:
         history: list[Draw] | None = None,
         limit: int = 500,
         strategy: str | None = None,
+        use_nn: bool = True,
     ) -> PredictionTicket:
         config = self._load_config(game)
         rules = game_rules_from_config(game)
@@ -133,7 +135,8 @@ class LotteryPredictionEngine:
 
         nn_scores = None
         nn_weight = 0.0
-        if config.nn.enabled and config.ensemble.enabled:
+        # Walk-forward tuning scores ensemble weights; skip the per-draw NN refit.
+        if use_nn and config.nn.enabled and config.ensemble.enabled:
             nn = self._get_nn(game, config)
             if nn is not None:
                 try:
@@ -167,6 +170,7 @@ class LotteryPredictionEngine:
             rules=rules,
             nn_scores=nn_scores,
             nn_weight=nn_weight,
+            metrics={"nn_blended": bool(nn_scores) and nn_weight > 0},
         )
         ticket.strategy_used = strategy_name
         return ticket
@@ -177,6 +181,8 @@ class LotteryPredictionEngine:
         actual: Draw,
         history: list[Draw] | None = None,
         validation_accuracy: float | None = None,
+        learning_rate: float | None = None,
+        outputs: list[StrategyOutput] | None = None,
     ) -> dict:
         """Update ensemble weights after a real draw result."""
         config = self._load_config(game)
@@ -189,41 +195,91 @@ class LotteryPredictionEngine:
 
         # Evaluate picks made before the draw; never let the actual result
         # influence the strategy output being scored.
-        prior_history = list(history or [])
-        if actual.draw_id:
-            prior_history = [draw for draw in prior_history if draw.draw_id != actual.draw_id]
-        elif prior_history and prior_history[-1].primary == actual.primary:
-            prior_history = prior_history[:-1]
-        outputs = self._collect_outputs(prior_history, config)
+        if outputs is not None:
+            scored_outputs = list(outputs)
+        else:
+            prior_history = list(history or [])
+            if actual.draw_id:
+                prior_history = [draw for draw in prior_history if draw.draw_id != actual.draw_id]
+            elif prior_history and prior_history[-1].primary == actual.primary:
+                prior_history = prior_history[:-1]
+            scored_outputs = self._collect_outputs(prior_history, config)
+        outputs = scored_outputs
         state = self.weight_updater.update(
             game=game,
             actual=actual,
             outputs=outputs,
             rules=rules,
-            learning_rate=config.ensemble.learning_rate,
+            learning_rate=float(learning_rate) if learning_rate is not None else config.ensemble.learning_rate,
             min_weight=config.ensemble.min_weight,
             initial_weights=config.ensemble.initial_weights,
             validation_accuracy=validation_accuracy,
         )
+        latest = state.history[-1] if state.history else {}
         return {
             "game": game,
             "weights": state.weights,
             "best_weights": state.best_weights,
             "best_validation_accuracy": state.best_validation_accuracy,
-            "promoted": bool(state.history and state.history[-1].get("promoted")),
+            "promoted": bool(latest.get("promoted")),
+            "regressed": bool(latest.get("regressed")),
+            "held": bool(latest.get("held")),
             "updated_at": state.updated_at,
         }
 
-    def backtest(self, game: str, history: list[Draw] | None = None) -> dict:
+    def backtest(
+        self,
+        game: str,
+        history: list[Draw] | None = None,
+        verification_rounds: int | None = None,
+        min_verification_rounds: int | None = None,
+        improvement_patience: int | None = None,
+        rolling_window: int | None = None,
+        learning_rate: float | None = None,
+        progress_callback: Callable[[dict], None] | None = None,
+        max_test_draws: int | None = None,
+        use_nn: bool = False,
+    ) -> dict:
         """Walk-forward backtest with honest metrics."""
         config = self._load_config(game)
         rules = game_rules_from_config(game)
         if history is None:
             history = from_chroma(game, limit=config.metrics.backtest_window + 50)
 
-        def predict_fn(train_hist: list[Draw]) -> PredictionTicket:
-            return self.predict(game, history=train_hist)
+        last_outputs: list[StrategyOutput] = []
 
+        def predict_fn(train_hist: list[Draw]) -> PredictionTicket:
+            ticket = self.predict(game, history=train_hist, use_nn=use_nn)
+            last_outputs.clear()
+            last_outputs.extend(ticket.strategy_outputs or [])
+            return ticket
+
+        lr_holder = {
+            "value": float(learning_rate) if learning_rate is not None else float(config.ensemble.learning_rate),
+        }
+
+        def wrapped_progress(payload: dict) -> None:
+            if progress_callback is None:
+                return
+            progress_callback({**payload, "game": game, "learning_rate": lr_holder.get("value")})
+
+        def update_fn(actual: Draw, train_hist: list[Draw], validation_accuracy: float):
+            reused = list(last_outputs)
+            last_outputs.clear()
+            return self.update_weights(
+                game,
+                actual,
+                history=train_hist,
+                validation_accuracy=validation_accuracy,
+                learning_rate=lr_holder["value"],
+                outputs=reused,
+            )
+
+        test_cap = (
+            max_test_draws
+            if max_test_draws is not None
+            else getattr(config.metrics, "max_test_draws", None)
+        )
         return walk_forward_backtest(
             history=history,
             rules=rules,
@@ -231,13 +287,18 @@ class LotteryPredictionEngine:
             window=config.metrics.backtest_window,
             min_draws=config.metrics.min_backtest_draws,
             target_accuracy=config.metrics.target_accuracy,
-            verification_rounds=config.metrics.verification_rounds,
-            update_fn=lambda actual, train_hist, validation_accuracy: self.update_weights(
-                game,
-                actual,
-                history=train_hist,
-                validation_accuracy=validation_accuracy,
+            verification_rounds=(
+                verification_rounds
+                if verification_rounds is not None
+                else config.metrics.verification_rounds
             ),
+            min_verification_rounds=min_verification_rounds or 1,
+            improvement_patience=improvement_patience,
+            rolling_window=rolling_window,
+            learning_rate_holder=lr_holder,
+            progress_callback=wrapped_progress if progress_callback is not None else None,
+            max_test_draws=test_cap,
+            update_fn=update_fn,
         )
 
 

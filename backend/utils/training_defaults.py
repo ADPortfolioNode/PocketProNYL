@@ -61,6 +61,21 @@ GAME_TRAINING_DEFAULTS: Dict[str, Dict[str, Any]] = {
             "target, smaller trees, and a short window to avoid overfitting noise."
         ),
     },
+    "win4": {
+        "target_accuracy": 0.84,
+        "max_iterations": 30,
+        "train_size": 0.30,
+        "n_estimators": 160,
+        "max_depth": 12,
+        "window_size": 2,
+        "blend_step": 0.06,
+        "data_limit": 0,
+        "reasoning": (
+            "Win 4 is the same twice-daily digit cadence as Pick 3 with one extra "
+            "digit; keep a short window and a modest target so history noise does "
+            "not dominate."
+        ),
+    },
     "take5": {
         "target_accuracy": 0.88,
         "max_iterations": 35,

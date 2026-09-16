@@ -338,8 +338,18 @@ GAME_PREDICTION_SCHEDULES = {
             5: 1,
         },
     },
-    "numbers": {"daily_draws": 2, "weekday_draws": {}},
-    "win4": {"daily_draws": 2, "weekday_draws": {}},
+    "numbers": {
+        "daily_draws": 2,
+        "draw_times": ["14:30", "22:30"],
+        "draw_sessions": ["midday", "evening"],
+        "weekday_draws": {},
+    },
+    "win4": {
+        "daily_draws": 2,
+        "draw_times": ["14:30", "22:30"],
+        "draw_sessions": ["midday", "evening"],
+        "weekday_draws": {},
+    },
     "millionaireforlife": {"daily_draws": 0, "weekday_draws": {0: 1, 2: 1, 5: 1}},
 }
 

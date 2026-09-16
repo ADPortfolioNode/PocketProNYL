@@ -1,0 +1,22 @@
+game: win4
+enabled_strategies:
+  - frequency
+  - delta
+  - hot_cold
+  - distribution
+enabled_agents:
+  - repeats
+  - sums
+  - last_digit
+ensemble:
+  initial_weights:
+    frequency: 0.25
+    delta: 0.20
+    hot_cold: 0.20
+    distribution: 0.15
+    repeats: 0.10
+    sums: 0.05
+    last_digit: 0.05
+metrics:
+  backtest_window: 250
+  min_backtest_draws: 60

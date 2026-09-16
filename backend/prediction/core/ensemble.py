@@ -145,4 +145,5 @@ def build_ticket(
         strategy_contributions=contributions,
         weights_used=used,
         metrics=metrics or {},
+        strategy_outputs=list(outputs),
     )

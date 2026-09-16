@@ -91,6 +91,8 @@ class PredictionTicket:
     strategy_contributions: dict[str, list[int]] = field(default_factory=dict)
     weights_used: dict[str, float] = field(default_factory=dict)
     metrics: dict[str, Any] = field(default_factory=dict)
+    # Plugin outputs used to build this ticket; reuse them when scoring the draw.
+    strategy_outputs: list[StrategyOutput] = field(default_factory=list)
 
 
 @dataclass

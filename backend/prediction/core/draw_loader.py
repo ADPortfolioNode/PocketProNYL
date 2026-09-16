@@ -14,22 +14,51 @@ def _parse_numbers(raw_value: Any) -> list[int]:
     return [int(token) for token in re.findall(r"\d+", str(raw_value or ""))]
 
 
-def _extract_primary_candidate(metadata: dict) -> list[int]:
+def _parse_fixed_digits(raw_value: Any, count: int) -> list[int]:
+    digits = re.findall(r"\d", str(raw_value or ""))
+    return [int(digit) for digit in digits[-count:]] if len(digits) >= count else []
+
+
+def _extract_primary_candidate(metadata: dict, game: str | None = None) -> list[int]:
     preferred: list[Any] = []
     fallback: list[Any] = []
+    pick3_fields: list[Any] = []
+    win4_fields: list[Any] = []
     for key, value in (metadata or {}).items():
         key_lower = str(key).lower()
+        key_norm = re.sub(r"[^a-z0-9]+", "", key_lower)
         if "draw_number" in key_lower or not str(value or "").strip():
             continue
         if key_lower in ("winning_numbers", "winningnumbers"):
             preferred.append(value)
+        elif key_norm in {"middaydaily", "eveningdaily"}:
+            pick3_fields.append(value)
+        elif key_norm in {"middaywin4", "eveningwin4"}:
+            win4_fields.append(value)
         elif "winning" in key_lower and "number" in key_lower:
             fallback.append(value)
         elif "numbers" in key_lower or "result" in key_lower:
             fallback.append(value)
-    for candidate in preferred + fallback:
-        numbers = _parse_numbers(candidate)
-        if numbers:
+
+    normalized_game = str(game or "").lower()
+    if normalized_game in {"pick3", "numbers"}:
+        parse_value = lambda value: _parse_fixed_digits(value, 3)
+        candidates = preferred + pick3_fields + fallback
+        expected = 3
+    elif normalized_game == "win4":
+        parse_value = lambda value: _parse_fixed_digits(value, 4)
+        candidates = preferred + win4_fields + fallback
+        expected = 4
+    else:
+        parse_value = _parse_numbers
+        candidates = preferred + pick3_fields + win4_fields + fallback
+        expected = 0
+
+    for candidate in candidates:
+        numbers = parse_value(candidate)
+        if expected and len(numbers) == expected:
+            return numbers
+        if not expected and numbers:
             return numbers
     return []
 
@@ -87,7 +116,7 @@ def metadata_to_draw(metadata: dict, game: str, draw_id: str | None = None) -> D
     """Parse one Chroma metadata record into a Draw."""
     _ensure_bonus_keys()
     rules = game_rules_from_config(game)
-    winning = _extract_primary_candidate(metadata)
+    winning = _extract_primary_candidate(metadata, game=game)
     if not winning:
         return None
 
@@ -182,13 +211,37 @@ def draws_from_lists(rows: list[list[int]], game: str) -> list[Draw]:
     return draws
 
 
+def _session_rank(metadata: dict | None) -> str:
+    session = str((metadata or {}).get("draw_session") or "").strip().lower()
+    if session == "midday":
+        return "0"
+    if session == "evening":
+        return "1"
+    return session or "9"
+
+
 def from_chroma(game: str, limit: int = 500) -> list[Draw]:
-    """Load draw history from ChromaDB (newest first in DB, returned oldest-first)."""
+    """Load the most recent draw history from ChromaDB, returned oldest-first."""
     from services.chroma_client import chroma_client
 
     collection = chroma_client.client.get_collection(game)
-    data = collection.get(limit=limit, include=["metadatas"])
+    total = int(collection.count() or 0)
+    if total <= 0:
+        return []
+
+    fetch_limit = min(total, max(int(limit), 1))
+    offset = max(0, total - fetch_limit)
+    data = collection.get(limit=fetch_limit, offset=offset, include=["metadatas"])
     metadatas = data.get("metadatas") or []
     ids = data.get("ids") or []
-    draws = draws_from_metadatas(list(reversed(metadatas)), game, list(reversed(ids)))
+    draws = draws_from_metadatas(list(metadatas), game, list(ids))
+    draws.sort(
+        key=lambda draw: (
+            draw.draw_date or date.min,
+            _session_rank(draw.metadata),
+            str(draw.draw_id or ""),
+        )
+    )
+    if len(draws) > fetch_limit:
+        draws = draws[-fetch_limit:]
     return draws

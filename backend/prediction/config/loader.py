@@ -39,6 +39,8 @@ class MetricsConfig(BaseModel):
     random_trials: int = 500
     target_accuracy: float = 0.98
     verification_rounds: int = 1
+    # Cap walk-forward evaluations to the most recent test draws.
+    max_test_draws: int = 80
 
 
 class GamePredictionConfig(BaseModel):

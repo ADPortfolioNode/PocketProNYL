@@ -3,9 +3,6 @@ Chat API routes with RAG support.
 """
 from io import BytesIO
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -13,7 +10,13 @@ from typing import Optional, Dict, Any
 from services.lm_router import lm_router
 from services.rag_service import rag_service
 from services.gemini_client import LM_UNAVAILABLE_PREFIX
-from utils.chat_tools import _render_tool_response, execute_chat_tool
+from utils.chat_tools import (
+    _render_tool_response,
+    detect_chat_tool,
+    execute_chat_tool,
+    is_all_games_scope,
+    resolve_tool_game,
+)
 
 
 router = APIRouter()
@@ -28,39 +31,12 @@ async def tuning_status():
 
 
 @router.get("/api/tuning_chart")
-async def tuning_chart():
-    """Render current tuning telemetry as a small cacheable PNG for the hero panel."""
+def tuning_chart(game: Optional[str] = None):
+    """Render current tuning telemetry as a matplotlib PNG for the tuning section."""
     from services.game_tuner import game_tuner
+    from services.tuning_chart import render_tuning_chart
 
-    status = game_tuner.status()
-    total = max(int(status.get("games_total") or 0), 0)
-    completed = min(max(int(status.get("games_completed") or 0), 0), total) if total else 0
-    relative_progress = completed / total if total else 0
-    state = str(status.get("status") or "idle").upper()
-    active_game = str(status.get("current_game") or status.get("game") or "all games")
-    task = str(status.get("current_task") or "waiting")
-
-    figure, axis = plt.subplots(figsize=(7.2, 2.25), dpi=140)
-    figure.patch.set_facecolor("#10182b")
-    axis.set_facecolor("#10182b")
-    axis.barh([0], [1], color="#273552", height=0.22)
-    axis.barh([0], [relative_progress], color="#d38b52" if state == "RUNNING" else "#6ea8fe", height=0.22)
-    axis.set_xlim(0, 1)
-    axis.set_yticks([])
-    axis.set_xticks([0, 0.25, 0.5, 0.75, 1])
-    axis.set_xticklabels(["0%", "25%", "50%", "75%", "100%"], color="#b7c6df", fontsize=8)
-    axis.tick_params(axis="x", length=0, pad=5)
-    for spine in axis.spines.values():
-        spine.set_visible(False)
-    axis.text(0, 0.42, "LIVE TUNING TELEMETRY", color="#dbe9ff", fontsize=9, fontweight="bold", transform=axis.transAxes)
-    axis.text(0, 0.23, f"{active_game.upper()}  /  {task.replace('_', ' ').upper()}", color="#b7c6df", fontsize=8, transform=axis.transAxes)
-    axis.text(1, 0.42, f"{completed}/{total}  {state}", color="#d38b52" if state == "RUNNING" else "#dbe9ff", fontsize=9, fontweight="bold", ha="right", transform=axis.transAxes)
-    figure.tight_layout(pad=0.8)
-
-    image = BytesIO()
-    figure.savefig(image, format="png", transparent=False)
-    plt.close(figure)
-    image.seek(0)
+    image = BytesIO(render_tuning_chart(game_tuner.status(), game=game))
     return StreamingResponse(image, media_type="image/png", headers={"Cache-Control": "no-store"})
 
 
@@ -87,7 +63,9 @@ def _chat_fallback_for_lm_unavailable(user_text: str, lm_response: str, raw_game
     Generate a helpful fallback response when LLM is unavailable.
     """
     if lm_response.startswith(LM_UNAVAILABLE_PREFIX):
-        game_context = f" for {raw_game}" if raw_game else ""
+        game_context = ""
+        if raw_game and not is_all_games_scope(raw_game):
+            game_context = f" for {raw_game}"
         return (
             f"I apologize, but I'm currently unable to connect to the AI language model{game_context}. "
             f"This might be due to API key issues or service unavailability. "
@@ -103,12 +81,21 @@ async def chat(request: ChatRequest):
     AI chat endpoint with optional RAG context and tool calling.
     """
     try:
-        if request.tool:
-            tool_name = request.tool.get("name")
+        tool = request.tool
+        if not tool:
+            inferred = detect_chat_tool(request.text)
+            if inferred:
+                tool = {
+                    "name": inferred,
+                    "params": {"game": resolve_tool_game(request.text, request.game)},
+                }
+
+        if tool:
+            tool_name = tool.get("name")
             if not tool_name:
                 raise HTTPException(status_code=400, detail="Tool name is required")
 
-            tool_params = request.tool.get("params") or {}
+            tool_params = tool.get("params") or {}
             tool_result = await execute_chat_tool(tool_name, tool_params)
             response_text = _render_tool_response(tool_name, tool_result)
 
@@ -124,7 +111,7 @@ async def chat(request: ChatRequest):
 
         # Prepare context if RAG is enabled
         context_docs = []
-        if request.use_rag and request.game:
+        if request.use_rag and request.game and not is_all_games_scope(request.game):
             try:
                 from utils.validation import _require_game_key
                 game_key = _require_game_key(request.game)

@@ -41,6 +41,43 @@ class WeightStore:
                 weights = {k: v / total for k, v in weights.items()}
         return WeightState(game=game, weights=weights)
 
+    def snapshot(self, game: str) -> dict:
+        state = self.load(game)
+        return {
+            "weights": dict(state.weights or {}),
+            "best_weights": dict(state.best_weights or {}),
+            "best_validation_accuracy": state.best_validation_accuracy,
+            "best_validation_at": state.best_validation_at,
+            "last_draw_id": state.last_draw_id,
+            "history": list(state.history or []),
+        }
+
+    def restore(self, game: str, snapshot: dict | None) -> WeightState:
+        state = self.load(game)
+        payload = snapshot or {}
+        state.weights = dict(payload.get("weights") or state.weights or {})
+        state.best_weights = dict(payload.get("best_weights") or {})
+        state.best_validation_accuracy = payload.get("best_validation_accuracy")
+        state.best_validation_at = float(payload.get("best_validation_at") or 0)
+        state.last_draw_id = payload.get("last_draw_id")
+        state.history = list(payload.get("history") or [])
+        self.save(state)
+        return state
+
+    def adopt_best(self, game: str) -> WeightState:
+        """Make the live mix the last promoted balance (production / end of tuning)."""
+        state = self.load(game)
+        if state.best_weights:
+            state.weights = dict(state.best_weights)
+            self.save(state)
+        return state
+
+    def clear_last_draw(self, game: str) -> WeightState:
+        state = self.load(game)
+        state.last_draw_id = None
+        self.save(state)
+        return state
+
     def save(self, state: WeightState) -> None:
         path = self._path(state.game)
         payload = {

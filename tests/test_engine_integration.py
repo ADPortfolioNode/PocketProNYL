@@ -41,3 +41,49 @@ def test_engine_backtest_pick3():
         if result.get("status") == "ok":
             assert "random_baseline" in result
             assert result["lift_vs_random"] < 10
+
+
+def test_backtest_skips_nn_and_reuses_strategy_outputs():
+    with tempfile.TemporaryDirectory() as tmp:
+        engine = LotteryPredictionEngine(state_dir=tmp)
+        history = draws_from_lists(
+            [[i % 10, (i + 1) % 10, (i + 2) % 10] for i in range(70)],
+            "pick3",
+        )
+        nn_calls = {"n": 0}
+        collect_calls = {"n": 0}
+        original_get_nn = LotteryPredictionEngine._get_nn
+        original_collect = LotteryPredictionEngine._collect_outputs
+
+        def counting_get_nn(self, game, config):
+            nn_calls["n"] += 1
+            return None
+
+        def counting_collect(self, hist, config):
+            collect_calls["n"] += 1
+            return original_collect(self, hist, config)
+
+        LotteryPredictionEngine._get_nn = counting_get_nn
+        LotteryPredictionEngine._collect_outputs = counting_collect
+        try:
+            result = engine.backtest(
+                "pick3",
+                history=history,
+                verification_rounds=1,
+                max_test_draws=6,
+            )
+            backtest_nn = nn_calls["n"]
+            live = engine.predict("pick3", history=history, use_nn=True)
+        finally:
+            LotteryPredictionEngine._get_nn = original_get_nn
+            LotteryPredictionEngine._collect_outputs = original_collect
+
+        assert result["status"] == "ok"
+        assert result["evaluated_draws"] == 6
+        assert result["split"]["test_draws"] == 6
+        # Backtest must not touch the NN; live predict still does.
+        assert backtest_nn == 0
+        assert nn_calls["n"] >= 1
+        assert live.game == "pick3"
+        # One collect per scored draw (predict), not a second collect in update_weights.
+        assert collect_calls["n"] == result["evaluated_draws"] + 1

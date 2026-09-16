@@ -213,13 +213,15 @@ class IngestService:
         return ordered
 
     def _pick3_digit_string(self, raw_value) -> str | None:
-        # Use the centralized pick3 parser from utils to get digits, then join to string
+        # Store comma-separated digits so history parsers do not treat "123" as 123.
         parsed_digits = parse_pick3_digits_util(raw_value)
-        return "".join(str(d) for d in parsed_digits) if len(parsed_digits) == 3 else None
+        return ",".join(str(d) for d in parsed_digits) if len(parsed_digits) == 3 else None
 
     def _pick4_digit_string(self, raw_value) -> str | None:
         digits = re.findall(r"\d", str(raw_value or ""))
-        return "".join(digits[-4:]) if len(digits) >= 4 else None
+        if len(digits) < 4:
+            return None
+        return ",".join(digits[-4:])
 
     def _process_api_row(self, row_dict: dict, game: str, column_names: list[str], existing_ids: set[str]) -> list[tuple[str, dict, str]]:
         """

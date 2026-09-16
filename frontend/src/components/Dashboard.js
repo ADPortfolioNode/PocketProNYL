@@ -50,15 +50,111 @@ const FILMSTRIP = [
   { src: '/css/assets/nyl-bg/subway.jpg', alt: 'Subway commuter checking a phone', label: 'On the go' },
 ];
 
+function resolveTuningViewGame(status, selectedGame) {
+  const latestGame = status?.current_game || status?.latest_result?.game || status?.progress?.game || '';
+  if (!selectedGame || selectedGame === ALL_GAMES_VALUE) return latestGame;
+  return selectedGame;
+}
+
+function formatAccuracyDelta(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 'n/a';
+  const sign = number > 0 ? '+' : '';
+  return `${sign}${number.toFixed(1)} pts`;
+}
+
+function TuningTelemetryGraph({ status, selectedGame, apiBase }) {
+  const game = resolveTuningViewGame(status, selectedGame);
+  const metrics = (game && status?.metrics_by_game?.[game]) || status?.tuning_metrics || {};
+  const updatedAt = Number(status?.updated_at || 0);
+  const params = new URLSearchParams();
+  if (game) params.set('game', game);
+  if (updatedAt) params.set('t', String(updatedAt));
+  const src = `${apiBase}/api/tuning_chart?${params.toString()}`;
+  const state = String(status?.status || 'idle');
+  const regressions = metrics.regression_count;
+  const promotions = metrics.promotion_count;
+
+  return (
+    <div className="tuning-section-graph" aria-label={`Matplotlib tuner graph for ${game || 'all games'}`}>
+      <div className="tuning-hero-meta">
+        <span>Matplotlib tuner graph</span>
+        <strong>
+          {state}
+          {Number.isFinite(Number(promotions)) ? ` · ${Number(promotions)} promoted` : ''}
+          {Number.isFinite(Number(regressions)) ? ` · ${Number(regressions)} regressions blocked` : ''}
+        </strong>
+      </div>
+      <img src={src} alt={`Tuner accuracy graph for ${game || 'all games'}`} />
+    </div>
+  );
+}
+
+function TuningRunProgress({ status, selectedGame }) {
+  const game = resolveTuningViewGame(status, selectedGame);
+  const metrics = (game && status?.metrics_by_game?.[game]) || status?.tuning_metrics || {};
+  const runs = (metrics.run_history || status?.run_history || []).filter((run) => (
+    !game || run.game === game || selectedGame === ALL_GAMES_VALUE
+  ));
+  const last = status?.last_run || status?.progress || runs[runs.length - 1];
+  if (!runs.length && !last) return null;
+
+  return (
+    <div className="tuning-run-progress" aria-live="polite">
+      <div className="tuning-ledger-heading">
+        <span>ASSISTANT PROGRESS</span>
+        <span>{status?.assistant?.label ? `${status.assistant.label} trial` : (last?.message || (last?.round ? `Run ${last.round}` : 'Waiting'))}</span>
+      </div>
+      {(status?.run_state === 'between_runs' || status?.progress?.between_runs) && (
+        <div className="tuning-between-runs">
+          {status?.progress?.message
+            || `Between runs: held ${Number.isFinite(Number(last?.held_accuracy_percent ?? last?.accuracy_percent)) ? `${Number(last.held_accuracy_percent ?? last.accuracy_percent).toFixed(1)}%` : 'n/a'}. Next run must beat that floor.`}
+        </div>
+      )}
+      {status?.assistant?.learning_rate != null && (
+        <div className="tuning-run-delta">
+          Optimizing lr={status.assistant.learning_rate}, window={status.assistant.rolling_window ?? 'n/a'}
+          {status.assistant.trial ? ` · trial ${status.assistant.trial}/${status.assistant.trials_total || '?'}` : ''}
+        </div>
+      )}
+      {Number.isFinite(Number(last?.delta_percent)) && (
+        <div className={`tuning-run-delta ${Number(last.delta_percent) > 0 ? 'is-up' : Number(last.delta_percent) < 0 ? 'is-down' : ''}`}>
+          This run {Number.isFinite(Number(last.accuracy_percent)) ? `${Number(last.accuracy_percent).toFixed(1)}%` : 'n/a'}
+          {' '}({formatAccuracyDelta(last.delta_percent)} vs previous run)
+        </div>
+      )}
+      {runs.length > 0 && (
+        <ol className="tuning-run-list">
+          {runs.map((run, index) => (
+            <li key={`${run.game || 'game'}-${run.round || index}`}>
+              <span>{String(run.game || game || 'game').toUpperCase()} run {run.round || index + 1}</span>
+              <strong>{Number.isFinite(Number(run.accuracy_percent)) ? `${Number(run.accuracy_percent).toFixed(1)}%` : 'n/a'}</strong>
+              <em className={Number(run.delta_percent) > 0 ? 'is-up' : Number(run.delta_percent) < 0 ? 'is-down' : ''}>
+                {run.delta_percent == null ? 'baseline' : formatAccuracyDelta(run.delta_percent)}
+              </em>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
 function TuningMetricsChart({ status, selectedGame }) {
-  const metrics = status?.tuning_metrics || {};
   const latestGame = status?.latest_result?.game || status?.current_game;
-  const game = selectedGame === ALL_GAMES_VALUE ? latestGame : selectedGame;
-  const hasMatchingMetrics = !latestGame || selectedGame === ALL_GAMES_VALUE || latestGame === selectedGame;
+  const game = resolveTuningViewGame(status, selectedGame);
+  const metrics = (game && status?.metrics_by_game?.[game]) || status?.tuning_metrics || {};
+  const hasMatchingMetrics = Boolean(game && status?.metrics_by_game?.[game])
+    || !latestGame
+    || selectedGame === ALL_GAMES_VALUE
+    || latestGame === selectedGame;
   const weights = hasMatchingMetrics ? (metrics.best_weights || metrics.weights || {}) : {};
   const values = [
-    ['Current accuracy', hasMatchingMetrics ? Number(metrics.accuracy_percent) : NaN],
-    ['Best accuracy', hasMatchingMetrics ? Number(metrics.highest_accuracy_percent) : NaN],
+    ['Held accuracy', hasMatchingMetrics ? Number(metrics.held_accuracy_percent ?? metrics.accuracy_percent) : NaN],
+    ['This run', hasMatchingMetrics ? Number(metrics.this_run_accuracy_percent ?? metrics.accuracy_percent) : NaN],
+    ['Next must beat', hasMatchingMetrics ? Number(metrics.next_run_target_percent) : NaN],
+    ['Best run', hasMatchingMetrics ? Number(metrics.best_round_accuracy_percent) : NaN],
+    ['Rolling (held)', hasMatchingMetrics ? Number(metrics.highest_rolling_accuracy_percent ?? metrics.rolling_accuracy_percent) : NaN],
     ['Target floor', hasMatchingMetrics ? Number(metrics.target_accuracy_percent) : NaN],
   ].filter(([, value]) => Number.isFinite(value));
 
@@ -77,7 +173,7 @@ function TuningMetricsChart({ status, selectedGame }) {
           <div className="tuning-metric-row" key={label}>
             <span>{label}</span>
             <div className="tuning-metric-track">
-              <span className={`tuning-metric-fill ${label === 'Target floor' ? 'is-target' : ''}`} style={{ width: `${Math.max(0, Math.min(value, 100))}%` }} />
+              <span className={`tuning-metric-fill ${label === 'Target floor' ? 'is-target' : ''} ${label.toLowerCase().includes('rolling') ? 'is-rolling' : ''}`} style={{ width: `${Math.max(0, Math.min(value, 100))}%` }} />
             </div>
             <strong>{value.toFixed(1)}%</strong>
           </div>
@@ -87,6 +183,7 @@ function TuningMetricsChart({ status, selectedGame }) {
         <span>Random baseline: {hasMatchingMetrics && Number.isFinite(Number(metrics.random_baseline?.mean_partial_hits)) ? Number(metrics.random_baseline.mean_partial_hits).toFixed(2) : 'n/a'} hits</span>
         <span>Lift: {hasMatchingMetrics && Number.isFinite(Number(metrics.lift_vs_random)) ? `${Number(metrics.lift_vs_random).toFixed(2)}x` : 'n/a'}</span>
         <span>Batches: {hasMatchingMetrics ? (metrics.suggestion_history_count ?? 'n/a') : 'n/a'}</span>
+        <span>Regressions blocked: {hasMatchingMetrics ? (metrics.regression_count ?? 'n/a') : 'n/a'}</span>
       </div>
       {Object.keys(weights).length > 0 && (
         <div className="tuning-weight-chart">
@@ -106,9 +203,13 @@ function TuningMetricsChart({ status, selectedGame }) {
 
 function TuningValidationLedger({ status, selectedGame }) {
   const latestGame = status?.latest_result?.game || status?.current_game;
-  const game = selectedGame === ALL_GAMES_VALUE ? latestGame : selectedGame;
-  const hasMatchingHistory = !latestGame || selectedGame === ALL_GAMES_VALUE || latestGame === selectedGame;
-  const history = hasMatchingHistory ? (status?.tuning_metrics?.suggestion_history || []) : [];
+  const game = resolveTuningViewGame(status, selectedGame);
+  const metrics = (game && status?.metrics_by_game?.[game]) || status?.tuning_metrics || {};
+  const hasMatchingHistory = Boolean(game && status?.metrics_by_game?.[game])
+    || !latestGame
+    || selectedGame === ALL_GAMES_VALUE
+    || latestGame === selectedGame;
+  const history = hasMatchingHistory ? (metrics.suggestion_history || []) : [];
 
   if (!history.length) return null;
 
@@ -130,6 +231,7 @@ function TuningValidationLedger({ status, selectedGame }) {
               <th>Winning numbers</th>
               <th>Bonus</th>
               <th>Accuracy</th>
+              <th>Weights</th>
             </tr>
           </thead>
           <tbody>
@@ -145,6 +247,9 @@ function TuningValidationLedger({ status, selectedGame }) {
                 </td>
                 <td>{entry.bonus_possible ? `${entry.bonus_hits ?? 0} / ${entry.bonus_possible}` : 'n/a'}</td>
                 <td>{Number.isFinite(Number(entry.accuracy_percent)) ? `${Number(entry.accuracy_percent).toFixed(1)}%` : 'n/a'}</td>
+                <td className={entry.balance_promoted ? 'text-success' : entry.balance_regressed ? 'text-danger' : 'text-muted'}>
+                  {entry.balance_promoted ? 'Promoted' : entry.balance_regressed ? 'Rejected' : 'Held'}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -1150,7 +1255,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
 
     loadTuningStatus();
     const stopPolling = startPolling({
-      intervalMs: 6000,
+      intervalMs: tuningStatus.status === 'running' ? 1500 : 6000,
       tick: loadTuningStatus,
     });
 
@@ -1158,7 +1263,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
       cancelled = true;
       stopPolling();
     };
-  }, [API_BASE]);
+  }, [API_BASE, tuningStatus.status]);
 
   const startSuggestionTuning = useCallback(async (scopeOverride = null) => {
     const requestedScope = scopeOverride === null ? selectedTuningGame : scopeOverride;
@@ -1177,7 +1282,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
       const result = response?.data?.tool_result || { status: 'started' };
       setTuningStatus((prev) => ({
         ...prev,
-        status: result.status === 'already_running' ? 'running' : (result.status || 'started'),
+        status: ['already_running', 'started', 'running'].includes(result.status) ? 'running' : (result.status || 'running'),
         game: normalizedScope,
         current_game: result.current_game || normalizedScope,
         games_total: result.games_total || prev.games_total || 0,
@@ -1240,16 +1345,6 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
           <p className="lead">
             Ask about Take 5, Pick 3, Powerball, Mega Millions, and the rest of the NYL slate. RAG grounds answers in ingested draw history.
           </p>
-          <div className="tuning-hero-telemetry" aria-live="polite">
-            <div className="tuning-hero-meta">
-              <span>Suggestion tuning</span>
-              <strong>{String(tuningStatus.status || 'idle').toUpperCase()}</strong>
-            </div>
-            <img
-              src={`${API_BASE}/api/tuning_chart?updated=${encodeURIComponent(tuningStatus.updated_at || '0')}`}
-              alt={`Live tuning telemetry: ${tuningStatus.current_game || tuningStatus.game || 'all games'}, ${tuningStatus.games_completed || 0} of ${tuningStatus.games_total || 0} games complete`}
-            />
-          </div>
         </div>
         {conciergeCard}
       </section>
@@ -1767,6 +1862,18 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
               'Tuning Graph': tuningStatus.games_total > 0
                 ? `${Number(tuningStatus.games_completed || 0)}/${Number(tuningStatus.games_total || 0)}`
                 : 'n/a',
+              'Assistant': tuningStatus.assistant?.label
+                ? `${tuningStatus.assistant.label}${tuningStatus.assistant.learning_rate != null ? ` lr=${tuningStatus.assistant.learning_rate}` : ''}`
+                : (tuningStatus.status || 'idle'),
+              'This run': Number.isFinite(Number(tuningStatus.progress?.accuracy_percent ?? tuningStatus.last_run?.accuracy_percent))
+                ? `${Number(tuningStatus.progress?.accuracy_percent ?? tuningStatus.last_run?.accuracy_percent).toFixed(1)}%`
+                : 'n/a',
+              'Vs previous run': Number.isFinite(Number(tuningStatus.progress?.delta_percent ?? tuningStatus.last_run?.delta_percent))
+                ? formatAccuracyDelta(tuningStatus.progress?.delta_percent ?? tuningStatus.last_run?.delta_percent)
+                : 'n/a',
+              'Regressions blocked': Number.isFinite(Number(tuningStatus.tuning_metrics?.regression_count))
+                ? Number(tuningStatus.tuning_metrics.regression_count)
+                : 'n/a',
               ...(tuningErrorMessage ? { 'Error Message': tuningErrorMessage } : {}),
             }}
             statusBadge={
@@ -1777,10 +1884,16 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
             onToggle={handleCardFocus('tuning')}
           >
             <p className="mb-3 text-muted">
-              Run the iterative draw-history tuner to promote the best validated weights for the selected game or the full slate.
+              The tuning assistant starts with baseline settings, then tries aggressive and stable mixes only if baseline does not already raise the held accuracy floor. It keeps the mix that raises validated accuracy and restores weights when a trial regresses.
             </p>
-            <TuningMetricsChart status={tuningStatus} selectedGame={selectedTuningGame === ALL_GAMES_VALUE ? selectedGame : selectedTuningGame} />
-            <TuningValidationLedger status={tuningStatus} selectedGame={selectedTuningGame === ALL_GAMES_VALUE ? selectedGame : selectedTuningGame} />
+            <TuningTelemetryGraph
+              status={tuningStatus}
+              selectedGame={selectedTuningGame}
+              apiBase={API_BASE}
+            />
+            <TuningRunProgress status={tuningStatus} selectedGame={selectedTuningGame} />
+            <TuningMetricsChart status={tuningStatus} selectedGame={selectedTuningGame} />
+            <TuningValidationLedger status={tuningStatus} selectedGame={selectedTuningGame} />
             <div className="mb-3">
               <label htmlFor="tuningGameSelect" className="form-label text-neon">Game for tuning</label>
               <select
@@ -1812,9 +1925,10 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
                 Tune All Games
               </button>
             </div>
-            {tuningStatus.status === 'running' && (
+            {(tuningStatus.status === 'running' || tuningStatus.progress?.message) && (
               <div className="small text-neon">
-                Active: {tuningStatus.current_game || tuningStatus.game || (selectedTuningGame === ALL_GAMES_VALUE ? 'all games' : selectedTuningGame)}
+                {tuningStatus.progress?.message
+                  || `Active: ${tuningStatus.current_game || tuningStatus.game || (selectedTuningGame === ALL_GAMES_VALUE ? 'all games' : selectedTuningGame)}`}
                 {tuningStatus.games_total > 0 && (
                   <span className="ms-2">({Number(tuningStatus.games_completed || 0)}/{Number(tuningStatus.games_total || 0)})</span>
                 )}

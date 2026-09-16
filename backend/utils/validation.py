@@ -10,6 +10,9 @@ def _require_game_key(raw_game: str) -> str:
     Raises ValueError if the game is not recognized.
     """
     try:
-        return resolve_game_key(raw_game)
+        resolved = resolve_game_key(raw_game)
     except ValueError as e:
+        raise ValueError(f"Invalid game '{raw_game}'. Available games: {list(GAME_CONFIGS.keys())}") from e
+    if not resolved:
         raise ValueError(f"Invalid game '{raw_game}'. Available games: {list(GAME_CONFIGS.keys())}")
+    return resolved

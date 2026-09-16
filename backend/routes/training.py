@@ -344,6 +344,91 @@ def _training_worker(game_key: str, request: TrainingRequest):
         set_job(game_key, {"status": "error", "game": game_key, "message": str(exc)})
 
 
+_ALL_SCOPE_TOKENS = {"", "all", "*", "allgames", "all_games", "__all_games__"}
+
+
+def _is_all_training_scope(value: str | None) -> bool:
+    token = str(value or "").strip().lower()
+    compact = "".join(ch for ch in token if ch.isalnum())
+    return token in _ALL_SCOPE_TOKENS or compact in {"all", "allgames"}
+
+
+def _training_request_for_game(game_key: str) -> TrainingRequest:
+    defaults = trainer_service.get_training_defaults(game_key) or {}
+    payload = {}
+    for field_name in (
+        "target_accuracy",
+        "max_iterations",
+        "train_size",
+        "n_estimators",
+        "max_depth",
+        "random_state",
+        "window_size",
+        "auto_tune",
+        "blend_step",
+    ):
+        if defaults.get(field_name) is not None:
+            payload[field_name] = defaults[field_name]
+    return TrainingRequest(game=game_key, **payload)
+
+
+def enqueue_training_games(games: list[str] | None = None) -> dict:
+    """Queue one or more games for background training and return immediately."""
+    if not games or (len(games) == 1 and _is_all_training_scope(games[0])):
+        targets = list(GAME_CONFIGS.keys())
+    else:
+        targets = [_require_game_key(game) for game in games]
+
+    queued: list[str] = []
+    already: list[str] = []
+    for game_key in targets:
+        if is_running(game_key):
+            already.append(game_key)
+            continue
+        set_job(game_key, {
+            "status": "queued",
+            "message": "Queued for training",
+        })
+        queued.append(game_key)
+
+    def _run_queue():
+        for game_key in queued:
+            request = _training_request_for_game(game_key)
+            set_job(game_key, {
+                "status": "running",
+                "message": "Training in progress",
+                "target_accuracy": request.target_accuracy,
+                "max_iterations": request.max_iterations,
+            })
+            _training_worker(game_key, request)
+
+    if queued:
+        thread = threading.Thread(target=_run_queue, daemon=True, name="train-games")
+        thread.start()
+
+    if queued:
+        status = "started"
+        message = (
+            f"Training started for {len(queued)} game(s). "
+            "Poll /api/train_status for live progress."
+        )
+    elif already:
+        status = "already_running"
+        message = "Training is already running for the requested game(s)."
+    else:
+        status = "error"
+        message = "No games were queued for training."
+
+    return {
+        "status": status,
+        "game": targets[0] if len(targets) == 1 else "all",
+        "games": targets,
+        "started": queued,
+        "already_running": already,
+        "message": message,
+    }
+
+
 @router.get("/api/train_settings")
 async def get_train_settings(game: str = None):
     from utils.training_defaults import get_game_training_defaults

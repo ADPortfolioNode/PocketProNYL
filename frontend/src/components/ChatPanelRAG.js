@@ -24,12 +24,14 @@ const GAME_DISPLAY_NAMES = {
   cash4life: 'Cash4Life',
   quickdraw: 'Quick Draw',
   nylotto: 'NY Lotto',
+  win4: 'Win 4',
 };
 
 const STARTER_CHIPS = [
   "What's hot in Take 5 lately?",
   'How do I train Pick 3 without a gateway timeout?',
   'Which games are ready for suggestions?',
+  'Train all games',
   'Optimize suggestions for Take 5',
   'Tune all games for the next suggestion pass',
 ];
@@ -53,7 +55,7 @@ function buildGreeting(selectedGame) {
   const key = String(selectedGame || '').toLowerCase();
   const label = GAME_DISPLAY_NAMES[key] || (key ? key.toUpperCase() : 'all games');
   return (
-    `Hi — I'm PocketPro Concierge. Ask about draws, training, suggestions, or errors`
+    `Hi — I'm PocketPro Concierge. Ask about draws, training, suggestions, tuning, or errors`
     + (key ? ` for **${label}**` : '')
     + `. Toggle RAG to ground answers in Chroma history.`
   );
@@ -68,9 +70,15 @@ function providerLabel(value) {
   return LM_OPTIONS.find((opt) => opt.value === value)?.label || value || 'Auto';
 }
 
+function isAllGamesScope(value) {
+  const token = String(value || '').trim().toLowerCase();
+  const compact = token.replace(/[^a-z0-9]+/g, '');
+  return !token || ['all', '*', 'all_games', '__all_games__'].includes(token) || compact === 'all' || compact === 'allgames';
+}
+
 function detectGameFromPrompt(text, selectedGame) {
   const normalized = String(text || '').toLowerCase();
-  if (!normalized) return selectedGame || 'all';
+  if (!normalized) return isAllGamesScope(selectedGame) ? 'all' : (selectedGame || 'all');
 
   const aliases = {
     take5: ['take 5', 'take5', 'take-five'],
@@ -81,12 +89,17 @@ function detectGameFromPrompt(text, selectedGame) {
     cash4life: ['cash 4 life', 'cash4life'],
     quickdraw: ['quick draw', 'quickdraw'],
     nylotto: ['ny lotto', 'nylotto'],
+    win4: ['win 4', 'win4', 'win-four'],
   };
 
   for (const [gameKey, patterns] of Object.entries(aliases)) {
     if (patterns.some((pattern) => normalized.includes(pattern))) {
       return gameKey;
     }
+  }
+
+  if (/(all games|every game|all lottery games)/i.test(normalized) || isAllGamesScope(selectedGame)) {
+    return 'all';
   }
 
   return selectedGame || 'all';
@@ -145,6 +158,8 @@ const ChatPanelRAG = ({ game = null, isExpanded = false, onActivityChange = null
     const text = String(rawText || '').trim();
     if (!text || isLoading) return;
 
+    const isQuestion = /\?/.test(text) || /^(how|what|why|when|where|can|could|should|do i|please explain)\b/i.test(text);
+    const trainIntent = !isQuestion && /\b(retrain|start training|train)\b/i.test(text);
     const tuningIntent = /(optimi[sz]e|tune|tuning|retune|re-tune|suggestion)/i.test(text);
     const toolGame = detectGameFromPrompt(text, game);
 
@@ -153,20 +168,31 @@ const ChatPanelRAG = ({ game = null, isExpanded = false, onActivityChange = null
     setIsLoading(true);
 
     try {
-      const payload = tuningIntent
-        ? {
-              text,
-            tool: {
-              name: 'optimize_suggestions',
-              params: { game: toolGame === 'all' ? 'all' : toolGame },
-            },
-          }
-        : {
-            text,
-            game,
-            use_rag: useRag,
-            lm_provider: lmProvider || 'auto',
-          };
+      let payload;
+      if (trainIntent && !tuningIntent) {
+        payload = {
+          text,
+          tool: {
+            name: 'train_models',
+            params: { game: toolGame === 'all' ? 'all' : toolGame },
+          },
+        };
+      } else if (tuningIntent) {
+        payload = {
+          text,
+          tool: {
+            name: 'optimize_suggestions',
+            params: { game: toolGame === 'all' ? 'all' : toolGame },
+          },
+        };
+      } else {
+        payload = {
+          text,
+          game: isAllGamesScope(game) ? null : game,
+          use_rag: useRag,
+          lm_provider: lmProvider || 'auto',
+        };
+      }
 
       const response = await fetchWithTimeout(`${API_BASE}/api/chat`, {
         method: 'POST',

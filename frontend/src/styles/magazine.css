@@ -167,11 +167,22 @@ body {
   color: var(--copper);
 }
 
-.tuning-hero-telemetry img {
+.tuning-hero-telemetry img,
+.tuning-section-graph img {
   display: block;
   width: 100%;
   height: auto;
   border-radius: 0.45rem;
+  background: #10182b;
+}
+
+.tuning-section-graph {
+  width: 100%;
+  margin: 0 0 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+  background: rgba(7, 13, 31, 0.62);
 }
 
 .magazine-badge {
@@ -216,6 +227,7 @@ body {
 .tuning-metric-track { flex: 1; height: 0.45rem; background: rgba(219, 233, 255, 0.14); }
 .tuning-metric-fill { display: block; height: 100%; background: var(--copper); }
 .tuning-metric-fill.is-target { background: #85e3b0; }
+.tuning-metric-fill.is-rolling { background: #6ea8fe; }
 .tuning-metrics-meta { flex-wrap: wrap; margin-top: 0.7rem; color: var(--ink-soft); font-size: 0.68rem; }
 .tuning-metrics-empty { margin: 0 0 1rem; color: var(--ink-soft); font-size: 0.8rem; }
 .tuning-weight-chart { margin-top: 0.8rem; padding-top: 0.7rem; border-top: 1px solid var(--line); }
@@ -225,6 +237,42 @@ body {
 .tuning-weight-track { flex: 1; height: 0.35rem; background: rgba(219, 233, 255, 0.14); }
 .tuning-weight-track span { display: block; height: 100%; background: #6ea8fe; }
 .tuning-weight-row strong { width: 2.5rem; text-align: right; color: var(--ink); }
+.tuning-run-progress {
+  margin: 0 0 1rem;
+  border: 1px solid var(--line);
+  background: rgba(7, 13, 31, 0.42);
+}
+.tuning-run-delta {
+  padding: 0.45rem 0.8rem 0.15rem;
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+}
+.tuning-between-runs {
+  margin: 0 0.8rem 0.35rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid rgba(133, 227, 176, 0.35);
+  background: rgba(133, 227, 176, 0.08);
+  color: #85e3b0;
+  font-size: 0.78rem;
+}
+.tuning-run-delta.is-up, .tuning-run-list em.is-up { color: #85e3b0; }
+.tuning-run-delta.is-down, .tuning-run-list em.is-down { color: #e36b6b; }
+.tuning-run-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.35rem 0.8rem 0.7rem;
+}
+.tuning-run-list li {
+  display: flex;
+  gap: 0.65rem;
+  align-items: baseline;
+  padding: 0.22rem 0;
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+}
+.tuning-run-list li span { flex: 1; }
+.tuning-run-list li strong { color: var(--ink); width: 4.2rem; text-align: right; }
+.tuning-run-list li em { width: 6.5rem; text-align: right; font-style: normal; }
 .tuning-validation-ledger { margin-bottom: 1rem; border: 1px solid var(--line); background: rgba(7, 13, 31, 0.42); }
 .tuning-ledger-heading { display: flex; justify-content: space-between; gap: 0.75rem; padding: 0.65rem 0.8rem; color: var(--copper); font-size: 0.68rem; letter-spacing: 0.08em; }
 .tuning-ledger-heading > span:last-child { color: var(--ink-soft); }

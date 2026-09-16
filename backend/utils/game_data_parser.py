@@ -121,16 +121,20 @@ def _extract_primary_candidate(metadata: Dict[str, Any], game: str | None = None
     preferred = []
     fallback = []
     pick3_specific_fields = []
+    win4_specific_fields = []
 
     for key, value in (metadata or {}).items():
         key_lower = str(key).lower()
+        key_norm = re.sub(r"[^a-z0-9]+", "", key_lower)
         if "draw_number" in key_lower or not str(value or "").strip():
             continue
 
         if key_lower in ("winning_numbers", "winningnumbers"):
             preferred.append(value)
-        elif key_lower in ("midday_daily", "evening_daily"):
+        elif key_norm in {"middaydaily", "eveningdaily"}:
             pick3_specific_fields.append(value)
+        elif key_norm in {"middaywin4", "eveningwin4"}:
+            win4_specific_fields.append(value)
         elif "winning" in key_lower and "number" in key_lower:
             fallback.append(value)
         elif "numbers" in key_lower or "result" in key_lower:
@@ -141,14 +145,21 @@ def _extract_primary_candidate(metadata: Dict[str, Any], game: str | None = None
     if normalized_game == "win4":
         parse_value = lambda value: _parse_fixed_digits(value, 4)
 
-    # For pick3, prioritize specific daily fields if winning_numbers is not immediately parsable
-    if normalized_game in ("pick3", "numbers", "win4"):
+    # Expanded child rows set winning_numbers to this session. Unexpanded shared
+    # Daily Numbers / Win 4 rows leave winning_numbers as the other game, so the
+    # game-specific midday/evening fields are the fallback.
+    if normalized_game in ("pick3", "numbers"):
         for candidate in preferred + pick3_specific_fields + fallback:
             numbers = parse_value(candidate)
-            if len(numbers) == 3: # Ensure exactly 3 digits for pick3
+            if len(numbers) == 3:
+                return numbers
+    elif normalized_game == "win4":
+        for candidate in preferred + win4_specific_fields + fallback:
+            numbers = parse_value(candidate)
+            if len(numbers) == 4:
                 return numbers
     else:
-        for candidate in preferred + pick3_specific_fields + fallback:
+        for candidate in preferred + pick3_specific_fields + win4_specific_fields + fallback:
             numbers = parse_value(candidate)
             if numbers:
                 return numbers

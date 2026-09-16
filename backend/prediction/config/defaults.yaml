@@ -20,6 +20,7 @@ metrics:
   random_trials: 500
   target_accuracy: 0.98
   verification_rounds: 1
+  max_test_draws: 80
 
 strategies:
   hot_cold:
