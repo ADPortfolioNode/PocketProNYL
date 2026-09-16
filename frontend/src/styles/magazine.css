@@ -308,6 +308,38 @@ body {
   margin-top: 0.3rem;
 }
 
+.film-link {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.film-link:hover img,
+.film-link:focus-visible img {
+  outline: 2px solid var(--copper);
+  outline-offset: 2px;
+}
+
+.film-link:focus-visible {
+  outline: none;
+}
+
+#section-chat,
+#section-ingest,
+#section-train,
+#section-tuning,
+#section-predict,
+#section-games,
+#section-chroma,
+#section-experiments {
+  scroll-margin-top: calc(var(--header-h) + 0.75rem);
+}
+
 .magazine-app .card,
 .magazine-app .alert {
   background: var(--glass) !important;

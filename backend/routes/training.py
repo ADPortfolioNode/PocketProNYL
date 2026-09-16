@@ -1,6 +1,5 @@
 """Training API routes."""
 import logging
-import asyncio
 import hashlib
 import json
 import os
@@ -561,13 +560,6 @@ async def train_all_models(request: TrainAllRequest):
         if request.games:
             game_keys = [_require_game_key(game) for game in request.games]
 
-        results = await asyncio.to_thread(trainer_service.train_all_games, game_keys)
-        completed = [item for item in results if str(item.get("status", "")).lower() in ("success", "completed")]
-        return {
-            "status": "COMPLETED",
-            "trained": len(completed),
-            "total": len(results),
-            "results": results,
-        }
+        return enqueue_training_games(game_keys)
     except Exception as e:
         return {"status": "error", "message": str(e)}

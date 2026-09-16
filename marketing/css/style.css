@@ -125,6 +125,9 @@ button:not(:disabled), [role="button"]:not(:disabled) { cursor: pointer; }
 .filmstrip figure { margin: 0; }
 .filmstrip img { width: 100%; height: 110px; object-fit: cover; border-radius: 0.7rem; }
 .filmstrip figcaption { font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); margin-top: 0.35rem; }
+.film-link { display: block; color: inherit; text-decoration: none; }
+.film-link:hover img, .film-link:focus-visible img { outline: 2px solid var(--copper); outline-offset: 2px; }
+#ingest, #train, #ask, #take5, #pick3, #powerball, #megamillions, #quickdraw, #nylotto { scroll-margin-top: 5rem; }
 
 .photo-card { display: grid; background: var(--navy); border-radius: 1.1rem; overflow: hidden; box-shadow: var(--shadow-border); }
 .photo-card img { width: 100%; height: 160px; object-fit: cover; }
