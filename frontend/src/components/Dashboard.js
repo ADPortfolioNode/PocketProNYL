@@ -15,7 +15,7 @@ import chromaStateManager from '../utils/chromaStateManager';
 import { startPolling } from '../utils/polling';
 import { formatApiError } from '../utils/errorUtils';
 import { formatExperimentTimestamp, parseExperimentTimestampMs } from '../utils/timestampUtils';
-import { runTrainingJob } from '../utils/runTrainJob';
+import { runTrainingJob, runTrainAllJobs } from '../utils/runTrainJob';
 import {
   BASE_MODEL_TYPE,
   buildTrainRequestBody,
@@ -40,14 +40,14 @@ import {
 const ALL_GAMES_VALUE = '__all_games__';
 const GAME_COLOR_SCHEMES = ['primary', 'success', 'warning', 'info', 'danger', 'secondary', 'dark'];
 const FILMSTRIP = [
-  { src: '/css/assets/nyl-bg/skyline.jpg', alt: 'New York skyline at blue hour', label: 'City' },
-  { src: '/css/assets/nyl-bg/bodega.jpg', alt: 'Night bodega lottery counter', label: 'Draw night' },
-  { src: '/css/assets/nyl-bg/concierge.jpg', alt: 'Analyst reviewing draw data', label: 'Concierge' },
-  { src: '/css/assets/nyl-bg/take5.jpg', alt: 'Five lottery balls on black glass', label: 'Take 5' },
-  { src: '/css/assets/nyl-bg/jackpot.jpg', alt: 'Times Square lights on wet pavement', label: 'Jackpot' },
-  { src: '/css/assets/nyl-bg/training.jpg', alt: 'Training dashboard on a laptop', label: 'Train' },
-  { src: '/css/assets/nyl-bg/dashboard.jpg', alt: 'Operations wall of lottery dashboards', label: 'Dashboard' },
-  { src: '/css/assets/nyl-bg/subway.jpg', alt: 'Subway commuter checking a phone', label: 'On the go' },
+  { src: '/css/assets/nyl-bg/skyline.jpg', alt: 'New York skyline at blue hour', label: 'City', section: 'chat' },
+  { src: '/css/assets/nyl-bg/bodega.jpg', alt: 'Night bodega lottery counter', label: 'Draw night', section: 'ingest' },
+  { src: '/css/assets/nyl-bg/concierge.jpg', alt: 'Analyst reviewing draw data', label: 'Concierge', section: 'chat' },
+  { src: '/css/assets/nyl-bg/take5.jpg', alt: 'Five lottery balls on black glass', label: 'Take 5', section: 'games' },
+  { src: '/css/assets/nyl-bg/jackpot.jpg', alt: 'Times Square lights on wet pavement', label: 'Jackpot', section: 'predict' },
+  { src: '/css/assets/nyl-bg/training.jpg', alt: 'Training dashboard on a laptop', label: 'Train', section: 'train' },
+  { src: '/css/assets/nyl-bg/dashboard.jpg', alt: 'Operations wall of lottery dashboards', label: 'Dashboard', section: 'chroma' },
+  { src: '/css/assets/nyl-bg/subway.jpg', alt: 'Subway commuter checking a phone', label: 'On the go', section: 'predict' },
 ];
 
 function resolveTuningViewGame(status, selectedGame) {
@@ -1118,6 +1118,75 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
     }
   }, [effectiveIngestStatus, selectedTrainGame, selectedTrainGameStoredDraws, trainParams, effectiveTrainingTarget, API_BASE]);
 
+  const gamesWithDraws = useMemo(
+    () => (games || []).filter((game) => Number(gameContents[game] || 0) > 0),
+    [games, gameContents],
+  );
+
+  const openSection = useCallback((section) => {
+    if (!section) return;
+    setExpandedCard(section);
+    window.requestAnimationFrame(() => {
+      document.getElementById(`section-${section}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }, []);
+
+  const startTrainAll = useCallback(async () => {
+    if (effectiveIngestStatus !== 'completed') {
+      alert('Please complete data ingestion first.');
+      return;
+    }
+    if (!gamesWithDraws.length) {
+      alert('No games have draws yet. Run ingestion first.');
+      return;
+    }
+    setTrainStatus('in progress');
+    setTrainErrorMessage('');
+    setTrainProgress(0);
+    setTrainStartTime(Date.now());
+    setExpandedCard('train');
+    const interval = setInterval(() => setTrainProgress((p) => Math.min(p + 2, 95)), 2500);
+    try {
+      const sample = buildTrainRequestBody(gamesWithDraws[0], {
+        ...trainParams,
+        targetAccuracy: effectiveTrainingTarget,
+      });
+      const { game: _ignoredGame, ...allBody } = sample;
+      const response = {
+        data: await runTrainAllJobs(axios, API_BASE, { ...allBody, games: gamesWithDraws }),
+      };
+      clearInterval(interval);
+      setTrainProgress(100);
+      if (isTrainSuccessStatus(response?.data?.status)) {
+        setTrainStatus('completed');
+        setTrainErrorMessage('');
+        setSummaryRefreshKey((prev) => prev + 1);
+        try {
+          const r = await axios.get(`${API_BASE}/api/experiments`);
+          const experimentsPayload = Array.isArray(r.data)
+            ? r.data
+            : (Array.isArray(r.data?.experiments) ? r.data.experiments : []);
+          setExperiments(experimentsPayload);
+          setExperimentsErrorMessage('');
+        } catch (_) {}
+        alert(response.data.message || `Training finished for ${gamesWithDraws.length} game(s).`);
+        setTimeout(() => setExpandedCard(null), 2000);
+      } else {
+        setTrainStatus('error');
+        setTrainErrorMessage(response.data.error || response.data.message || 'Train all failed.');
+        alert(`Train all failed: ${response.data.error || response.data.message}`);
+      }
+    } catch (e) {
+      clearInterval(interval);
+      setTrainStatus('error');
+      setTrainProgress(0);
+      const errText = formatTrainingErrorMessage(e, formatApiError);
+      setTrainErrorMessage(errText);
+      alert(`Train all failed due to an error: ${errText}`);
+    }
+  }, [effectiveIngestStatus, gamesWithDraws, trainParams, effectiveTrainingTarget, API_BASE]);
+
+
   const trainingModelTypeLabel = useMemo(() => {
     const strategy =
       selectedTrainingExperiment?.model_strategy
@@ -1311,7 +1380,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
   };
   
   const conciergeCard = (
-        <div className={getFocusColClass('chat')}>
+        <div id="section-chat" className={getFocusColClass('chat')}>
           <ExpandableCard
             title="PocketPro Concierge"
             cardKey="chat"
@@ -1351,8 +1420,15 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
       <section className="filmstrip" aria-label="Layout photography">
         {FILMSTRIP.map((photo) => (
           <figure key={photo.src}>
-            <img src={photo.src} alt={photo.alt} />
-            <figcaption>{photo.label}</figcaption>
+            <button
+              type="button"
+              className="film-link"
+              onClick={() => openSection(photo.section)}
+              aria-label={`Open ${photo.label} section`}
+            >
+              <img src={photo.src} alt={photo.alt} />
+              <figcaption>{photo.label}</figcaption>
+            </button>
           </figure>
         ))}
       </section>
@@ -1404,7 +1480,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
 
       <div className="focus-cards-row">
         {/* Data Ingestion Card */}
-        <div className={getFocusColClass('ingest')}>
+        <div id="section-ingest" className={getFocusColClass('ingest')}>
           <ExpandableCard
             title="Data Ingestion"
             cardKey="ingest"
@@ -1519,7 +1595,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
         </div>
 
         {/* Model Training Card */}
-        <div className={getFocusColClass('train')}>
+        <div id="section-train" className={getFocusColClass('train')}>
           <ExpandableCard
             title="Model Training"
             cardKey="train"
@@ -1838,6 +1914,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
                 />
               </div>
             )}
+            <div className="d-flex flex-wrap gap-2">
             <button 
               className="btn btn-success" 
               onClick={startTrain} 
@@ -1845,12 +1922,21 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
             >
               {trainStatus === 'in progress' ? 'Training...' : 'Start Training'}
             </button>
+            <button
+              type="button"
+              className="btn btn-outline-light"
+              onClick={startTrainAll}
+              disabled={trainStatus === 'in progress' || effectiveIngestStatus !== 'completed' || gamesWithDraws.length === 0}
+            >
+              {trainStatus === 'in progress' ? 'Training...' : `Train All (${gamesWithDraws.length})`}
+            </button>
+            </div>
             {renderCardErrorAlert('Training Error', trainErrorMessage, 'mt-3 mb-0')}
           </ExpandableCard>
         </div>
 
         {/* Suggestion Tuning */}
-        <div className={getFocusColClass('tuning')}>
+        <div id="section-tuning" className={getFocusColClass('tuning')}>
           <ExpandableCard
             title="Suggestion Tuning"
             cardKey="tuning"
@@ -1939,7 +2025,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
         </div>
 
         {/* Suggestion Panel */}
-        <div className={getFocusColClass('predict')}>
+        <div id="section-predict" className={getFocusColClass('predict')}>
           <ExpandableCard
             title="Suggestions"
             cardKey="predict"
@@ -1959,7 +2045,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
         </div>
 
         {/* Game Summary */}
-        <div className={getFocusColClass('games')}>
+        <div id="section-games" className={getFocusColClass('games')}>
           <ExpandableCard
             title="Game Contents"
             cardKey="games"
@@ -1978,7 +2064,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
         </div>
 
         {/* ChromaDB Status */}
-        <div className={getFocusColClass('chroma')}>
+        <div id="section-chroma" className={getFocusColClass('chroma')}>
           <ExpandableCard
             title="ChromaDB Collections"
             cardKey="chroma"
@@ -1995,7 +2081,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
         </div>
 
         {/* Experiments */}
-        <div className={getFocusColClass('experiments')}>
+        <div id="section-experiments" className={getFocusColClass('experiments')}>
           <ExpandableCard
             title="Training Experiments"
             cardKey="experiments"
