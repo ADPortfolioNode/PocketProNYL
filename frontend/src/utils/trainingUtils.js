@@ -92,7 +92,16 @@ export function formatTrainingSuccessMessage(game, data) {
     learningNote = ` Improved from prior ${(prevAcc * 100).toFixed(2)}%.`;
   }
   const targetNote = trainTarget != null ? ` Target: ${(Number(trainTarget) * 100).toFixed(2)}%.` : '';
-  return `Training completed successfully for ${String(game).toUpperCase()}! Experiment ID: ${data.experiment_id}, Accuracy: ${scoreText}.${targetNote}${learningNote}`;
+  const opt = data.weight_optimization || {};
+  let optNote = '';
+  if (opt.best_score != null && opt.previous_score != null && Number(opt.best_score) > Number(opt.previous_score)) {
+    optNote = ` Suggestion weights rebalanced ${Number(opt.previous_score).toFixed(1)}% → ${Number(opt.best_score).toFixed(1)}%.`;
+  } else if (opt.best_score != null) {
+    optNote = ` Suggestion weights verified at ${Number(opt.best_score).toFixed(1)}%.`;
+  } else if (opt.message) {
+    optNote = ` ${opt.message}`;
+  }
+  return `Training completed successfully for ${String(game).toUpperCase()}! Experiment ID: ${data.experiment_id}, Accuracy: ${scoreText}.${targetNote}${learningNote}${optNote}`;
 }
 
 export function isTrainSuccessStatus(status) {

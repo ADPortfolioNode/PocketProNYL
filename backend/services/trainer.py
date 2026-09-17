@@ -762,6 +762,22 @@ class TrainerService:
                     "accuracy": float(accuracy),
                 }
             weight = round(weight + step, 10)
+        if best is None:
+            return best
+        fine_step = max(round(step / 5, 4), 0.01)
+        lo = max(fine_step, round(best["weight"] - step, 10))
+        hi = min(1.0 - fine_step, round(best["weight"] + step, 10))
+        weight = lo
+        while weight <= hi + 1e-9:
+            blend_pred = (weight * candidate_predictions) + ((1.0 - weight) * previous_predictions)
+            mae, accuracy = self._score_predictions(y_val, blend_pred, y_full)
+            if accuracy > best["accuracy"]:
+                best = {
+                    "weight": float(weight),
+                    "mae": float(mae),
+                    "accuracy": float(accuracy),
+                }
+            weight = round(weight + fine_step, 10)
         return best
 
     def _train_recursive(

@@ -8,10 +8,11 @@ function isPending(status) {
   return ['started', 'already_running', 'running', 'queued'].includes(String(status || '').toLowerCase());
 }
 
-export async function runTrainingJob(axiosClient, apiBase, body, { timeoutMs = 3600000, pollMs = 3000 } = {}) {
+export async function runTrainingJob(axiosClient, apiBase, body, { timeoutMs = 3600000, pollMs = 3000, onStatus } = {}) {
   const start = await axiosClient.post(`${apiBase}/api/train`, body, { timeout: 20000 });
   let data = start.data || {};
   const startStatus = String(data.status || '').toLowerCase();
+  onStatus?.(data);
 
   if (isTrainSuccessStatus(data.status) && !isPending(data.status)) {
     return data;
@@ -31,6 +32,7 @@ export async function runTrainingJob(axiosClient, apiBase, body, { timeoutMs = 3
         { timeout: 8000 },
       );
       data = poll.data || {};
+      onStatus?.(data);
       const st = String(data.status || '').toLowerCase();
       if (st === 'completed' || st === 'success') return data;
       if (st === 'error' || st === 'failed') {
@@ -49,9 +51,10 @@ export async function runTrainingJob(axiosClient, apiBase, body, { timeoutMs = 3
   throw err;
 }
 
-export async function runTrainAllJobs(axiosClient, apiBase, body, { timeoutMs = 3600000, pollMs = 4000 } = {}) {
+export async function runTrainAllJobs(axiosClient, apiBase, body, { timeoutMs = 3600000, pollMs = 4000, onStatus } = {}) {
   const start = await axiosClient.post(`${apiBase}/api/train_all`, body, { timeout: 20000 });
   const data = start.data || {};
+  onStatus?.(data);
   const startStatus = String(data.status || '').toLowerCase();
   if (startStatus === 'error' || startStatus === 'failed') {
     const err = new Error(data.message || 'Train all failed.');
@@ -73,6 +76,7 @@ export async function runTrainAllJobs(axiosClient, apiBase, body, { timeoutMs = 
       ? list.filter((job) => watched.includes(job.game))
       : list;
     if (!relevant.length) continue;
+    onStatus?.({ phase: relevant.some((job) => job.phase === 'optimize_weights') ? 'optimize_weights' : 'fit', jobs: relevant });
     const pending = relevant.some((job) => isPending(job.status));
     const failed = relevant.find((job) => ['error', 'failed'].includes(String(job.status || '').toLowerCase()));
     if (!pending) {

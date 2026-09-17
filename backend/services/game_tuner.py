@@ -342,12 +342,22 @@ class GameTuner:
             self._set_status(latest_result=error_result, current_task="error")
             return error_result
 
-    def optimize_game(self, game: str) -> dict[str, Any]:
+    def optimize_game(self, game: str, trials: tuple[dict[str, Any], ...] | None = None) -> dict[str, Any]:
         assistant = TuningAssistant(
             WeightStore(str(self.state_dir)),
             on_trial=self._on_assistant_trial,
         )
-        result = assistant.optimize_game(game, run_trial=lambda settings: self.tune_game(game, settings=settings))
+        if trials:
+            result = assistant.optimize_game(
+                game,
+                run_trial=lambda settings: self.tune_game(game, settings=settings),
+                trials=trials,
+            )
+        else:
+            result = assistant.optimize_game(
+                game,
+                run_trial=lambda settings: self.tune_game(game, settings=settings),
+            )
         assistant_meta = result.get("assistant") or {}
         best = assistant_meta.get("best_settings") or {}
         weights = WeightStore(str(self.state_dir)).load(game)
