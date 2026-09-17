@@ -314,6 +314,7 @@ def _persist_training_result(game_key: str, request: TrainingRequest, result: di
         "accuracy_history": result.get("accuracy_history", []),
         "optimal_config_applied": result.get("optimal_config_applied", False),
         "optimal_config": result.get("optimal_config", {}),
+        "weight_optimization": result.get("weight_optimization") or {},
         "record_count": dataset.get("record_count"),
         "dataset_hash": dataset.get("dataset_hash"),
     }))
@@ -329,14 +330,67 @@ def _persist_training_result(game_key: str, request: TrainingRequest, result: di
         "highest_accuracy": result.get("highest_accuracy", accuracy),
         "record_accuracy": result.get("record_accuracy", accuracy),
         "message": result.get("message") or "Training completed.",
+        "phase": "completed",
+        "weight_optimization": result.get("weight_optimization") or {},
     }
     set_job(game_key, payload)
     return payload
 
 
+def _post_train_optimize(game_key: str, train_result: dict) -> dict:
+    """After a saved model: verify suggestion mix, rebalance weights, keep only accuracy gains."""
+    from services.game_tuner import GameTuner
+    from services.tuning_assistant import POST_TRAIN_TRIALS
+
+    set_job(game_key, {
+        "status": "running",
+        "phase": "optimize_weights",
+        "game": game_key,
+        "message": "Model saved. Verifying guesses and rebalancing weights for higher accuracy...",
+        "highest_accuracy": train_result.get("highest_accuracy") or train_result.get("accuracy"),
+        "progress": 96,
+    })
+    tuner = GameTuner()
+    optimized = tuner.optimize_game(game_key, trials=POST_TRAIN_TRIALS)
+    assistant = optimized.get("assistant") or {}
+    previous_score = assistant.get("previous_score")
+    best_score = assistant.get("best_score")
+    if best_score is not None and previous_score is not None and best_score > previous_score + 1e-9:
+        extra = (
+            f" Weights rebalanced after verify: {previous_score:.1f}% → {best_score:.1f}%"
+            " held suggestion accuracy."
+        )
+    elif best_score is not None:
+        extra = f" Weights verified; held suggestion accuracy {best_score:.1f}%."
+    else:
+        extra = " Weight verification complete."
+    train_result["weight_optimization"] = {
+        "status": optimized.get("status") or "ok",
+        "held_accuracy_percent": optimized.get("held_accuracy_percent") or optimized.get("accuracy_percent"),
+        "best_settings": assistant.get("best_settings"),
+        "best_score": best_score,
+        "previous_score": previous_score,
+        "trials": assistant.get("trials") or [],
+        "kept_existing": assistant.get("kept_existing"),
+        "message": optimized.get("message") or extra.strip(),
+    }
+    train_result["message"] = (train_result.get("message") or "Training completed.") + extra
+    return train_result
+
+
 def _training_worker(game_key: str, request: TrainingRequest):
     try:
         result = _run_trainer(game_key, request)
+        status = str((result or {}).get("status") or "").lower()
+        if status in ("success", "completed", "ok"):
+            try:
+                result = _post_train_optimize(game_key, result)
+            except Exception:
+                logger.exception("Post-train weight optimization failed for %s", game_key)
+                result["weight_optimization"] = {
+                    "status": "error",
+                    "message": "Optimization skipped after an error; trained model was kept.",
+                }
         _persist_training_result(game_key, request, result)
     except Exception as exc:
         logger.exception("Training failed for %s", game_key)

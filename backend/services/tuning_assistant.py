@@ -16,6 +16,13 @@ OPTIMIZE_TRIALS: tuple[dict[str, Any], ...] = (
 # Skip remaining trials when baseline already raises the stored held floor.
 EARLY_EXIT_MARGIN_PERCENT = 0.5
 
+# After RF training: guess → verify → keep or restore. Fewer rounds so Train All stays usable.
+POST_TRAIN_TRIALS: tuple[dict[str, Any], ...] = (
+    {"learning_rate": 0.05, "rolling_window": 40, "rounds": 3, "patience": 2, "label": "baseline"},
+    {"learning_rate": 0.10, "rolling_window": 28, "rounds": 2, "patience": 2, "label": "aggressive"},
+    {"learning_rate": 0.03, "rolling_window": 56, "rounds": 2, "patience": 2, "label": "stable"},
+)
+
 
 def result_score(result: dict[str, Any] | None) -> float:
     """Prefer the held accuracy floor so a dipping live window cannot win a trial."""

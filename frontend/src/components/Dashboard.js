@@ -283,6 +283,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
   const [ingestingGame, setIngestingGame] = useState(null);
   const [ingestStartTime, setIngestStartTime] = useState(null);
   const [trainStatus, setTrainStatus] = useState('idle');
+  const [trainPhase, setTrainPhase] = useState('idle');
   const [trainErrorMessage, setTrainErrorMessage] = useState('');
   const [trainProgress, setTrainProgress] = useState(0);
   const [trainStartTime, setTrainStartTime] = useState(null);
@@ -1048,6 +1049,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
       return;
     }
     setTrainStatus('in progress');
+    setTrainPhase('fit');
     setTrainErrorMessage('');
     setTrainProgress(0);
     setTrainStartTime(Date.now());
@@ -1062,11 +1064,20 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
           ...trainParams,
           targetAccuracy: effectiveTrainingTarget,
         }),
+        {
+          onStatus: (job) => {
+            if (String(job?.phase || '').toLowerCase() === 'optimize_weights') {
+              setTrainPhase('optimize_weights');
+              setTrainProgress((p) => Math.max(p, 96));
+            }
+          },
+        },
       ) };
       clearInterval(interval); // Clear interval regardless of outcome
       setTrainProgress(100);
       if (isTrainSuccessStatus(response?.data?.status)) {
         setTrainStatus('completed');
+        setTrainPhase('completed');
         setTrainErrorMessage('');
         setSummaryRefreshKey((prev) => prev + 1);
         // Refresh experiments
@@ -1105,12 +1116,14 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
         setTimeout(() => setExpandedCard(null), 2000);
       } else {
         setTrainStatus('error');
+      setTrainPhase('error');
         setTrainErrorMessage(response.data.error || response.data.message || 'Training failed.');
         alert(`Training failed: ${response.data.error || response.data.message}`);
       }
     } catch (e) {
       clearInterval(interval);
       setTrainStatus('error');
+      setTrainPhase('error');
       setTrainProgress(0);
       const errText = formatTrainingErrorMessage(e, formatApiError);
       setTrainErrorMessage(errText);
@@ -1141,6 +1154,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
       return;
     }
     setTrainStatus('in progress');
+    setTrainPhase('fit');
     setTrainErrorMessage('');
     setTrainProgress(0);
     setTrainStartTime(Date.now());
@@ -1153,12 +1167,20 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
       });
       const { game: _ignoredGame, ...allBody } = sample;
       const response = {
-        data: await runTrainAllJobs(axios, API_BASE, { ...allBody, games: gamesWithDraws }),
+        data: await runTrainAllJobs(axios, API_BASE, { ...allBody, games: gamesWithDraws }, {
+          onStatus: (job) => {
+            if (String(job?.phase || '').toLowerCase() === 'optimize_weights') {
+              setTrainPhase('optimize_weights');
+              setTrainProgress((p) => Math.max(p, 96));
+            }
+          },
+        }),
       };
       clearInterval(interval);
       setTrainProgress(100);
       if (isTrainSuccessStatus(response?.data?.status)) {
         setTrainStatus('completed');
+        setTrainPhase('completed');
         setTrainErrorMessage('');
         setSummaryRefreshKey((prev) => prev + 1);
         try {
@@ -1173,12 +1195,14 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
         setTimeout(() => setExpandedCard(null), 2000);
       } else {
         setTrainStatus('error');
+      setTrainPhase('error');
         setTrainErrorMessage(response.data.error || response.data.message || 'Train all failed.');
         alert(`Train all failed: ${response.data.error || response.data.message}`);
       }
     } catch (e) {
       clearInterval(interval);
       setTrainStatus('error');
+      setTrainPhase('error');
       setTrainProgress(0);
       const errText = formatTrainingErrorMessage(e, formatApiError);
       setTrainErrorMessage(errText);
@@ -1637,7 +1661,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
             }
             onToggle={handleCardFocus('train')}
           >
-            <p>Train machine learning model on lottery draw history. Each run builds incrementally on the saved model and highest known accuracy.</p>
+            <p>Train machine learning model on lottery draw history. Each run fits the model, verifies accuracy, then rebalances suggestion weights. Only mixes that beat the held floor are kept, so accuracy can climb.</p>
             <p className="small text-neon mb-3">
               <strong>Model Type:</strong> {trainingModelTypeLabel || BASE_MODEL_TYPE}
             </p>
@@ -1907,7 +1931,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
                   current={trainProgress}
                   total={100}
                   status="active"
-                  label="Training Progress"
+                  label={trainPhase === 'optimize_weights' ? 'Verify + rebalance weights' : 'Training Progress'}
                   showMetadata={true}
                   startTime={trainStartTime}
                   colorScheme="success"
