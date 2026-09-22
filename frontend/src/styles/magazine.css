@@ -86,6 +86,33 @@ body {
   font-style: italic;
 }
 
+.magazine-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.magazine-nav-link {
+  padding: 0.4rem 0.8rem;
+  border-radius: 999px;
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.magazine-nav-link:hover {
+  color: var(--cream);
+  background: rgba(219, 233, 255, 0.08);
+}
+
+.magazine-nav-link.is-active {
+  color: #070d1f;
+  background: var(--copper);
+}
+
 .magazine-ingest {
   flex: 1;
   max-width: 28rem;
@@ -378,6 +405,110 @@ body {
 
 .magazine-tools {
   padding: 0 0 2rem;
+}
+
+.resources-page {
+  width: min(1120px, calc(100% - 2rem));
+  margin: 0 auto 3rem;
+  padding-top: 1.5rem;
+}
+
+.resources-page h1 {
+  font-family: Fraunces, Georgia, serif;
+  font-weight: 500;
+  font-size: clamp(1.8rem, 3.4vw, 2.6rem);
+  color: var(--cream);
+  margin-bottom: 0.4rem;
+}
+
+.resources-page .lead {
+  color: rgba(219, 233, 255, 0.92);
+  max-width: 60ch;
+  margin-bottom: 1.5rem;
+}
+
+.resources-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.resource-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.resource-card-clickable {
+  cursor: pointer;
+}
+
+.resource-card-clickable:focus-visible {
+  outline: 2px solid var(--copper);
+  outline-offset: 2px;
+}
+
+.resource-card-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.resource-draws-table {
+  font-size: 0.78rem;
+}
+
+.resource-draws-table th {
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+}
+
+.resource-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin-bottom: 0.4rem;
+}
+
+.resource-card-header h5 {
+  margin: 0;
+}
+
+.resource-card-meta {
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin-bottom: 0.6rem;
+}
+
+.resource-links {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.resource-links a {
+  color: var(--copper);
+  font-size: 0.85rem;
+  text-decoration: none;
+}
+
+.resource-links a:hover {
+  text-decoration: underline;
+}
+
+.stretched-link-text {
+  color: inherit;
+  text-decoration: none;
+}
+
+.stretched-link-text:hover {
+  color: var(--copper);
+  text-decoration: underline;
 }
 
 @media (max-width: 800px) {

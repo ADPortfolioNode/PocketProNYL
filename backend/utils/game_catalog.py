@@ -8,6 +8,7 @@ rule-derived training defaults for suggestions.
 from __future__ import annotations
 
 import math
+import re
 from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
@@ -19,6 +20,23 @@ from config import (
     GAME_PREDICTION_SCHEDULES,
     GAME_TITLES,
 )
+
+
+_SOCRATA_ID_RE = re.compile(r"/views/([a-z0-9]{4}-[a-z0-9]{4})")
+
+
+def _build_resources(endpoints: List[str]) -> Dict[str, Any]:
+    """Build verified resource links: NY Open Data dataset (live, confirmed working) + official site root."""
+    resources: Dict[str, Any] = {
+        "official_site": "https://nylottery.ny.gov/",
+        "dataset_endpoints": list(endpoints),
+    }
+    match = _SOCRATA_ID_RE.search(endpoints[0]) if endpoints else None
+    if match:
+        resource_id = match.group(1)
+        resources["dataset_landing"] = f"https://data.ny.gov/d/{resource_id}"
+        resources["dataset_json"] = f"https://data.ny.gov/resource/{resource_id}.json"
+    return resources
 
 
 def _combination(n: int, k: int) -> float:
@@ -242,6 +260,7 @@ def build_game_entry(game: str, draw_count: int = 0) -> Dict[str, Any]:
     schedule = deepcopy(GAME_PREDICTION_SCHEDULES.get(game) or {})
     training = compute_training_defaults_for_game(game)
     endpoints = list(DATASET_ENDPOINTS.get(game) or [])
+    resources = _build_resources(endpoints)
     return {
         "id": game,
         "key": game,
@@ -252,6 +271,7 @@ def build_game_entry(game: str, draw_count: int = 0) -> Dict[str, Any]:
         "suggestion_format": fmt,
         "schedule": schedule,
         "dataset_endpoints": endpoints,
+        "resources": resources,
         "draw_count": int(draw_count or 0),
         "has_draws": int(draw_count or 0) > 0,
         "ready_for_training": int(draw_count or 0) >= 50,

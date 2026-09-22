@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { NavLink } from 'react-router-dom';
 
 const Header = ({ startupStatus }) => {
   const [showProgress, setShowProgress] = useState(true);
@@ -30,6 +31,14 @@ const Header = ({ startupStatus }) => {
         <a className="magazine-brand" href="/">
           Pocket<span>Pro</span>:NYL
         </a>
+        <nav className="magazine-nav" aria-label="Primary">
+          <NavLink to="/" end className={({ isActive }) => `magazine-nav-link${isActive ? ' is-active' : ''}`}>
+            Dashboard
+          </NavLink>
+          <NavLink to="/resources" className={({ isActive }) => `magazine-nav-link${isActive ? ' is-active' : ''}`}>
+            Resources
+          </NavLink>
+        </nav>
         {showProgress && startupStatus ? (
           <div className="magazine-ingest" aria-label="Ingestion progress">
             <div className="meta">

@@ -107,3 +107,38 @@ async def get_game_summary(game: str):
         ready_for_training=int(draw_count or 0) >= 50,
         ready_for_suggestions=int(draw_count or 0) >= 20,
     )
+
+
+@router.get("/api/games/{game}/draws")
+async def get_game_draws(game: str, limit: int = Query(25, ge=1, le=200)):
+    """
+    Return the most recently ingested draw records for a game, newest first.
+    Powers the Resources page "digest and display" workflow.
+    """
+    game_key = _require_game_key(game)
+    from routes.chroma_repository import chroma_repository
+
+    def _fetch():
+        total = chroma_repository.count_documents(game_key)
+        if total <= 0:
+            return [], total
+        fetch_limit = min(total, limit)
+        offset = max(0, total - fetch_limit)
+        data = chroma_repository.get_documents(
+            game_key, limit=fetch_limit, offset=offset, include=["metadatas"]
+        )
+        return data.get("metadatas") or [], total
+
+    try:
+        metadatas, total = await asyncio.wait_for(
+            asyncio.to_thread(_fetch), timeout=CHROMA_QUERY_TIMEOUT
+        )
+    except asyncio.TimeoutError:
+        metadatas, total = [], 0
+
+    def _sort_key(meta: dict) -> tuple:
+        return (str(meta.get("draw_date") or ""), str(meta.get("draw_session") or ""))
+
+    draws = sorted(metadatas, key=_sort_key, reverse=True)[:limit]
+    return {"game": game_key, "total_draws": int(total or 0), "draws": draws}
+

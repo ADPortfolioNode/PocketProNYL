@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
+import { Link } from 'react-router-dom';
 import getApiBase from '../utils/apiBase';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -99,7 +100,9 @@ export default function GameSummaryPanel({ games, refreshKey = 0, initialSummari
         <ul className="list-group list-group-flush">
           {games.map(game => (
             <li key={game} className="list-group-item d-flex justify-content-between align-items-center">
-              {game}
+              <Link to={`/resources?game=${game}`} className="stretched-link-text">
+                {game}
+              </Link>
               <span className="badge bg-primary rounded-pill">
                 {summaries[game] !== undefined ? `${summaries[game]} draws` : 'Loading...'}
               </span>

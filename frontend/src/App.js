@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
+import { Routes, Route } from 'react-router-dom';
 import Dashboard from './components/Dashboard';
 import StartupProgress from './components/StartupProgress';
 import Header from './components/Header';
+import ResourcesPage from './components/ResourcesPage';
 import { useStartupStatusPoll } from './hooks/useStartupStatusPoll';
 import './styles/modern.css';
 import './App.css';
@@ -34,7 +36,13 @@ export default function App() {
         ) : (
           <>
             <Header startupStatus={startupStatus} />
-            <Dashboard startupStatus={startupStatus} startupErrorMessage={startupErrorMessage} />
+            <Routes>
+              <Route
+                path="/"
+                element={<Dashboard startupStatus={startupStatus} startupErrorMessage={startupErrorMessage} />}
+              />
+              <Route path="/resources" element={<ResourcesPage />} />
+            </Routes>
           </>
         )}
       </div>

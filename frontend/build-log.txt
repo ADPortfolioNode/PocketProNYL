@@ -1,0 +1,27 @@
+
+> pocketpro-nyl-frontend@0.1.0 build
+> react-scripts build
+
+(node:11164) [DEP0176] DeprecationWarning: fs.F_OK is deprecated, use fs.constants.F_OK instead
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Creating an optimized production build...
+Compiled successfully.
+
+File sizes after gzip:
+
+  115.5 kB  build\static\js\main.9c0a273e.js
+  40.31 kB  build\static\css\main.2736aabd.css
+
+The project was built assuming it is hosted at /.
+You can control this with the homepage field in your package.json.
+
+The build folder is ready to be deployed.
+You may serve it with a static server:
+
+  npm install -g serve
+  serve -s build
+
+Find out more about deployment here:
+
+  https://cra.link/deployment
+
