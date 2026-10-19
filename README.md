@@ -39,3 +39,32 @@ If APIs fail from the UI:
 - scripts/tests use `http://127.0.0.1:5001`
 
 Do not commit `.env`.
+
+## Subscriber deployment (optional API keys)
+
+Local starts are unchanged. For a paid or public server, turn on per-customer keys in `.env`:
+
+```env
+AUTH_MODE=apikey
+API_KEYS=subscriber-key-1,subscriber-key-2   # predict, chat, read
+ADMIN_API_KEYS=your-admin-key                 # train, ingest, vector-store admin
+```
+
+Generate a key with `openssl rand -hex 24`. The browser asks for the key once and remembers it. `/api/health` stays public for health checks. See `backend/middleware/auth.py`.
+
+## Storage paths
+
+All state lives under `DATA_DIR` (default `/data`, the Docker volume). `MODELS_DIR` and `PREDICTION_STATE_DIR` override their sub-folders. Paths resolve in `backend/utils/paths.py`.
+
+## Tests
+
+```bash
+pip install -r backend/requirements-dev.txt
+DATA_DIR=/tmp/pocketpro-data python -m pytest -q tests
+```
+
+## License and disclaimer
+
+Proprietary, all rights reserved. See `LICENSE`.
+
+PocketPro:NYL is statistical analysis for entertainment only. Lottery draws are random and no tool can predict or improve the odds. Not affiliated with the New York Lottery or the New York State Gaming Commission. 18+. Gambling problem? Call 1-877-8-HOPENY.

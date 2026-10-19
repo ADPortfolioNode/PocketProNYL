@@ -23,6 +23,10 @@ services:
       - GROK_API_KEY=${GROK_API_KEY}
       - GROK_API_BASE=${GROK_API_BASE:-https://api.x.ai/v1}
       - GROK_MODEL=${GROK_MODEL:-grok-3-mini-beta}
+      # Optional API-key gate (off unless AUTH_MODE=apikey) — see backend/middleware/auth.py
+      - AUTH_MODE=${AUTH_MODE:-off}
+      - API_KEYS=${API_KEYS:-}
+      - ADMIN_API_KEYS=${ADMIN_API_KEYS:-}
       - CHROMA_HOST=pocketpro_nyl_chroma
       - HF_HOME=/app/.cache/chroma
       - CHROMA_PORT=8000

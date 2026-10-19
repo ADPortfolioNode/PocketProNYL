@@ -13,6 +13,7 @@ from config import GAME_CONFIGS
 from prediction.engine import LotteryPredictionEngine
 from prediction.state.weight_store import WeightStore
 from services.tuning_assistant import TuningAssistant
+from utils.paths import prediction_state_dir
 
 # Keep iterating past a single walk-forward pass so regressions get another
 # chance to be rejected and accuracy can still climb.
@@ -27,7 +28,7 @@ class GameTuner:
     """Run the validated iterative learner independently for each game."""
 
     def __init__(self, state_dir: str | None = None):
-        self.state_dir = Path(state_dir or os.environ.get("PREDICTION_STATE_DIR", "/data/prediction"))
+        self.state_dir = Path(state_dir or prediction_state_dir())
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._status: dict[str, Any] = {

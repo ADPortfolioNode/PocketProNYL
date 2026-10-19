@@ -14,9 +14,7 @@
 
 ## Top-level entries
 - `_check_train_settings.py`
-- `_start_mensa_core.bat`
 - `_start_pocketpro_nyl_core.bat`
-- `_start_pocketpronyl_core.bat`
 - `_watch_start.ps1`
 - `_watch_user_start.ps1`
 - `.agents`

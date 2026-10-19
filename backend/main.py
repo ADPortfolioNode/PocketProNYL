@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from routes import health, games, models, chroma, ingestion, predictions, training, experiments, chat
 from middleware.rate_limit import rate_limit_middleware
+from middleware.auth import api_key_auth_middleware
 from state.ingestion_worker import start_background_ingestion
 from services.ingest import ingest_service
 from services.socrata_fetch import install_capped_fetch
@@ -42,6 +43,10 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+# Optional API-key gate (no-op unless AUTH_MODE=apikey). Registered before CORS so
+# CORS stays the outer layer and 401/403 responses still carry CORS headers.
+app.middleware("http")(api_key_auth_middleware)
 
 
 def _cors_allowed_origins() -> list[str]:

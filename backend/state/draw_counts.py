@@ -11,10 +11,11 @@ import os
 import threading
 import time
 from pathlib import Path
+from utils.paths import data_dir
 
 _counts_lock = threading.Lock()
 _counts: dict[str, int] = {}
-_counts_file = Path(os.environ.get("DATA_DIR", "/data")) / "draw_counts.json"
+_counts_file = Path(data_dir()) / "draw_counts.json"
 _loaded = False
 
 

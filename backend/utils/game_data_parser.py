@@ -1,3 +1,4 @@
+import ast
 import re
 import logging
 from typing import Any, Dict, List, Optional
@@ -14,10 +15,10 @@ def _parse_numbers(raw_value: Any) -> List[int]:
     # Handle string representation of a list, e.g., "[1, 2, 3]"
     if isinstance(raw_value, str) and raw_value.strip().startswith("[") and raw_value.strip().endswith("]"):
         try:
-            list_from_str = eval(raw_value) # Use eval carefully, assuming trusted input
+            list_from_str = ast.literal_eval(raw_value)  # safe literal parsing (no code execution)
             if isinstance(list_from_str, list):
                 return [int(token) for token in list_from_str if isinstance(token, (int, float))]
-        except (SyntaxError, NameError):
+        except (SyntaxError, ValueError, TypeError):
             pass # Fallback to regex if not a valid list string
 
     tokens = re.findall(r"\d+", str(raw_value or ""))
@@ -32,12 +33,12 @@ def _parse_pick3_digits(raw_value: Any) -> List[int]:
     # Handle string representation of a list, e.g., "[1, 2, 3]"
     if text.startswith("[") and text.endswith("]"):
         try:
-            list_from_str = eval(text)
+            list_from_str = ast.literal_eval(text)
             if isinstance(list_from_str, list):
                 digits = [str(int(d)) for d in list_from_str if isinstance(d, (int, float))]
                 if len(digits) == 3:
                     return [int(d) for d in digits]
-        except (SyntaxError, NameError):
+        except (SyntaxError, ValueError, TypeError):
             pass
 
     # Extract all digits, then pad/truncate to exactly 3

@@ -41,6 +41,7 @@ def with_timeout(seconds):
 from fastapi import HTTPException
 from config import GAME_CONFIGS, DATASET_ENDPOINTS, GAME_TITLES, GAME_ALIASES, resolve_game_key
 from routes.chroma_repository import chroma_repository # Import the repository
+from utils.paths import ingestion_cache_dir
 
 from utils.game_data_parser import (
     _parse_pick3_digits as parse_pick3_digits_util,
@@ -551,7 +552,7 @@ class IngestService:
             raise Exception(f"Failed to connect to ChromaDB collection '{collection_name}': {str(conn_error)}")
 
         # --- JSON Caching and Fetching Logic ---
-        json_cache_dir = "/data/ingestion_cache"
+        json_cache_dir = ingestion_cache_dir()
         os.makedirs(json_cache_dir, exist_ok=True)
         json_path = os.path.join(json_cache_dir, f"{game_key}.json")
 

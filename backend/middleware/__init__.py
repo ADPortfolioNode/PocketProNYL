@@ -1,1 +1,1 @@
-# Middleware for Mensa Project backend
+# Middleware for PocketPro:NYL backend

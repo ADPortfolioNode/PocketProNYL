@@ -10,6 +10,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, accuracy_score
 from sklearn.exceptions import ConvergenceWarning
 from config import GAME_CONFIGS
+from utils.paths import models_dir
 from utils.training_params import (
     extract_training_params,
     merge_training_params,
@@ -36,7 +37,7 @@ warnings.filterwarnings("ignore", category=ConvergenceWarning, module="sklearn")
 
 class TrainerService:
     def __init__(self):
-        self.models_dir = "/data/models"
+        self.models_dir = models_dir()
         os.makedirs(self.models_dir, exist_ok=True)
         defaults = self.get_training_defaults()
         self.target_accuracy = float(os.environ.get("TRAIN_TARGET_ACCURACY", defaults["target_accuracy"]))

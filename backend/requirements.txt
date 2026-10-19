@@ -1,6 +1,5 @@
 # Core application
 fastapi==0.111.0
-hypercorn[standard]>=0.17.3
 requests==2.31.0
 pydantic==2.7.4
 pydantic-settings==2.2.1
@@ -35,7 +34,7 @@ hypercorn[standard]>=0.17.3,<0.18.0
 # AI/LLM Clients
 openai==1.35.3
 google-generativeai==0.7.1
-langchain-community==0.0.38
+# langchain-community removed: nothing in the backend imports it.
 
 # Utilities
 docker==6.1.3

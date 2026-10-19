@@ -14,13 +14,14 @@ from config import GAME_CONFIGS, GAME_PREDICTION_FORMATS, GAME_PREDICTION_SCHEDU
 from prediction.config.loader import load_game_config
 from prediction.core.draw_loader import from_chroma
 from prediction.engine import LotteryPredictionEngine
+from utils.paths import prediction_state_dir
 
 
 class PredictionAdapter:
     """Bridge modular engine to legacy PredictorService response contract."""
 
     def __init__(self, state_dir: str | None = None):
-        self.state_dir = Path(state_dir or os.environ.get("PREDICTION_STATE_DIR", "/data/prediction"))
+        self.state_dir = Path(state_dir or prediction_state_dir())
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.prediction_timezone = os.getenv("PREDICTION_TIMEZONE", "America/New_York")
         self.engine = LotteryPredictionEngine(str(self.state_dir))

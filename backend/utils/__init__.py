@@ -1,1 +1,1 @@
-# Utility functions for Mensa Project backend
+# Utility functions for PocketPro:NYL backend

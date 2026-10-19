@@ -6,10 +6,11 @@ import asyncio
 from fastapi import APIRouter
 from experiments.store import ExperimentStore
 from utils.timestamps import normalize_experiment_record
+from utils.paths import experiments_file
 
 
 router = APIRouter()
-exp_store = ExperimentStore("/data/experiments/experiments.json")
+exp_store = ExperimentStore(experiments_file())
 
 
 @router.get("/api/experiments")
