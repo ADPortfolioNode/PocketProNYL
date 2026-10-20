@@ -6,6 +6,7 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 import requests
 
 from utils.game_data_parser import _extract_rows_and_columns as extract_rows_and_columns_util
+from utils.game_validation import tag_rows_with_source
 
 MAX_ROWS = int(os.getenv("INGEST_MAX_ROWS_PER_GAME", "80000"))
 
@@ -79,6 +80,8 @@ def install_capped_fetch(ingest_service):
                     break
 
                 fetched_rows, extracted_columns = extract_rows_and_columns_util(data)
+                # Provenance tag so validation/repair can prove which dataset a row came from.
+                fetched_rows = tag_rows_with_source(fetched_rows, endpoint)
                 if extracted_columns and not column_names:
                     column_names = extracted_columns
                 if not fetched_rows:

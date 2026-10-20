@@ -53,7 +53,10 @@ class GameTuner:
 
     def status(self) -> dict[str, Any]:
         with self._lock:
-            return dict(self._status)
+            snapshot = dict(self._status)
+            # Callers get their own per-game map, never the live one.
+            snapshot["metrics_by_game"] = dict(snapshot.get("metrics_by_game") or {})
+            return snapshot
 
     def _set_status(self, **values: Any) -> None:
         with self._lock:
@@ -65,7 +68,9 @@ class GameTuner:
             by_game = dict(self._status.get("metrics_by_game") or {})
             by_game[game_key] = metrics
             self._status["metrics_by_game"] = by_game
+            # Legacy "latest game" mirror; tuning_metrics_game says whose it is.
             self._status["tuning_metrics"] = metrics
+            self._status["tuning_metrics_game"] = game_key
             self._status["updated_at"] = time.time()
 
     def _progress_message(self, game_key: str, payload: dict[str, Any], *, round_complete: bool) -> str:
@@ -362,6 +367,7 @@ class GameTuner:
             return error_result
 
     def optimize_game(self, game: str, trials: tuple[dict[str, Any], ...] | None = None) -> dict[str, Any]:
+        game = str(game or "").strip().lower()
         assistant = TuningAssistant(
             WeightStore(str(self.state_dir)),
             on_trial=self._on_assistant_trial,
@@ -381,7 +387,9 @@ class GameTuner:
         best = assistant_meta.get("best_settings") or {}
         weights = WeightStore(str(self.state_dir)).load(game)
         with self._lock:
-            current_metrics = dict((self._status.get("metrics_by_game") or {}).get(game) or self._status.get("tuning_metrics") or {})
+            # Only this game's metrics. Falling back to the global "latest" mirror
+            # copied another game's history/weights into this game's entry.
+            current_metrics = dict((self._status.get("metrics_by_game") or {}).get(game) or {})
         current_metrics.update({
             "accuracy_percent": result.get("accuracy_percent"),
             "rolling_accuracy_percent": result.get("rolling_accuracy_percent"),

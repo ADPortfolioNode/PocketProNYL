@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from datetime import date, datetime
 from typing import Any
@@ -115,6 +116,7 @@ def _ensure_bonus_keys() -> None:
 def metadata_to_draw(metadata: dict, game: str, draw_id: str | None = None) -> Draw | None:
     """Parse one Chroma metadata record into a Draw."""
     _ensure_bonus_keys()
+    _ensure_embedded_flags()
     rules = game_rules_from_config(game)
     winning = _extract_primary_candidate(metadata, game=game)
     if not winning:
@@ -179,6 +181,33 @@ def _clamp_primary(numbers: list[int], rules: GameRules) -> list[int]:
     return valid[: rules.primary_count]
 
 
+# Games whose source rows carry one board per draw session in separate fields.
+_SESSION_FIELDS: dict[str, tuple[tuple[str, str], ...]] = {
+    "take5": (("midday_winning_numbers", "midday"), ("evening_winning_numbers", "evening")),
+    "pick3": (("midday_daily", "midday"), ("evening_daily", "evening")),
+}
+
+
+def _expand_sessions(metadata: dict, game: str) -> list[dict]:
+    """Split a source row holding midday and evening boards into one record per draw."""
+    fields = _SESSION_FIELDS.get(str(game or "").lower())
+    if not fields or not isinstance(metadata, dict):
+        return [metadata]
+    if metadata.get("winning_numbers") or metadata.get("draw_session"):
+        return [metadata]
+    session_keys = {name for name, _ in fields}
+    expanded: list[dict] = []
+    for field, session in fields:
+        raw = metadata.get(field)
+        if raw is None or not str(raw).strip():
+            continue
+        row = {key: value for key, value in metadata.items() if key not in session_keys}
+        row["winning_numbers"] = raw
+        row["draw_session"] = session
+        expanded.append(row)
+    return expanded or [metadata]
+
+
 def draws_from_metadatas(
     metadatas: list[dict],
     game: str,
@@ -193,9 +222,14 @@ def draws_from_metadatas(
         if not isinstance(meta, dict):
             continue
         draw_id = id_list[index] if index < len(id_list) else None
-        draw = metadata_to_draw(meta, game, draw_id=draw_id)
-        if draw:
-            draws.append(draw)
+        rows = _expand_sessions(meta, game)
+        for row in rows:
+            row_id = draw_id
+            if draw_id and len(rows) > 1:
+                row_id = f"{draw_id}:{row.get('draw_session')}"
+            draw = metadata_to_draw(row, game, draw_id=row_id)
+            if draw:
+                draws.append(draw)
     return draws
 
 
@@ -220,28 +254,93 @@ def _session_rank(metadata: dict | None) -> str:
     return session or "9"
 
 
-def from_chroma(game: str, limit: int = 500) -> list[Draw]:
-    """Load the most recent draw history from ChromaDB, returned oldest-first."""
-    from services.chroma_client import chroma_client
+FULL_SCAN_MAX_ROWS = int(os.environ.get("DRAW_LOADER_FULL_SCAN_MAX", "200000"))
+_PAGE_SIZE = 5000
 
-    collection = chroma_client.client.get_collection(game)
+
+def _dedupe_key(draw: Draw) -> tuple:
+    meta = draw.metadata or {}
+    return (
+        draw.draw_date,
+        str(meta.get("draw_session") or "").lower(),
+        str(meta.get("draw_number") or ""),
+        str(meta.get("draw_time") or ""),
+        tuple(draw.primary),
+        tuple(draw.bonus or []),
+    )
+
+
+def _read_all(collection, total: int) -> tuple[list, list]:
+    metadatas: list = []
+    ids: list = []
+    offset = 0
+    while offset < total:
+        page = collection.get(limit=min(_PAGE_SIZE, total - offset), offset=offset, include=["metadatas"])
+        batch = list((page or {}).get("metadatas") or [])
+        batch_ids = list((page or {}).get("ids") or [])
+        if not batch:
+            break
+        metadatas.extend(batch)
+        ids.extend(batch_ids)
+        offset += len(batch)
+        if len(batch) < _PAGE_SIZE:
+            break
+    return metadatas, ids
+
+
+def from_chroma(game: str, limit: int = 500) -> list[Draw]:
+    """Load the most recent draw history of ``game`` from its own collection, oldest-first.
+
+    Chroma's storage order is insertion order, not draw date, so the newest
+    ``limit`` draws are picked after sorting by date, never by offset. Rows that
+    belong to another game (foreign dataset columns, numbers that do not fit)
+    are dropped, and exact duplicates are collapsed.
+    """
+    from services.chroma_client import chroma_client
+    from utils.game_validation import validate_game_record
+
+    game_key = str(game or "").strip().lower()
+    collection = chroma_client.client.get_collection(game_key)
     total = int(collection.count() or 0)
     if total <= 0:
         return []
 
-    fetch_limit = min(total, max(int(limit), 1))
-    offset = max(0, total - fetch_limit)
-    data = collection.get(limit=fetch_limit, offset=offset, include=["metadatas"])
-    metadatas = data.get("metadatas") or []
-    ids = data.get("ids") or []
-    draws = draws_from_metadatas(list(metadatas), game, list(ids))
+    if total <= FULL_SCAN_MAX_ROWS:
+        metadatas, ids = _read_all(collection, total)
+    else:
+        # Very large collections (Quick Draw): bounded tail read, as before.
+        fetch_limit = min(total, max(int(limit), 1) * 4)
+        data = collection.get(limit=fetch_limit, offset=max(0, total - fetch_limit), include=["metadatas"])
+        metadatas = list(data.get("metadatas") or [])
+        ids = list(data.get("ids") or [])
+
+    kept_meta: list[dict] = []
+    kept_ids: list = []
+    for index, meta in enumerate(metadatas):
+        ok, _reason = validate_game_record(game_key, meta, strict=False)
+        if ok:
+            kept_meta.append(meta)
+            kept_ids.append(ids[index] if index < len(ids) else None)
+
+    draws = draws_from_metadatas(kept_meta, game_key, kept_ids)
     draws.sort(
         key=lambda draw: (
             draw.draw_date or date.min,
             _session_rank(draw.metadata),
+            str((draw.metadata or {}).get("draw_number") or "").zfill(12),
             str(draw.draw_id or ""),
         )
     )
-    if len(draws) > fetch_limit:
-        draws = draws[-fetch_limit:]
-    return draws
+    unique: list[Draw] = []
+    seen: set[tuple] = set()
+    for draw in draws:
+        key = _dedupe_key(draw)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(draw)
+
+    fetch_limit = max(int(limit), 1)
+    if len(unique) > fetch_limit:
+        unique = unique[-fetch_limit:]
+    return unique

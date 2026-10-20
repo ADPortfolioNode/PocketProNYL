@@ -72,6 +72,12 @@ def chart_status_for_game(status: dict[str, Any], game: str | None = None) -> di
     if metrics:
         overlay["tuning_metrics"] = metrics
         overlay["current_game"] = requested
+    elif str(overlay.get("tuning_metrics_game") or "").lower() != requested:
+        # No metrics for this game yet: never chart another game's run under its name.
+        overlay["tuning_metrics"] = {}
+    last_run = overlay.get("last_run")
+    if isinstance(last_run, dict) and last_run.get("game") and str(last_run.get("game")).lower() != requested:
+        overlay["last_run"] = None
     return overlay
 
 

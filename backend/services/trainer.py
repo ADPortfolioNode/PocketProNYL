@@ -2,6 +2,7 @@ import json
 import os
 import re
 import logging
+import threading
 import time
 import numpy as np
 import joblib
@@ -35,8 +36,16 @@ from utils.game_data_parser import (
 warnings.filterwarnings("ignore", category=ConvergenceWarning, module="sklearn")
 
 
+# Training knobs that train() rewrites per game (optimal config, memory caps).
+_PER_RUN_KNOBS = (
+    "target_accuracy", "max_train_attempts", "blend_step", "train_size", "n_estimators",
+    "max_depth", "random_state", "data_limit", "window_size", "auto_tune",
+)
+
+
 class TrainerService:
     def __init__(self):
+        self._train_lock = threading.RLock()
         self.models_dir = models_dir()
         os.makedirs(self.models_dir, exist_ok=True)
         defaults = self.get_training_defaults()
@@ -263,10 +272,15 @@ class TrainerService:
         return metadatas
 
     def _extract_winning_sequences(self, metadatas, game: str):
+        from utils.game_validation import validate_game_record
+
         sequences = []
         game_key = str(game or "").lower()
         for meta in metadatas or []:
             if not isinstance(meta, dict):
+                continue
+            # Never train one game on another game's rows.
+            if game_key and not validate_game_record(game_key, meta, strict=False)[0]:
                 continue
 
             numbers = _extract_record_sequence(meta, game)
@@ -1295,7 +1309,23 @@ class TrainerService:
             "best_training_params": best_training_params,
         }
 
-    def train(
+    def train(self, game: str, *args, **kwargs):
+        """Train one game with its own knobs, then restore the shared defaults.
+
+        The module-level ``trainer_service`` is shared by every game. Per-game
+        optimal configs and memory caps used to stay on it after a run, so e.g.
+        a ``data_limit`` cap from Take 5 silently applied to the next game.
+        Runs are serialized so concurrent games cannot read each other's knobs.
+        """
+        with self._train_lock:
+            saved = {name: getattr(self, name) for name in _PER_RUN_KNOBS if hasattr(self, name)}
+            try:
+                return self._train_game(game, *args, **kwargs)
+            finally:
+                for name, value in saved.items():
+                    setattr(self, name, value)
+
+    def _train_game(
         self,
         game: str,
         target_accuracy: float = None,

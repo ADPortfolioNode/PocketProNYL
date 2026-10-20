@@ -159,7 +159,7 @@ export default function PredictionPanel({ games = [], disabled = false }) {
               )}
             </div>
           ) : (
-            selectedGame && <GamePrediction game={selectedGame} />
+            selectedGame && <GamePrediction key={selectedGame} game={selectedGame} />
           )}
 
           {selectedGame === ALL_GAMES_VALUE && allPredictions.length > 0 && (
