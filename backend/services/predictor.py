@@ -408,6 +408,15 @@ class PredictorService:
         if not all_metadatas:
             return {"status": "error", "message": "No historical data available for this game."}
 
+        # Drop rows that belong to another game (wrong dataset / numbers that do not fit).
+        from utils.game_validation import validate_game_record
+
+        all_metadatas = [
+            meta for meta in all_metadatas
+            if validate_game_record(game_key, meta, strict=False)[0]
+        ]
+        if not all_metadatas:
+            return {"status": "error", "message": "No historical data available for this game."}
         sorted_metadatas = TrainerService()._sort_metadatas_chronologically(all_metadatas)
         
         history_for_strategy: List[Draw] = []

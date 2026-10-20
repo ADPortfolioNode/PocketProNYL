@@ -121,6 +121,7 @@ class PredictionAdapter:
             return {"dataset_hash": None, "record_count": 0}
 
     def predict_next_draw(self, game: str, recent_k: int = 10) -> dict:
+        game = str(game or "").strip().lower()
         if game not in GAME_CONFIGS:
             return {"status": "error", "message": f"Game '{game}' has no modular prediction config."}
 
@@ -129,6 +130,8 @@ class PredictionAdapter:
             ticket = self.engine.predict(game, history=history)
         except Exception as exc:
             return {"status": "error", "message": str(exc)}
+        if str(getattr(ticket, "game", game) or game).lower() != game:
+            return {"status": "error", "message": f"Engine returned a ticket for '{ticket.game}', not '{game}'."}
 
         prediction_dt = self._current_prediction_datetime()
         session_draw_count = self._get_session_draw_count(game, prediction_dt)
@@ -152,7 +155,11 @@ class PredictionAdapter:
             "formatted_prediction": formatted,
             "predicted_main_numbers": formatted["main_numbers"],
             "predicted_bonus_numbers": formatted["bonus_numbers"],
-            "prediction_session": [session_item] * max(1, session_draw_count),
+            # Independent copies: one shared dict repeated N times aliases every session.
+            "prediction_session": [
+                {**session_item, "draw_index": index + 1}
+                for index in range(max(1, session_draw_count))
+            ],
             "session_draw_count": max(1, session_draw_count),
             "prediction_date": prediction_dt.date().isoformat(),
             "prediction_weekday": prediction_dt.strftime("%A"),

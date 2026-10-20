@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { resolveTuningMetrics } from '../utils/tuningView';
 import axios from 'axios';
 import getApiBase from '../utils/apiBase';
 import PredictionPanel from './PredictionPanel';
@@ -65,7 +66,7 @@ function formatAccuracyDelta(value) {
 
 function TuningTelemetryGraph({ status, selectedGame, apiBase }) {
   const game = resolveTuningViewGame(status, selectedGame);
-  const metrics = (game && status?.metrics_by_game?.[game]) || status?.tuning_metrics || {};
+  const metrics = resolveTuningMetrics(status, game, selectedGame);
   const updatedAt = Number(status?.updated_at || 0);
   const params = new URLSearchParams();
   if (game) params.set('game', game);
@@ -92,7 +93,7 @@ function TuningTelemetryGraph({ status, selectedGame, apiBase }) {
 
 function TuningRunProgress({ status, selectedGame }) {
   const game = resolveTuningViewGame(status, selectedGame);
-  const metrics = (game && status?.metrics_by_game?.[game]) || status?.tuning_metrics || {};
+  const metrics = resolveTuningMetrics(status, game, selectedGame);
   const runs = (metrics.run_history || status?.run_history || []).filter((run) => (
     !game || run.game === game || selectedGame === ALL_GAMES_VALUE
   ));
@@ -143,7 +144,7 @@ function TuningRunProgress({ status, selectedGame }) {
 function TuningMetricsChart({ status, selectedGame }) {
   const latestGame = status?.latest_result?.game || status?.current_game;
   const game = resolveTuningViewGame(status, selectedGame);
-  const metrics = (game && status?.metrics_by_game?.[game]) || status?.tuning_metrics || {};
+  const metrics = resolveTuningMetrics(status, game, selectedGame);
   const hasMatchingMetrics = Boolean(game && status?.metrics_by_game?.[game])
     || !latestGame
     || selectedGame === ALL_GAMES_VALUE
@@ -223,7 +224,7 @@ function TuningMetricsChart({ status, selectedGame }) {
 function TuningValidationLedger({ status, selectedGame }) {
   const latestGame = status?.latest_result?.game || status?.current_game;
   const game = resolveTuningViewGame(status, selectedGame);
-  const metrics = (game && status?.metrics_by_game?.[game]) || status?.tuning_metrics || {};
+  const metrics = resolveTuningMetrics(status, game, selectedGame);
   const hasMatchingHistory = Boolean(game && status?.metrics_by_game?.[game])
     || !latestGame
     || selectedGame === ALL_GAMES_VALUE

@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import getApiBase from '../utils/apiBase';
-import { hasSuggestionResponse } from '../utils/suggestionUtils';
+import { hasSuggestionResponse, isPredictionForGame } from '../utils/suggestionUtils';
 import PredictionDisplay from './PredictionDisplay';
 import './PredictionDisplay.css';
 
@@ -10,8 +10,19 @@ export default function GamePrediction({ game }) {
   const [prediction, setPrediction] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  // The game this card currently shows. A reply for an earlier game must never
+  // land under a different game's heading.
+  const activeGameRef = useRef(game);
+
+  useEffect(() => {
+    activeGameRef.current = game;
+    setPrediction(null);
+    setError(null);
+    setLoading(false);
+  }, [game]);
 
   const submit = async () => {
+    const requestedGame = game;
     setLoading(true);
     setError(null);
     setPrediction(null);
@@ -22,6 +33,13 @@ export default function GamePrediction({ game }) {
         recent_k: parseInt(recentK, 10)
       }, { timeout: 600000 });
       const payload = r.data || {};
+      if (activeGameRef.current !== requestedGame) {
+        return;
+      }
+      if (!isPredictionForGame(payload, requestedGame)) {
+        setError(`Suggestion response was for ${payload.game}, not ${requestedGame}.`);
+        return;
+      }
       if (payload.status === 'error') {
         setError(payload.message || 'Suggestion failed');
         return;
@@ -32,9 +50,10 @@ export default function GamePrediction({ game }) {
       }
       setPrediction(payload);
     } catch (e) {
+      if (activeGameRef.current !== requestedGame) return;
       setError(e.response?.data?.detail || e.message || 'Suggestion failed');
     } finally {
-      setLoading(false);
+      if (activeGameRef.current === requestedGame) setLoading(false);
     }
   };
 

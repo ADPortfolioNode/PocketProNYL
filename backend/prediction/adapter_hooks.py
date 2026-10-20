@@ -16,6 +16,10 @@ def on_new_draw_metadata(game: str, metadata: dict, draw_id: str | None = None) 
     if os.environ.get("PREDICTION_ENGINE", "modular").lower() == "legacy":
         return None
 
+    from utils.game_validation import validate_game_record
+
+    if not validate_game_record(game, metadata, strict=False)[0]:
+        return None
     draw = metadata_to_draw(metadata, game, draw_id=draw_id)
     if draw is None:
         return None

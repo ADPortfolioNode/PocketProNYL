@@ -41,6 +41,12 @@ def with_timeout(seconds):
 from fastapi import HTTPException
 from config import GAME_CONFIGS, DATASET_ENDPOINTS, GAME_TITLES, GAME_ALIASES, resolve_game_key
 from routes.chroma_repository import chroma_repository # Import the repository
+from utils.game_validation import (
+    allowed_dataset_ids,
+    dataset_id_from_url,
+    tag_rows_with_source,
+    validate_game_record,
+)
 from utils.paths import ingestion_cache_dir
 
 from utils.game_data_parser import (
@@ -64,6 +70,10 @@ class IngestService:
         # Otherwise, use the general INGEST_BATCH_SIZE
         self.batch_size = int(os.getenv("INGEST_STARTUP_BATCH_SIZE", "500")) if os.getenv("INGEST_STARTUP_PARALLEL", "0") == "1" else int(os.getenv("INGEST_BATCH_SIZE", "4000"))
         self.use_upsert = os.getenv("INGEST_USE_UPSERT", "1") != "0"
+        # Catalog discovery is a recovery path for games with NO configured dataset.
+        # It must never add datasets to a configured game: a catalog search for
+        # "new york Take 5 lottery" also returns Cash 4 Life and NY Lotto, which is
+        # how other games' draws were stored and trained as Take 5.
         self.enable_catalog_fallback = os.getenv("INGEST_ENABLE_CATALOG_FALLBACK", "1") == "1"
         self.fallback_on_empty = os.getenv("INGEST_FALLBACK_ON_EMPTY", "1") == "1"
         self.max_catalog_candidates = int(os.getenv("INGEST_MAX_CATALOG_CANDIDATES", "3")) # PocketPro:NYL Project
@@ -73,6 +83,9 @@ class IngestService:
         self.progress_interval_s = float(os.getenv("INGEST_PROGRESS_INTERVAL_S", "0.5"))
         self.socrata_catalog_url = os.getenv("SOCRATA_CATALOG_URL", "https://api.us.socrata.com/api/catalog/v1")
         self.socrata_domain = os.getenv("SOCRATA_DOMAIN", "data.ny.gov")
+        self._catalog_titles: dict[str, str] = {}
+        self.auto_repair = os.getenv("INGEST_AUTO_REPAIR", "1") != "0"
+        self.repair_max_rows = int(os.getenv("INGEST_REPAIR_MAX_ROWS", "100000"))
         self.game_search_hints = {
             key: f"new york {GAME_TITLES.get(key, key)} lottery"
             for key in DATASET_ENDPOINTS.keys()
@@ -183,6 +196,7 @@ class IngestService:
                 continue
             seen.add(endpoint)
             deduped_endpoints.append(endpoint)
+            self._catalog_titles[endpoint] = str(title or "")
             print(f"  ↳ Catalog candidate for {game}: {title} -> {endpoint}")
 
             if len(deduped_endpoints) >= self.max_catalog_candidates:
@@ -191,27 +205,33 @@ class IngestService:
         return deduped_endpoints
 
     def _resolve_game_endpoints(self, game: str):
-        configured = DATASET_ENDPOINTS.get(game, [])
+        configured = list(DATASET_ENDPOINTS.get(game, []) or [])
 
-        # Fast path: use known configured datasets by default.
-        # Catalog fallback is opt-in and primarily for recovery when configured endpoints are missing.
-        if configured and not self.enable_catalog_fallback:
+        # Configured datasets are authoritative. Never merge catalog hits into them.
+        if configured:
             return configured
 
-        catalog_candidates = self._fetch_catalog_endpoints(game)
+        if not self.enable_catalog_fallback:
+            return []
 
-        if configured and not catalog_candidates:
-            return configured
-
-        ordered = []
-        seen = set()
-        for endpoint in configured + catalog_candidates:
-            if endpoint in seen:
+        # Recovery only: keep catalog datasets whose title names this game and
+        # no other configured game.
+        own_title = self._normalize_text(GAME_TITLES.get(game, game)).replace(" ", "")
+        safe = []
+        for endpoint in self._fetch_catalog_endpoints(game):
+            dataset_id = dataset_id_from_url(endpoint)
+            owned_elsewhere = any(
+                dataset_id and dataset_id in allowed_dataset_ids(other)
+                for other in DATASET_ENDPOINTS.keys()
+                if other != game
+            )
+            title = self._catalog_titles.get(endpoint, "")
+            compact = self._normalize_text(title).replace(" ", "")
+            if owned_elsewhere or not own_title or own_title not in compact:
+                print(f"  ↳ Rejected catalog candidate for {game}: {title or endpoint}")
                 continue
-            seen.add(endpoint)
-            ordered.append(endpoint)
-
-        return ordered
+            safe.append(endpoint)
+        return safe
 
     def _pick3_digit_string(self, raw_value) -> str | None:
         # Store comma-separated digits so history parsers do not treat "123" as 123.
@@ -224,7 +244,14 @@ class IngestService:
             return None
         return ",".join(digits[-4:])
 
-    def _process_api_row(self, row_dict: dict, game: str, column_names: list[str], existing_ids: set[str]) -> list[tuple[str, dict, str]]:
+    def _process_api_row(
+        self,
+        row_dict: dict,
+        game: str,
+        column_names: list[str],
+        existing_ids: set[str],
+        rejected: dict[str, int] | None = None,
+    ) -> list[tuple[str, dict, str]]:
         """
         Process a single row from the API, normalize it, and prepare for ChromaDB.
         This method was restored to fix a regression where it was missing.
@@ -241,6 +268,12 @@ class IngestService:
         
         records_to_add = []
         for record_id, record_meta in normalized_records:
+            ok, reason = validate_game_record(game, record_meta, strict=True)
+            if not ok:
+                # Per-call counter (never instance state): games ingest in parallel threads.
+                if rejected is not None:
+                    rejected[reason] = rejected.get(reason, 0) + 1
+                continue
             if record_id in existing_ids:
                 continue
             doc_text = json.dumps(record_meta, sort_keys=True)
@@ -422,6 +455,8 @@ class IngestService:
                     break
 
                 fetched_rows, extracted_columns = extract_rows_and_columns_util(data)
+                # Provenance tag: lets validation and repair prove which dataset a row came from.
+                fetched_rows = tag_rows_with_source(fetched_rows, endpoint)
 
                 if not _current_column_names and extracted_columns:
                     _current_column_names = extracted_columns
@@ -433,6 +468,13 @@ class IngestService:
                 
                 all_fetched_rows.extend(fetched_rows)
                 _emit_progress(len(all_fetched_rows), total_estimated_game_rows)
+                if len(fetched_rows) > socrata_page_size * 2:
+                    # rows.json views ignore $limit/$offset and return the whole
+                    # dataset every time; paging on would loop forever.
+                    print(f"  ↳ Endpoint ignored $limit (got {len(fetched_rows)} rows); using single dump")
+                    break
+                if len(fetched_rows) < socrata_page_size:
+                    break
                 current_offset += len(fetched_rows)
 
         return all_fetched_rows, _current_column_names
@@ -445,6 +487,7 @@ class IngestService:
         existing_ids: set[str],
         column_names: list[str],
         progress_callback=None,
+        rejected: dict[str, int] | None = None,
     ) -> tuple[int, int]:
         """Processes a list of rows from a file and upserts them into ChromaDB."""
         chroma_batch_size = self.batch_size
@@ -474,7 +517,7 @@ class IngestService:
                     row = converted[0]
                 if not isinstance(row, dict):
                     continue
-                processed_records = self._process_api_row(row, game, column_names, existing_ids)
+                processed_records = self._process_api_row(row, game, column_names, existing_ids, rejected)
                 for record_id, record_meta, doc_text in processed_records:
                     chroma_ids.append(record_id)
                     chroma_metadatas.append(record_meta)
@@ -659,6 +702,7 @@ class IngestService:
                 else:
                     print(f"  ↳ Skipping ID preload ({existing_count} > {self.max_id_preload}); upsert dedupe only")
 
+        rejected: dict[str, int] = {}
         total_rows_processed, total_rows_added = self._process_rows_from_file(
             game=game_key,
             all_rows=all_rows,
@@ -666,10 +710,40 @@ class IngestService:
             existing_ids=existing_ids,
             column_names=column_names,
             progress_callback=progress_callback,
+            rejected=rejected,
         )
+        rejected_total = sum(rejected.values())
+        if rejected_total:
+            print(
+                f"⚠ [{game_key.upper()}] Rejected {rejected_total} row(s) that do not fit "
+                f"{game_key} (wrong dataset or invalid numbers): {dict(sorted(rejected.items()))}"
+            )
+
+        # Remove rows a previous (unvalidated) ingest stored in this game's collection.
+        repair_summary = None
+        if self.auto_repair:
+            try:
+                from services.data_repair import repair_game_collection
+
+                repair_summary = repair_game_collection(
+                    game_key, max_rows=self.repair_max_rows, collection=collection
+                )
+            except Exception as repair_error:
+                print(f"⚠ [{game_key.upper()}] Repair step skipped: {repair_error}")
+                repair_summary = {"status": "error", "message": str(repair_error)}
+            if isinstance(repair_summary, dict) and int(repair_summary.get("removed") or 0) > 0:
+                try:
+                    existing_count = max(0, existing_count - int(repair_summary.get("removed") or 0))
+                except Exception:
+                    pass
 
         # --- Finalization ---
         final_total = max(existing_count + total_rows_added, existing_count, total_rows_processed)
+        if isinstance(repair_summary, dict) and repair_summary.get("status") == "ok":
+            try:
+                final_total = int(collection.count() or 0)
+            except Exception:
+                pass
         try:
             from state.draw_counts import update_draw_count
             update_draw_count(collection_name, final_total)
@@ -701,12 +775,18 @@ class IngestService:
             except Exception as hook_error:
                 print(f"⚠ [{game_key.upper()}] Weight update hook skipped: {hook_error}")
 
-        return self._build_success_result(
+        result = self._build_success_result(
             existing_count=existing_count,
             total_rows_processed=total_rows_processed,
             total_rows_added=total_rows_added,
             final_total=final_total,
             force=force,
         )
+        # Additive fields only; existing keys are unchanged.
+        result["rejected"] = rejected_total
+        result["rejected_reasons"] = dict(sorted(rejected.items()))
+        if repair_summary is not None:
+            result["repair"] = repair_summary
+        return result
 
 ingest_service = IngestService()
