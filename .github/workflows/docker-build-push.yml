@@ -1,20 +1,38 @@
 name: Build & Push Docker Images
 
+# One workflow for every Docker build (it replaces the old
+# build-and-push-backend.yml, which built the same backend image twice).
+# - Pull requests: build both images and smoke-test them, never push.
+# - Pushes to main, feat/*, cleanup/*, v* tags, or a manual run: build, test,
+#   then push to GHCR with the built-in GITHUB_TOKEN (no secret needed).
+# - Docker Hub is optional: it is pushed to only when the repository secrets
+#   DOCKER_USERNAME and DOCKER_PASSWORD exist; otherwise that login is skipped.
+
 on:
   push:
     branches:
       - main
+      - 'feat/*'
+      - 'cleanup/*'
     tags:
       - 'v*'
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: docker-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
-  DOCKER_REGISTRY: ghcr.io
-  DOCKER_ORG: adportfolionode
   FRONTEND_IMAGE: pocketpro-nyl-frontend
   BACKEND_IMAGE: pocketpro-nyl-backend
+  NODE_VERSION: 22.13.1
 
 jobs:
   build-and-test:
@@ -25,51 +43,59 @@ jobs:
         uses: actions/checkout@v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      - name: Cache Docker layers
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-
       - name: Build backend image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./backend
           file: ./backend/Dockerfile
+          platforms: linux/amd64
           tags: ${{ env.BACKEND_IMAGE }}:test
           load: true
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
       - name: Build frontend image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
+          platforms: linux/amd64
           tags: ${{ env.FRONTEND_IMAGE }}:test
           load: true
-          build-args: NODE_VERSION=22.13.1
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new
+          build-args: NODE_VERSION=${{ env.NODE_VERSION }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
       - name: Test backend image
         run: |
           docker run --rm --user root --entrypoint python ${{ env.BACKEND_IMAGE }}:test -c "import fastapi, hypercorn, chromadb, sklearn; print('All backend imports OK')"
       - name: Test frontend image
         run: |
           docker run --rm ${{ env.FRONTEND_IMAGE }}:test sh -c '[ -f /usr/share/nginx/html/index.html ] && echo "Frontend build OK" || exit 1'
-      - name: Move cache
-        run: |
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
   push-to-registry:
-    name: Push to Docker Hub & GHCR
+    name: Push to GHCR (and Docker Hub if configured)
     needs: build-and-test
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKERHUB_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+      - name: Resolve registry names
+        id: names
+        run: |
+          # GHCR rejects upper-case repository names (the owner is ADPortfolioNode).
+          owner="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          echo "ghcr_prefix=ghcr.io/${owner}" >> "$GITHUB_OUTPUT"
+          if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_PASSWORD" ]; then
+            echo "dockerhub=true" >> "$GITHUB_OUTPUT"
+            echo "dockerhub_prefix=docker.io/$(echo "$DOCKERHUB_USERNAME" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+          else
+            echo "dockerhub=false" >> "$GITHUB_OUTPUT"
+            echo "dockerhub_prefix=docker.io/unset" >> "$GITHUB_OUTPUT"
+            echo "::notice::DOCKER_USERNAME/DOCKER_PASSWORD secrets not set; pushing to GHCR only."
+          fi
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Log in to GitHub Container Registry
@@ -79,39 +105,63 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Log in to Docker Hub
+        if: steps.names.outputs.dockerhub == 'true'
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-      - name: Extract metadata (tags, labels)
-        id: meta
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_PASSWORD }}
+      - name: Backend image metadata
+        id: meta_backend
         uses: docker/metadata-action@v5
         with:
           images: |
-            ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_ORG }}/pocketpro-nyl-frontend
-            ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_ORG }}/pocketpro-nyl-backend
+            ${{ steps.names.outputs.ghcr_prefix }}/${{ env.BACKEND_IMAGE }}
+            name=${{ steps.names.outputs.dockerhub_prefix }}/${{ env.BACKEND_IMAGE }},enable=${{ steps.names.outputs.dockerhub == 'true' }}
           tags: |
             type=ref,event=branch
+            type=ref,event=tag
             type=sha
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+            type=sha,format=long,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+      - name: Frontend image metadata
+        id: meta_frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ steps.names.outputs.ghcr_prefix }}/${{ env.FRONTEND_IMAGE }}
+            name=${{ steps.names.outputs.dockerhub_prefix }}/${{ env.FRONTEND_IMAGE }},enable=${{ steps.names.outputs.dockerhub == 'true' }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha
+            type=sha,format=long,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
       - name: Build and push backend
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./backend
           file: ./backend/Dockerfile
+          platforms: linux/amd64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ${{ steps.meta_backend.outputs.tags }}
+          labels: ${{ steps.meta_backend.outputs.labels }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
       - name: Build and push frontend
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
+          platforms: linux/amd64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: NODE_VERSION=22.13.1
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ${{ steps.meta_frontend.outputs.tags }}
+          labels: ${{ steps.meta_frontend.outputs.labels }}
+          build-args: NODE_VERSION=${{ env.NODE_VERSION }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+      - name: Image info
+        run: |
+          echo "Pushed backend tags:"
+          echo "${{ steps.meta_backend.outputs.tags }}"
+          echo "Pushed frontend tags:"
+          echo "${{ steps.meta_frontend.outputs.tags }}"

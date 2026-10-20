@@ -231,9 +231,8 @@ def with_circuit_breaker(breaker_name: str, config: Optional[CircuitBreakerConfi
             
             if breaker is None:
                 # Register with default config if not exists
-                if config is None:
-                    config = CircuitBreakerConfig(name=breaker_name)
-                breaker = circuit_breaker_registry.register(breaker_name, config)
+                breaker_config = config if config is not None else CircuitBreakerConfig(name=breaker_name)
+                breaker = circuit_breaker_registry.register(breaker_name, breaker_config)
             
             return breaker.call(func, *args, **kwargs)
         

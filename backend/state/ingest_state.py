@@ -48,7 +48,6 @@ _save_dirty = False
 
 def _load_manual_ingest_state():
     """Load manual ingest state from persistent storage."""
-    global manual_ingest_state
     try:
         if _ingest_state_file.exists():
             with _ingest_state_file.open('r', encoding='utf-8') as fh:
