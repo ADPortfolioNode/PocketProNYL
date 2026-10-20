@@ -1,1 +1,1 @@
-# State management for Mensa Project backend
+# State management for PocketPro:NYL backend

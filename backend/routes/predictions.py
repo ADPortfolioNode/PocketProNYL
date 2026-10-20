@@ -13,10 +13,11 @@ from services.prediction_adapter import prediction_adapter
 from experiments.store import ExperimentStore
 from utils.validation import _require_game_key
 from utils.timestamps import normalize_experiment_record, runtime_timestamp_fields
+from utils.paths import experiments_file
 
 
 router = APIRouter()
-exp_store = ExperimentStore("/data/experiments/experiments.json")
+exp_store = ExperimentStore(experiments_file())
 
 
 class PredictionRequest(BaseModel):

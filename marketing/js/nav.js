@@ -24,6 +24,7 @@
     el.outerHTML = `<footer class="site-footer"><div class="site-footer__inner">
       <a class="brand" href="index.html" style="color:#dbe9ff">Pocket<span>Pro</span>:NYL</a>
       <p>New York Lottery dashboard — ingest, train, and ask Concierge about draws.</p>
+      <p class="site-footer__disclaimer">For statistical analysis and entertainment only. Lottery draws are random; no tool can predict or improve your odds, and past results do not influence future draws. Not affiliated with, endorsed by, or sponsored by the New York Lottery or New York State Gaming Commission. Must be 18+ (21+ for Quick Draw where required). Gambling problem? Call 1-877-8-HOPENY or text HOPENY (467369).</p>
     </div></footer>`;
   });
   document.querySelectorAll(".nav-toggle").forEach((btn) => {

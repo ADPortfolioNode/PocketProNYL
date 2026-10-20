@@ -50,3 +50,16 @@
   background: linear-gradient(180deg, #ff9f40, #8ad7ff);
   border-radius: 4px;
 }
+/* Legal / responsible-play notice (components/Disclaimer.js) */
+.app-disclaimer {
+  margin: 2rem auto 1rem;
+  padding: 0.75rem 1rem;
+  max-width: 960px;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 8px;
+}
+.app-disclaimer p { margin: 0; }

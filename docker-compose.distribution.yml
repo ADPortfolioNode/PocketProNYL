@@ -27,6 +27,10 @@ x-backend-environment: &backend-environment
   GROK_API_KEY: ${GROK_API_KEY:-}
   GROK_API_BASE: ${GROK_API_BASE:-https://api.x.ai/v1}
   GROK_MODEL: ${GROK_MODEL:-grok-3-mini-beta}
+  # Per-subscriber API keys (off unless AUTH_MODE=apikey) — see backend/middleware/auth.py
+  AUTH_MODE: ${AUTH_MODE:-off}
+  API_KEYS: ${API_KEYS:-}
+  ADMIN_API_KEYS: ${ADMIN_API_KEYS:-}
   MAX_CONCURRENT_CLONES: ${MAX_CONCURRENT_CLONES:-3}
   INGEST_BATCH_SIZE: ${INGEST_BATCH_SIZE:-6000}
   INGEST_REQUEST_TIMEOUT: ${INGEST_REQUEST_TIMEOUT:-30}

@@ -10,9 +10,15 @@ from pathlib import Path
 from prediction.core.types import WeightState
 
 
+def _default_state_dir() -> str:
+    # Mirrors utils.paths.prediction_state_dir(); kept local so the prediction
+    # package stays importable on its own.
+    return os.environ.get("PREDICTION_STATE_DIR") or os.path.join(os.environ.get("DATA_DIR", "/data"), "prediction")
+
+
 class WeightStore:
     def __init__(self, base_dir: str | None = None):
-        self.base_dir = Path(base_dir or os.environ.get("PREDICTION_STATE_DIR", "/data/prediction"))
+        self.base_dir = Path(base_dir or _default_state_dir())
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
     def _path(self, game: str) -> Path:

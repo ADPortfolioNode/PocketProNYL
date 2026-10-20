@@ -10,6 +10,7 @@ from config import GAME_CONFIGS, GAME_PREDICTION_FORMATS, GAME_PREDICTION_SCHEDU
 from prediction.core.types import Draw, date, datetime  # Ensure datetime is imported for Draw constructor
 from services.statistical_strategies import score_frequency, score_hybrid, score_overdue, select_top_numbers, score_hot_cold
 from services.trainer import TrainerService
+from utils.paths import models_dir
 from utils.model_utils import (
     _load_model_metadata,
     build_prediction_model_metadata,
@@ -24,7 +25,7 @@ from utils.game_data_parser import (
 
 class PredictorService:
     def __init__(self):
-        self.models_dir = "/data/models"
+        self.models_dir = models_dir()
         self.prediction_timezone = os.getenv("PREDICTION_TIMEZONE", "America/New_York")
         self.max_session_draws = int(os.getenv("PREDICTION_MAX_SESSION_DRAWS", "400"))
         # New configurable parameters for statistical strategies

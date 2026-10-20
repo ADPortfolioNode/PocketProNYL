@@ -15,11 +15,12 @@ from config import GAME_CONFIGS
 from services.chroma_client import chroma_client
 from utils.timestamps import normalize_experiment_record, runtime_timestamp_fields
 from state.train_jobs import get_job, set_job, list_jobs, is_running
+from utils.paths import experiments_file, data_dir, prediction_state_dir
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-exp_store = ExperimentStore("/data/experiments/experiments.json")
+exp_store = ExperimentStore(experiments_file())
 
 
 class TrainingRequest(BaseModel):
@@ -102,8 +103,7 @@ def _last_trained_dataset_snapshot(game_key: str) -> dict:
             last_count = int(experiment.get("record_count") or 0)
             last_hash = experiment.get("dataset_hash")
 
-    data_dir = os.environ.get("DATA_DIR", "/data")
-    metadata_path = os.path.join(data_dir, "experiments", f"{game_key}_model_metadata.json")
+    metadata_path = os.path.join(data_dir(), "experiments", f"{game_key}_model_metadata.json")
     if os.path.exists(metadata_path):
         try:
             with open(metadata_path, encoding="utf-8") as handle:
@@ -119,7 +119,7 @@ def _last_trained_dataset_snapshot(game_key: str) -> dict:
             pass
 
     ready_path = os.path.join(
-        os.environ.get("PREDICTION_STATE_DIR", "/data/prediction"),
+        prediction_state_dir(),
         f"{game_key}_ready.json",
     )
     if os.path.exists(ready_path):

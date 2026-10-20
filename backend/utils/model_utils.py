@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import joblib
+from utils.paths import models_dir, experiments_dir
 
 
 def _coerce_float(value: Any) -> Optional[float]:
@@ -19,12 +20,11 @@ def _coerce_float(value: Any) -> Optional[float]:
 
 
 def _models_dir() -> str:
-    return os.environ.get("MODELS_DIR", "/data/models")
+    return models_dir()
 
 
 def _experiments_dir() -> str:
-    data_dir = os.environ.get("DATA_DIR", "/data")
-    return os.path.join(data_dir, "experiments")
+    return experiments_dir()
 
 
 def _load_model_metadata(game_key: str) -> dict:
