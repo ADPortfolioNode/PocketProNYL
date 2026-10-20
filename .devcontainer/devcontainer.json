@@ -1,0 +1,26 @@
+{
+  "name": "PocketPro:NYL",
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.11-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": { "version": "22" },
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "hostRequirements": { "cpus": 4, "memory": "8gb" },
+  "forwardPorts": [3000, 5001, 8001],
+  "portsAttributes": {
+    "3000": { "label": "Dashboard (docker compose)", "onAutoForward": "openPreview" },
+    "5001": { "label": "Backend API" },
+    "8001": { "label": "ChromaDB" }
+  },
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-azuretools.vscode-docker",
+        "dbaeumer.vscode-eslint",
+        "GitHub.vscode-pull-request-github"
+      ]
+    }
+  }
+}
