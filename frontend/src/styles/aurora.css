@@ -1,0 +1,176 @@
+/*
+ * Aurora theme layer: dark base, cyan + violet accents.
+ * Loaded last, so it only re-skins the existing magazine/bootstrap styles.
+ * No layout or markup depends on it; deleting the import restores the old look.
+ */
+
+:root {
+  --ai-base: #05070f;
+  --ai-surface: rgba(11, 16, 32, 0.78);
+  --ai-surface-2: rgba(17, 24, 46, 0.9);
+  --ai-cyan: #22d3ee;
+  --ai-violet: #a78bfa;
+  --ai-ok: #34d399;
+  --ai-warn: #fb7185;
+  --ai-text: #e6f0ff;
+  --ai-muted: #8aa0c8;
+  --ai-line: rgba(124, 146, 196, 0.22);
+  --ai-glow: 0 0 0 1px rgba(34, 211, 238, 0.18), 0 20px 50px -24px rgba(34, 211, 238, 0.35);
+
+  /* feed the existing variables so every legacy rule picks the palette up */
+  --ink: var(--ai-text);
+  --ink-soft: var(--ai-muted);
+  --paper: var(--ai-base);
+  --navy: #0d1328;
+  --copper: var(--ai-cyan);
+  --cream: var(--ai-text);
+  --line: var(--ai-line);
+  --glass: var(--ai-surface);
+  --photo-overlay: linear-gradient(180deg, rgba(5, 7, 15, 0.9) 0%, rgba(5, 7, 15, 0.74) 45%, rgba(5, 7, 15, 0.96) 100%);
+  --shadow-border: 0 0 0 1px var(--ai-line), 0 24px 48px -28px rgba(0, 0, 0, 0.8);
+  --accent-green: var(--ai-cyan);
+  --accent-green-light: #67e8f9;
+  --accent-green-dark: #0e7490;
+  --border-color: var(--ai-line);
+  --border-color-active: rgba(34, 211, 238, 0.6);
+  --st-accent: var(--ai-cyan);
+  --st-accent-2: var(--ai-violet);
+}
+
+body {
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(34, 211, 238, 0.08), transparent 60%),
+    radial-gradient(900px 500px at 100% 0%, rgba(167, 139, 250, 0.10), transparent 60%),
+    var(--ai-base) !important;
+  color: var(--ai-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* subtle animated grid behind the content */
+.magazine-overlay::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(34, 211, 238, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(167, 139, 250, 0.05) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at 50% 0%, #000 30%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 0%, #000 30%, transparent 75%);
+  animation: aurora-grid 24s linear infinite;
+}
+
+@keyframes aurora-grid {
+  from { background-position: 0 0, 0 0; }
+  to { background-position: 0 48px, 48px 0; }
+}
+
+.magazine-photo { filter: saturate(0.6) hue-rotate(15deg) brightness(0.55); }
+
+.magazine-header {
+  background: rgba(5, 7, 15, 0.82) !important;
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--ai-line);
+}
+
+.magazine-header::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--ai-cyan), var(--ai-violet), transparent);
+  opacity: 0.7;
+}
+
+.magazine-app .card,
+.magazine-app .alert {
+  background: var(--ai-surface) !important;
+  border: 1px solid var(--ai-line) !important;
+  border-radius: 16px !important;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.magazine-app .card:hover { border-color: rgba(34, 211, 238, 0.32) !important; box-shadow: var(--ai-glow); }
+
+.magazine-app .card::before { background: linear-gradient(90deg, var(--ai-cyan), var(--ai-violet)) !important; }
+
+.magazine-app .text-neon,
+.magazine-app h4,
+.magazine-app h5 { color: var(--ai-text) !important; letter-spacing: -0.01em; }
+
+.magazine-app .text-muted { color: var(--ai-muted) !important; }
+
+.magazine-badge {
+  color: var(--ai-cyan) !important;
+  border-color: rgba(34, 211, 238, 0.4) !important;
+  background: rgba(34, 211, 238, 0.08) !important;
+}
+
+.hero-copy h1 {
+  background: linear-gradient(100deg, #f0f9ff 10%, var(--ai-cyan) 55%, var(--ai-violet) 95%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.magazine-app .btn-primary {
+  background: linear-gradient(135deg, var(--ai-cyan), var(--ai-violet)) !important;
+  border: 0 !important;
+  color: #04121a !important;
+  font-weight: 600;
+  box-shadow: 0 8px 22px -10px rgba(34, 211, 238, 0.7);
+}
+
+.magazine-app .btn-primary:hover:not(:disabled) { filter: brightness(1.08); transform: translateY(-1px); }
+
+.magazine-app .btn-outline-primary,
+.magazine-app .btn-secondary,
+.magazine-app .btn-outline-secondary {
+  background: transparent !important;
+  border: 1px solid rgba(34, 211, 238, 0.45) !important;
+  color: var(--ai-cyan) !important;
+}
+
+.magazine-app .btn:focus-visible,
+.magazine-app .form-control:focus,
+.magazine-app .form-select:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.28) !important;
+  border-color: var(--ai-cyan) !important;
+}
+
+.magazine-app .form-control,
+.magazine-app .form-select {
+  background-color: rgba(5, 7, 15, 0.7) !important;
+  border-color: var(--ai-line) !important;
+  color: var(--ai-text) !important;
+}
+
+.magazine-app .progress { background: rgba(124, 146, 196, 0.15) !important; border-radius: 999px; }
+.magazine-app .progress-bar { background: linear-gradient(90deg, var(--ai-cyan), var(--ai-violet)) !important; }
+
+.magazine-app .badge.bg-success { background: rgba(52, 211, 153, 0.18) !important; color: var(--ai-ok) !important; }
+.magazine-app .badge.bg-danger { background: rgba(251, 113, 133, 0.18) !important; color: var(--ai-warn) !important; }
+
+.magazine-app a:not(.btn) { color: var(--ai-cyan); }
+.magazine-app a:not(.btn):hover { color: var(--ai-violet); }
+
+::selection { background: rgba(167, 139, 250, 0.35); }
+
+/* WorkflowSummary: keep the explanatory text, tucked behind a disclosure */
+.workflow-howto summary {
+  cursor: pointer;
+  color: var(--ai-muted);
+  font-size: 0.85rem;
+  list-style: none;
+}
+.workflow-howto summary::-webkit-details-marker { display: none; }
+.workflow-howto summary::before { content: "▸ "; color: var(--ai-cyan); }
+.workflow-howto[open] summary::before { content: "▾ "; }
+
+@media (prefers-reduced-motion: reduce) {
+  .magazine-overlay::after { animation: none; }
+  .magazine-app .btn-primary:hover:not(:disabled) { transform: none; }
+}

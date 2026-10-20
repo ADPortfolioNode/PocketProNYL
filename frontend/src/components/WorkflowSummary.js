@@ -1,9 +1,13 @@
 import React from 'react';
+import DataFlowPipeline from './DataFlowPipeline';
 
 export default function WorkflowSummary() {
   return (
-    <div className="card p-3 mb-3">
-      <h5>UI/UX and User Workflow Summary</h5>
+    <>
+    <DataFlowPipeline />
+    <details className="card p-3 mb-3 workflow-howto">
+      <summary>How the workflow works</summary>
+      <h5 className="mt-3">UI/UX and User Workflow Summary</h5>
       <p>This application provides a dashboard for a machine learning workflow with the following steps:</p>
       <ol>
         <li>
@@ -25,6 +29,7 @@ export default function WorkflowSummary() {
           <strong>Chat with Agent:</strong> A chat panel is available for the user to interact with a conversational agent.
         </li>
       </ol>
-    </div>
+    </details>
+    </>
   );
 }

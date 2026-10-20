@@ -3,12 +3,14 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { installAuthFetch } from './utils/authFetch';
+import { installFlowActivity } from './utils/flowActivity';
 import './index.css';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import './styles/starTrek.css';
 import './styles/magazine.css';
 
 installAuthFetch();
+installFlowActivity();
 
 const container = document.getElementById('root');
 const root = createRoot(container);
