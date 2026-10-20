@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from prediction.metrics.evaluator import HONEST_METRIC_KEYS
 from prediction.state.weight_store import WeightStore
 
 # Bounded search: baseline, then a more aggressive step, then a more stable one.
@@ -25,9 +26,15 @@ POST_TRAIN_TRIALS: tuple[dict[str, Any], ...] = (
 
 
 def result_score(result: dict[str, Any] | None) -> float:
-    """Prefer the held accuracy floor so a dipping live window cannot win a trial."""
+    """Score a trial on validation only; never on the final holdout.
+
+    ``validation_accuracy_percent`` comes first because ``held_accuracy_percent``
+    and ``accuracy_percent`` now carry the holdout headline. Older results
+    without it fall back to the held floor so a dipping live window cannot win.
+    """
     payload = result or {}
     for key in (
+        "validation_accuracy_percent",
         "held_accuracy_percent",
         "accuracy_percent",
         "best_round_accuracy_percent",
@@ -76,6 +83,11 @@ class TuningAssistant:
         trial_log: list[dict[str, Any]] = []
         early_exit = False
         stopped_reason = "all_trials"
+        # Bonferroni: every round of every planned trial is one look at validation.
+        planned_comparisons = sum(max(1, int(item.get("rounds") or 1)) for item in trials) or 1
+        trials_tested = 0
+        significance_mode = "legacy_score"
+        last_result: dict[str, Any] | None = None
 
         for index, settings in enumerate(trials, start=1):
             before = self.store.snapshot(game_key)
@@ -106,9 +118,18 @@ class TuningAssistant:
                     f"window={settings.get('rolling_window')})"
                 ),
             })
-            result = run_trial(settings) or {"status": "error", "game": game_key}
+            trial_settings = {**dict(settings), "bonferroni_comparisons": planned_comparisons}
+            result = run_trial(trial_settings) or {"status": "error", "game": game_key}
+            last_result = result
             score = result_score(result)
-            improved = score > best_score + 1e-9
+            trials_tested += int(result.get("trials_tested") or settings.get("rounds") or 1)
+            decision = result.get("champion_challenger")
+            if isinstance(decision, dict):
+                # Champion/challenger: keep only a validation gain that beats noise.
+                significance_mode = "champion_challenger"
+                improved = bool(decision.get("accepted"))
+            else:
+                improved = score > best_score + 1e-9
             trial_entry = {
                 "trial": index,
                 "label": settings.get("label"),
@@ -121,6 +142,12 @@ class TuningAssistant:
                 "improved": improved,
                 "kept": improved,
                 "status": result.get("status"),
+                "validation_accuracy_percent": result.get("validation_accuracy_percent"),
+                "holdout_accuracy_percent": result.get("holdout_accuracy_percent"),
+                "overfit_gap_percent": result.get("overfit_gap_percent"),
+                "overfit_warning": result.get("overfit_warning"),
+                "p_value": (decision or {}).get("p_value") if isinstance(decision, dict) else None,
+                "alpha_adjusted": (decision or {}).get("alpha_adjusted") if isinstance(decision, dict) else None,
             }
             trial_log.append(trial_entry)
             if improved:
@@ -149,11 +176,14 @@ class TuningAssistant:
                     ),
                 })
 
-            baseline_beat_floor = (
-                index == 1
-                and previous_score >= 0
-                and best_score >= previous_score + EARLY_EXIT_MARGIN_PERCENT
-            )
+            if significance_mode == "champion_challenger":
+                baseline_beat_floor = index == 1 and improved
+            else:
+                baseline_beat_floor = (
+                    index == 1
+                    and previous_score >= 0
+                    and best_score >= previous_score + EARLY_EXIT_MARGIN_PERCENT
+                )
             if baseline_beat_floor and index < len(trials):
                 early_exit = True
                 stopped_reason = "baseline_improved"
@@ -184,6 +214,19 @@ class TuningAssistant:
                 "accuracy_percent": previous_score if previous_score >= 0 else None,
                 "message": "No trial beat the held accuracy floor; kept existing mix.",
             }
+            if significance_mode == "champion_challenger" and last_result:
+                # Every trial scored the restored champion on the holdout; report
+                # that honest number instead of the stale validation floor.
+                for key in HONEST_METRIC_KEYS + (
+                    "accuracy", "accuracy_percent", "held_accuracy_percent",
+                    "mean_partial_hits", "lift_vs_random", "random_baseline",
+                ):
+                    if key in last_result:
+                        optimized[key] = last_result.get(key)
+                optimized["message"] = (
+                    "No challenger beat the champion by more than noise on validation; "
+                    "kept existing mix."
+                )
         else:
             optimized = dict(best_result)
         optimized["assistant"] = {
@@ -195,7 +238,11 @@ class TuningAssistant:
             "early_exit": early_exit,
             "stopped_reason": stopped_reason,
             "kept_existing": best_result is None,
+            "significance_mode": significance_mode,
+            "planned_comparisons": planned_comparisons,
+            "trials_tested": trials_tested,
         }
+        optimized["trials_tested"] = trials_tested
         if best_settings:
             optimized["learning_rate"] = best_settings.get("learning_rate")
             optimized["rolling_window"] = best_settings.get("rolling_window")

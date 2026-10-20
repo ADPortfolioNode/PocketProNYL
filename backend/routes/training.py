@@ -364,6 +364,11 @@ def _post_train_optimize(game_key: str, train_result: dict) -> dict:
         extra = f" Weights verified; held suggestion accuracy {best_score:.1f}%."
     else:
         extra = " Weight verification complete."
+    holdout = optimized.get("holdout_accuracy_percent")
+    if holdout is not None:
+        extra += f" Holdout (unseen draws) accuracy {float(holdout):.1f}%."
+        if optimized.get("overfit_warning"):
+            extra += " Overfit warning: no reliable edge over random on the holdout."
     train_result["weight_optimization"] = {
         "status": optimized.get("status") or "ok",
         "held_accuracy_percent": optimized.get("held_accuracy_percent") or optimized.get("accuracy_percent"),
@@ -373,6 +378,14 @@ def _post_train_optimize(game_key: str, train_result: dict) -> dict:
         "trials": assistant.get("trials") or [],
         "kept_existing": assistant.get("kept_existing"),
         "message": optimized.get("message") or extra.strip(),
+        "holdout_accuracy_percent": optimized.get("holdout_accuracy_percent"),
+        "validation_accuracy_percent": optimized.get("validation_accuracy_percent"),
+        "best_round_accuracy_percent": optimized.get("best_round_accuracy_percent"),
+        "overfit_gap_percent": optimized.get("overfit_gap_percent"),
+        "holdout_lift_vs_random": optimized.get("holdout_lift_vs_random"),
+        "holdout_p_value": optimized.get("holdout_p_value"),
+        "trials_tested": optimized.get("trials_tested"),
+        "overfit_warning": optimized.get("overfit_warning"),
     }
     train_result["message"] = (train_result.get("message") or "Training completed.") + extra
     return train_result

@@ -150,10 +150,12 @@ function TuningMetricsChart({ status, selectedGame }) {
     || latestGame === selectedGame;
   const weights = hasMatchingMetrics ? (metrics.best_weights || metrics.weights || {}) : {};
   const values = [
+    ['Holdout (unseen)', hasMatchingMetrics && metrics.holdout_accuracy_percent != null ? Number(metrics.holdout_accuracy_percent) : NaN],
+    ['Validation', hasMatchingMetrics && metrics.validation_accuracy_percent != null ? Number(metrics.validation_accuracy_percent) : NaN],
     ['Held accuracy', hasMatchingMetrics ? Number(metrics.held_accuracy_percent ?? metrics.accuracy_percent) : NaN],
     ['This run', hasMatchingMetrics ? Number(metrics.this_run_accuracy_percent ?? metrics.accuracy_percent) : NaN],
     ['Next must beat', hasMatchingMetrics ? Number(metrics.next_run_target_percent) : NaN],
-    ['Best run', hasMatchingMetrics ? Number(metrics.best_round_accuracy_percent) : NaN],
+    ['Best run (optimistic)', hasMatchingMetrics ? Number(metrics.best_round_accuracy_percent) : NaN],
     ['Rolling (held)', hasMatchingMetrics ? Number(metrics.highest_rolling_accuracy_percent ?? metrics.rolling_accuracy_percent) : NaN],
     ['Target floor', hasMatchingMetrics ? Number(metrics.target_accuracy_percent) : NaN],
   ].filter(([, value]) => Number.isFinite(value));
@@ -161,19 +163,30 @@ function TuningMetricsChart({ status, selectedGame }) {
   if (!values.length) {
     return <div className="tuning-metrics-empty">Run tuning to chart this game's validated accuracy floor.</div>;
   }
+  const overfitGap = Number(metrics.overfit_gap_percent);
+  const holdoutP = Number(metrics.holdout_p_value);
+  const showOverfitWarning = hasMatchingMetrics && metrics.overfit_warning === true;
 
   return (
     <div className="tuning-metrics-chart" aria-label={`Tuning metadata chart for ${game || 'selected game'}`}>
       <div className="tuning-metrics-heading">
         <span>{String(game || 'selected game').toUpperCase()}</span>
         <strong>VALIDATED ACCURACY</strong>
+        {showOverfitWarning && (
+          <span
+            className="tuning-overfit-badge"
+            title="Holdout accuracy is not reliably better than random picks, or validation beats the holdout by a wide margin."
+          >
+            Overfit warning
+          </span>
+        )}
       </div>
       <div className="tuning-metrics-bars">
         {values.map(([label, value]) => (
           <div className="tuning-metric-row" key={label}>
             <span>{label}</span>
             <div className="tuning-metric-track">
-              <span className={`tuning-metric-fill ${label === 'Target floor' ? 'is-target' : ''} ${label.toLowerCase().includes('rolling') ? 'is-rolling' : ''}`} style={{ width: `${Math.max(0, Math.min(value, 100))}%` }} />
+              <span className={`tuning-metric-fill ${label === 'Target floor' ? 'is-target' : ''} ${label.toLowerCase().includes('rolling') ? 'is-rolling' : ''} ${label.startsWith('Holdout') ? 'is-holdout' : ''}`} style={{ width: `${Math.max(0, Math.min(value, 100))}%` }} />
             </div>
             <strong>{value.toFixed(1)}%</strong>
           </div>
@@ -182,6 +195,12 @@ function TuningMetricsChart({ status, selectedGame }) {
       <div className="tuning-metrics-meta">
         <span>Random baseline: {hasMatchingMetrics && Number.isFinite(Number(metrics.random_baseline?.mean_partial_hits)) ? Number(metrics.random_baseline.mean_partial_hits).toFixed(2) : 'n/a'} hits</span>
         <span>Lift: {hasMatchingMetrics && Number.isFinite(Number(metrics.lift_vs_random)) ? `${Number(metrics.lift_vs_random).toFixed(2)}x` : 'n/a'}</span>
+        {hasMatchingMetrics && metrics.overfit_gap_percent != null && Number.isFinite(overfitGap) && (
+          <span>Overfit gap: {formatAccuracyDelta(overfitGap)}</span>
+        )}
+        {hasMatchingMetrics && metrics.holdout_p_value != null && Number.isFinite(holdoutP) && (
+          <span>Holdout p: {holdoutP.toFixed(3)}</span>
+        )}
         <span>Batches: {hasMatchingMetrics ? (metrics.suggestion_history_count ?? 'n/a') : 'n/a'}</span>
         <span>Regressions blocked: {hasMatchingMetrics ? (metrics.regression_count ?? 'n/a') : 'n/a'}</span>
       </div>
