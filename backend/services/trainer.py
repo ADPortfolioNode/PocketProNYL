@@ -283,8 +283,8 @@ class TrainerService:
             if game_key and not validate_game_record(game_key, meta, strict=False)[0]:
                 continue
 
-            numbers = _extract_record_sequence(meta, game)
-            if numbers: # Use the imported utility function
+            numbers = extract_record_sequence_util(meta, game)
+            if numbers:
                 sequences.append(numbers)
 
         return sequences

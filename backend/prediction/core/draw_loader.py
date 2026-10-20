@@ -104,7 +104,6 @@ def _extract_draw_date(metadata: dict) -> date | None:
 
 
 def _ensure_bonus_keys() -> None:
-    global GAME_BONUS_KEYS
     if GAME_BONUS_KEYS:
         return
     from config import GAME_CONFIGS
@@ -155,7 +154,6 @@ GAME_CONFIGS_EMBEDDED: dict[str, bool] = {}
 
 
 def _ensure_embedded_flags() -> None:
-    global GAME_CONFIGS_EMBEDDED
     if GAME_CONFIGS_EMBEDDED:
         return
     from config import GAME_CONFIGS
