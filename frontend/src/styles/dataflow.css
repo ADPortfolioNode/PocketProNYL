@@ -1,0 +1,234 @@
+/* Data-flow pipeline: ingest -> strategies & agents -> ensemble -> prediction */
+
+.dataflow {
+  --df-cyan: var(--ai-cyan, #22d3ee);
+  --df-violet: var(--ai-violet, #a78bfa);
+  --df-ok: var(--ai-ok, #34d399);
+  --df-warn: var(--ai-warn, #fb7185);
+  --df-muted: var(--ai-muted, #8aa0c8);
+  padding: 1.25rem 1.25rem 1.4rem;
+  overflow: hidden;
+  position: relative;
+}
+
+.dataflow::before {
+  content: "";
+  position: absolute;
+  inset: -40% -10% auto -10%;
+  height: 120%;
+  background: radial-gradient(60% 50% at 20% 0%, rgba(34, 211, 238, 0.10), transparent 70%),
+    radial-gradient(50% 40% at 90% 10%, rgba(167, 139, 250, 0.12), transparent 70%);
+  pointer-events: none;
+}
+
+.dataflow__head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.1rem;
+  position: relative;
+}
+
+.dataflow__eyebrow {
+  margin: 0;
+  font-size: 0.7rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--df-cyan);
+}
+
+.dataflow__title {
+  margin: 0;
+  font-weight: 600;
+  color: var(--ink, #e6f0ff);
+}
+
+.dataflow__beacon {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid rgba(138, 160, 200, 0.3);
+  color: var(--df-muted);
+}
+
+.dataflow__beacon i {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--df-muted);
+}
+
+.dataflow__beacon.is-live { color: var(--df-cyan); border-color: rgba(34, 211, 238, 0.45); }
+.dataflow__beacon.is-live i { background: var(--df-cyan); box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.6); animation: df-ping 1.6s ease-out infinite; }
+.dataflow__beacon.is-offline { color: var(--df-warn); border-color: rgba(251, 113, 133, 0.45); }
+.dataflow__beacon.is-offline i { background: var(--df-warn); }
+
+.dataflow__track {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 2.5rem minmax(0, 1fr) 2.5rem minmax(0, 1fr) 2.5rem minmax(0, 1fr);
+  align-items: stretch;
+  position: relative;
+}
+
+.dataflow__node {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.9rem 0.9rem 0.85rem;
+  border-radius: 14px;
+  background: rgba(10, 16, 34, 0.72);
+  border: 1px solid rgba(138, 160, 200, 0.18);
+  transition: border-color 0.35s ease, box-shadow 0.35s ease, transform 0.35s ease;
+  min-width: 0;
+}
+
+.dataflow__glyph {
+  width: 2rem;
+  height: 2rem;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  font-size: 1.05rem;
+  color: var(--df-muted);
+  background: rgba(138, 160, 200, 0.08);
+  transition: color 0.35s ease, background 0.35s ease;
+}
+
+.dataflow__label {
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: var(--ink, #e6f0ff);
+}
+
+.dataflow__chip {
+  align-self: flex-start;
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  color: var(--df-muted);
+  background: rgba(138, 160, 200, 0.1);
+}
+
+.dataflow__detail {
+  font-size: 0.78rem;
+  color: var(--df-muted);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.dataflow__meter {
+  height: 3px;
+  border-radius: 3px;
+  background: rgba(138, 160, 200, 0.15);
+  overflow: hidden;
+  margin-top: 0.2rem;
+}
+
+.dataflow__meter span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--df-cyan), var(--df-violet));
+  transition: width 0.6s ease;
+}
+
+/* states */
+.dataflow__node.is-ready .dataflow__chip { color: var(--df-cyan); background: rgba(34, 211, 238, 0.1); }
+
+.dataflow__node.is-active {
+  border-color: rgba(34, 211, 238, 0.55);
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.25), 0 0 28px -6px rgba(34, 211, 238, 0.45);
+  transform: translateY(-2px);
+}
+.dataflow__node.is-active .dataflow__glyph {
+  color: #04121a;
+  background: linear-gradient(135deg, var(--df-cyan), var(--df-violet));
+  animation: df-breathe 1.8s ease-in-out infinite;
+}
+.dataflow__node.is-active .dataflow__chip { color: #04121a; background: var(--df-cyan); }
+
+.dataflow__node.is-done { border-color: rgba(52, 211, 153, 0.35); }
+.dataflow__node.is-done .dataflow__glyph { color: var(--df-ok); background: rgba(52, 211, 153, 0.12); }
+.dataflow__node.is-done .dataflow__chip { color: var(--df-ok); background: rgba(52, 211, 153, 0.12); }
+
+.dataflow__node.is-error { border-color: rgba(251, 113, 133, 0.5); }
+.dataflow__node.is-error .dataflow__glyph { color: var(--df-warn); background: rgba(251, 113, 133, 0.12); }
+.dataflow__node.is-error .dataflow__chip { color: var(--df-warn); background: rgba(251, 113, 133, 0.12); }
+
+/* connectors with flowing particles */
+.dataflow__link {
+  position: relative;
+  align-self: center;
+  height: 2px;
+  margin: 0 0.2rem;
+  background: linear-gradient(90deg, rgba(34, 211, 238, 0.25), rgba(167, 139, 250, 0.25));
+  border-radius: 2px;
+}
+
+.dataflow__link span {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: var(--df-cyan);
+  box-shadow: 0 0 10px var(--df-cyan);
+  opacity: 0;
+}
+
+.dataflow__link.is-flowing { background: linear-gradient(90deg, rgba(34, 211, 238, 0.6), rgba(167, 139, 250, 0.6)); }
+.dataflow__link.is-flowing span { animation: df-flow-x 1.4s linear infinite; }
+.dataflow__link.is-flowing span:nth-child(2) { animation-delay: 0.47s; background: var(--df-violet); box-shadow: 0 0 10px var(--df-violet); }
+.dataflow__link.is-flowing span:nth-child(3) { animation-delay: 0.94s; }
+
+@keyframes df-flow-x {
+  0% { left: 0; opacity: 0; }
+  15% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { left: calc(100% - 6px); opacity: 0; }
+}
+
+@keyframes df-flow-y {
+  0% { top: 0; opacity: 0; }
+  15% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { top: calc(100% - 6px); opacity: 0; }
+}
+
+@keyframes df-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.45); }
+  50% { box-shadow: 0 0 0 6px rgba(34, 211, 238, 0); }
+}
+
+@keyframes df-ping {
+  0% { box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.6); }
+  100% { box-shadow: 0 0 0 8px rgba(34, 211, 238, 0); }
+}
+
+/* stacked layout on narrow screens */
+@media (max-width: 860px) {
+  .dataflow__track { grid-template-columns: 1fr; }
+  .dataflow__link {
+    width: 2px;
+    height: 1.6rem;
+    margin: 0.2rem 0 0.2rem 1.9rem;
+    background: linear-gradient(180deg, rgba(34, 211, 238, 0.25), rgba(167, 139, 250, 0.25));
+  }
+  .dataflow__link span { left: 50%; top: 0; margin: 0 0 0 -3px; }
+  .dataflow__link.is-flowing span { animation-name: df-flow-y; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dataflow *, .dataflow *::before { animation: none !important; transition: none !important; }
+  .dataflow__link.is-flowing span { opacity: 1; left: calc(50% - 3px); }
+}
