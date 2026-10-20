@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — honest out-of-sample accuracy (anti-overfit)
+
+- Three-way chronological split for tuning/backtests: train prefix / validation window (all round retries, trial selection, weight learning) / final untouched holdout of the most recent draws (`min(60, ~15%)`, configurable via `metrics.holdout_draws|holdout_fraction|max_holdout_draws` or `HOLDOUT_DRAWS`). The holdout is scored once per kept configuration with frozen weights and never drives a selection.
+- Champion/challenger: learned weights are committed only when a paired sign-flip permutation test on validation draws beats noise at `alpha / comparisons` (Bonferroni over rounds × trials; `TUNING_SIGNIFICANCE_ALPHA`, default 0.05). Otherwise the stored weights are restored exactly.
+- Headline `accuracy_percent` / `held_accuracy_percent` / `lift_vs_random` now report the holdout. New fields: `holdout_accuracy_percent`, `validation_accuracy_percent`, `best_round_accuracy_percent` (optimistic), `overfit_gap_percent`, `holdout_lift_vs_random`, `holdout_p_value`, `trials_tested`, `overfit_warning`. No keys were removed.
+- Dashboard tuning chart shows holdout accuracy, the overfit gap, and an "Overfit warning" badge.
+
 ## Unreleased — production readiness
 
 No behaviour change for existing local starts: every new control is off by default.

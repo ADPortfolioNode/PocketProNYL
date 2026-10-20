@@ -41,6 +41,11 @@ class MetricsConfig(BaseModel):
     verification_rounds: int = 1
     # Cap walk-forward evaluations to the most recent test draws.
     max_test_draws: int = 80
+    # Final untouched holdout (most recent draws): None = auto
+    # min(max_holdout_draws, ~holdout_fraction of history); 0 disables.
+    holdout_draws: int | None = None
+    holdout_fraction: float = 0.15
+    max_holdout_draws: int = 60
 
 
 class GamePredictionConfig(BaseModel):

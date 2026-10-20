@@ -174,3 +174,19 @@ body {
   .magazine-overlay::after { animation: none; }
   .magazine-app .btn-primary:hover:not(:disabled) { transform: none; }
 }
+
+/* Anti-overfit badge on the tuning chart: shown when holdout shows no real edge. */
+.tuning-overfit-badge {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--ai-warn);
+  border-radius: 999px;
+  color: var(--ai-warn);
+  background: rgba(251, 113, 133, 0.1);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.tuning-metric-fill.is-holdout { background: var(--ai-violet); }

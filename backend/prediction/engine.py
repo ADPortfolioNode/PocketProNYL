@@ -11,7 +11,11 @@ from prediction.core.ensemble import build_ticket
 from prediction.core.registry import ensure_plugins_loaded, get_agent_class, get_strategy_class
 from prediction.core.types import Draw, PredictionTicket, StrategyOutput
 from prediction.learning.weight_updater import WeightUpdater
-from prediction.metrics.evaluator import walk_forward_backtest
+from prediction.metrics.evaluator import (
+    DEFAULT_SIGNIFICANCE_ALPHA,
+    champion_challenger_decision,
+    walk_forward_backtest,
+)
 from prediction.nn.feedforward import FeedforwardNN
 from prediction.nn.lstm import LSTMBackend
 from prediction.state.weight_store import WeightStore
@@ -97,6 +101,7 @@ class LotteryPredictionEngine:
         limit: int = 500,
         strategy: str | None = None,
         use_nn: bool = True,
+        weights_override: dict[str, float] | None = None,
     ) -> PredictionTicket:
         config = self._load_config(game)
         rules = game_rules_from_config(game)
@@ -131,7 +136,9 @@ class LotteryPredictionEngine:
 
         # Default to existing ensemble/RF logic
         outputs = self._collect_outputs(history, config)
-        weights = self._resolve_weights(game, config)
+        weights = (
+            dict(weights_override) if weights_override else self._resolve_weights(game, config)
+        )
 
         nn_scores = None
         nn_weight = 0.0
@@ -239,14 +246,32 @@ class LotteryPredictionEngine:
         progress_callback: Callable[[dict], None] | None = None,
         max_test_draws: int | None = None,
         use_nn: bool = False,
+        holdout_draws: int | None = None,
+        bonferroni_comparisons: int | None = None,
+        commit_weights: bool = True,
+        significance_alpha: float | None = None,
     ) -> dict:
-        """Walk-forward backtest with honest metrics."""
+        """Walk-forward backtest with honest metrics.
+
+        Three-way chronological split: train prefix / validation window (all
+        round retries and weight learning) / final untouched holdout (scored
+        once, never used for selection). Weights learned during validation are
+        kept only when a champion/challenger test shows the validation gain
+        beats noise (paired permutation test at ``alpha / comparisons``);
+        otherwise the stored weights are restored exactly as they were.
+        """
         config = self._load_config(game)
         rules = game_rules_from_config(game)
         if history is None:
             history = from_chroma(game, limit=config.metrics.backtest_window + 50)
 
         last_outputs: list[StrategyOutput] = []
+        # Champion = the committed state before this run touches anything.
+        champion_snapshot = self.weight_store.snapshot(game)
+        champion_weights = dict(self._resolve_weights(game, config))
+        alpha = float(significance_alpha) if significance_alpha is not None else float(
+            os.environ.get("TUNING_SIGNIFICANCE_ALPHA", DEFAULT_SIGNIFICANCE_ALPHA)
+        )
 
         def predict_fn(train_hist: list[Draw]) -> PredictionTicket:
             ticket = self.predict(game, history=train_hist, use_nn=use_nn)
@@ -275,6 +300,54 @@ class LotteryPredictionEngine:
                 outputs=reused,
             )
 
+        def before_holdout(summary: dict) -> dict:
+            """Champion/challenger on validation draws only; commit or restore."""
+            indices = list(summary.get("validation_draw_indices") or [])
+            challenger_hits = list(summary.get("validation_hits") or [])
+            champion_hits: list[int] = []
+            for index in indices:
+                try:
+                    ticket = self.predict(
+                        game,
+                        history=history[:index],
+                        use_nn=use_nn,
+                        weights_override=champion_weights,
+                    )
+                    champion_hits.append(len(set(ticket.primary) & set(history[index].primary)))
+                except Exception:
+                    champion_hits.append(0)
+            comparisons = max(
+                1,
+                int(bonferroni_comparisons or 0),
+                int(summary.get("rounds_run") or 1),
+            )
+            decision = champion_challenger_decision(
+                challenger_hits,
+                champion_hits,
+                comparisons=comparisons,
+                alpha=alpha,
+                primary_count=rules.primary_count,
+            )
+            decision["rounds_run"] = summary.get("rounds_run")
+            if commit_weights:
+                if decision["accepted"]:
+                    self.weight_store.adopt_best(game)
+                else:
+                    self.weight_store.restore(game, champion_snapshot)
+            decision["weights_committed"] = bool(decision["accepted"]) if commit_weights else None
+            return {
+                "champion_challenger": decision,
+                "weights_committed": decision["weights_committed"],
+            }
+
+        holdout_cfg = getattr(config.metrics, "holdout_draws", None)
+        env_holdout = os.environ.get("HOLDOUT_DRAWS")
+        if holdout_draws is None:
+            if env_holdout not in (None, ""):
+                holdout_draws = int(env_holdout)
+            else:
+                holdout_draws = holdout_cfg
+
         test_cap = (
             max_test_draws
             if max_test_draws is not None
@@ -299,6 +372,10 @@ class LotteryPredictionEngine:
             progress_callback=wrapped_progress if progress_callback is not None else None,
             max_test_draws=test_cap,
             update_fn=update_fn,
+            holdout_draws=holdout_draws,
+            holdout_fraction=float(getattr(config.metrics, "holdout_fraction", 0.15)),
+            max_holdout_draws=int(getattr(config.metrics, "max_holdout_draws", 60)),
+            before_holdout_fn=before_holdout,
         )
 
 
