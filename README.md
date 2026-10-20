@@ -2,6 +2,10 @@
 
 Lottery data pipeline with ingestion, model training, suggestions, and optional AI chat (Gemini, OpenAI, Grok). Stack: **React** frontend, **FastAPI** backend, **ChromaDB** vector store — Docker Compose.
 
+## Code from anywhere (GitHub Codespaces)
+
+Open the repo on GitHub → **Code → Codespaces → Create codespace on main**. The dev container installs Python 3.11, Node 22 and Docker, then all dependencies. Run `docker compose up --build` and the dashboard opens on port 3000 as a private preview link. Works from any browser, including a tablet.
+
 ## Quick start (Windows)
 
 1. Install Docker Desktop and wait until it is running.
