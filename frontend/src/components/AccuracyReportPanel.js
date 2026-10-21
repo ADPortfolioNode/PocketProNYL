@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import getApiBase from '../utils/apiBase';
+import CandyStripeProgress from './CandyStripeProgress';
 import './InsightPanels.css';
 
 const fmtP = (p) => (p === null || p === undefined ? '—' : (p < 0.0001 ? '<0.0001' : Number(p).toFixed(4)));
@@ -169,7 +170,16 @@ export default function AccuracyReportPanel({ game, last = 3 }) {
       <p className="insight-muted mb-0 mt-1">
         Grades the suggestions this app served for {game} against the real draws they targeted.
       </p>
-      {error && <div className="alert alert-danger mt-2 mb-0">{error}</div>}
+      {loading && (
+        <div className="mt-2">
+          <CandyStripeProgress status="in_progress" value={null} detail="Grading served suggestions against real draws…" testId="accuracy-progress" />
+        </div>
+      )}
+      {error && !loading && (
+        <div className="mt-2">
+          <CandyStripeProgress status="error" error={error} onRetry={check} showPercent={false} testId="accuracy-error" />
+        </div>
+      )}
       {report && !error && <AccuracyReportView report={report} />}
     </div>
   );

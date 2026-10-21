@@ -4,6 +4,7 @@ import getApiBase from '../utils/apiBase';
 import { hasSuggestionResponse, isPredictionForGame } from '../utils/suggestionUtils';
 import PredictionDisplay from './PredictionDisplay';
 import AccuracyReportPanel from './AccuracyReportPanel';
+import CandyStripeProgress from './CandyStripeProgress';
 import './PredictionDisplay.css';
 
 export default function GamePrediction({ game }) {
@@ -69,9 +70,7 @@ export default function GamePrediction({ game }) {
         </button>
       </div>
       {loading && (
-        <div className="progress">
-          <div className="progress-bar progress-bar-striped progress-bar-animated w-100" role="progressbar"></div>
-        </div>
+        <CandyStripeProgress status="in_progress" value={null} detail={`Building a suggestion for ${game}…`} testId="predict-progress" />
       )}
       {error && !loading && (
         <div className="alert alert-danger">
