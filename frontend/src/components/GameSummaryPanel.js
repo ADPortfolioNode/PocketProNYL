@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
 import getApiBase from '../utils/apiBase';
+import CandyStripeProgress from './CandyStripeProgress';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -86,8 +87,8 @@ export default function GameSummaryPanel({ games, refreshKey = 0, initialSummari
     <div className="card p-3 mb-3">
       <h5>Game Contents</h5>
       {loading && (
-        <div className="progress mb-2">
-          <div className="progress-bar progress-bar-striped progress-bar-animated w-100" role="progressbar"></div>
+        <div className="mb-2">
+          <CandyStripeProgress status="in_progress" value={null} detail="Loading game contents…" testId="games-progress" />
         </div>
       )}
       {error && !loading && (

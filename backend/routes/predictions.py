@@ -14,6 +14,7 @@ from experiments.store import ExperimentStore
 from utils.validation import _require_game_key
 from utils.timestamps import normalize_experiment_record, runtime_timestamp_fields
 from utils.paths import experiments_file
+from services.suggestion_ledger import suggestion_ledger
 
 
 router = APIRouter()
@@ -41,6 +42,11 @@ class PredictionFeedbackRequest(BaseModel):
     primary: List[int]
     bonus: Optional[List[int]] = None
     draw_id: Optional[str] = None
+    draw_date: Optional[str] = None  # ISO date of the real draw (YYYY-MM-DD)
+    draw_session: Optional[str] = None  # midday / evening for twice-daily games
+    # Weight learning from a single reported draw bypasses the champion/challenger
+    # gate, so it only runs when asked for explicitly.
+    update_weights: bool = False
 
 
 @router.get("/api/predictions/all")
@@ -82,7 +88,14 @@ async def get_all_predictions():
         }
 
 
-def _normalize_prediction_result(game_key: str, result: dict, recent_k: int) -> dict:
+def _normalize_prediction_result(
+    game_key: str,
+    result: dict,
+    recent_k: int,
+    *,
+    source: str = "api_predict",
+    target_draw_date: Optional[str] = None,
+) -> dict:
     if result.get("status") == "error":
         return {
             "status": "error",
@@ -108,10 +121,17 @@ def _normalize_prediction_result(game_key: str, result: dict, recent_k: int) -> 
         "next_draw_date": next_draw_date,
     }))
 
+    # Append-only real-world ledger: every served suggestion is kept for grading.
+    ledger_entry = suggestion_ledger.record_served(
+        game_key, result, source=source, recent_k=recent_k, target_draw_date=target_draw_date,
+    )
+
     return {
         **result,
         "status": "COMPLETED",
         "game": game_key,
+        "ledger_id": (ledger_entry or {}).get("id"),
+        "target_draw_date": (ledger_entry or {}).get("target_draw_date") or result.get("target_draw_date"),
         "next_draw_date": next_draw_date,
         "highest_accuracy": result.get("highest_accuracy"),
         "model_metadata": result.get("model_metadata"),
@@ -122,17 +142,67 @@ def _normalize_prediction_result(game_key: str, result: dict, recent_k: int) -> 
 
 @router.post("/api/prediction/feedback")
 async def prediction_feedback(request: PredictionFeedbackRequest):
-    """Record an actual draw and update ensemble strategy weights."""
+    """Record a real draw for one game and grade that game's suggestions against it.
+
+    The draw is appended to the game's own feedback ledger (an ingested official
+    draw for the same date and session always takes precedence). Ensemble weights
+    are only updated when ``update_weights`` is true.
+    """
     try:
         game_key = _require_game_key(request.game)
-        from prediction.core.types import Draw
-        # The prediction_adapter is no longer used.
-        # Weight update logic needs to be implemented directly in PredictorService or a dedicated service.
-        # For now, we'll return a NotImplementedError to prevent breaking changes.
-        raise NotImplementedError("Weight update functionality is not yet implemented in the new architecture.")
-        # actual = Draw(primary=request.primary, bonus=request.bonus or [], draw_id=request.draw_id)
-        # result = await asyncio.to_thread(predictor_service.update_weights, game_key, actual)
-        # return {"status": "ok", "game": game_key, **result}
+        from prediction.config.loader import game_rules_from_config
+        from services.accuracy_report import build_accuracy_report
+
+        rules = game_rules_from_config(game_key)
+        primary = [int(n) for n in request.primary]
+        bonus = [int(n) for n in (request.bonus or [])]
+        if len(primary) != rules.primary_count:
+            raise ValueError(f"{game_key} draws have {rules.primary_count} numbers, got {len(primary)}.")
+        if any(n < rules.primary_min or n > rules.primary_max for n in primary):
+            raise ValueError(f"{game_key} numbers must be between {rules.primary_min} and {rules.primary_max}.")
+        if rules.primary_unique and len(set(primary)) != len(primary):
+            raise ValueError(f"{game_key} numbers must be unique.")
+        if bonus and any(n < rules.bonus_min or n > rules.bonus_max for n in bonus):
+            raise ValueError(f"{game_key} bonus must be between {rules.bonus_min} and {rules.bonus_max}.")
+        draw_date = None
+        if request.draw_date:
+            from datetime import date as _date
+
+            draw_date = _date.fromisoformat(str(request.draw_date)[:10]).isoformat()
+        record = suggestion_ledger.append_feedback(game_key, {
+            "primary": primary,
+            "bonus": bonus,
+            "draw_id": request.draw_id,
+            "draw_date": draw_date,
+            "draw_session": (request.draw_session or "").strip().lower() or None,
+            "recorded_at": runtime_timestamp_fields().get("timestamp_iso"),
+            "source": "user_feedback",
+        })
+
+        weights_result = None
+        if request.update_weights:
+            from prediction.core.types import Draw
+
+            actual = Draw(primary=primary, bonus=bonus, draw_id=request.draw_id)
+            weights_result = await asyncio.to_thread(
+                prediction_adapter.engine.update_weights, game_key, actual
+            )
+
+        report = await asyncio.to_thread(build_accuracy_report, game_key, 3, include_backtest=False)
+        graded_now = [
+            item for item in report.get("suggestions", [])
+            if draw_date and item.get("target_draw_date") == draw_date and item.get("status") == "graded"
+        ]
+        return {
+            "status": "ok",
+            "game": game_key,
+            "feedback_id": record.get("id"),
+            "draw_recorded": {"primary": primary, "bonus": bonus, "draw_date": draw_date,
+                              "draw_session": record.get("draw_session")},
+            "graded_suggestions": graded_now,
+            "weights_updated": bool(weights_result) and not (weights_result or {}).get("skipped"),
+            "weights": weights_result,
+        }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -156,6 +226,12 @@ async def predict_all_games(request: PredictAllRequest):
             return predictor_service.predict_all_games(game_keys, request.recent_k)
 
         results = await asyncio.to_thread(_run_predictions)
+        for item in results:
+            if item.get("status") == "success" and isinstance(item.get("prediction"), dict):
+                entry = suggestion_ledger.record_served(
+                    item.get("game"), item["prediction"], source="api_predict_all", recent_k=request.recent_k,
+                )
+                item["prediction"]["ledger_id"] = (entry or {}).get("id")
         failed_count = sum(1 for item in results if item.get("status") == "error")
 
         return {
@@ -215,7 +291,9 @@ async def make_prediction(request: PredictionRequest):
             raise RuntimeError("PredictorService is missing predict_next_draw/predict methods")
 
         result = await asyncio.to_thread(_run_prediction)
-        return _normalize_prediction_result(game_key, result, request.recent_k)
+        return _normalize_prediction_result(
+            game_key, result, request.recent_k, target_draw_date=request.target_draw_date,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

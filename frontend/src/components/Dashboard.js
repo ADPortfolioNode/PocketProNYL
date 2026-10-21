@@ -3,6 +3,7 @@ import { resolveTuningMetrics } from '../utils/tuningView';
 import axios from 'axios';
 import getApiBase from '../utils/apiBase';
 import PredictionPanel from './PredictionPanel';
+import RoiPanel from './RoiPanel';
 import ChatPanelRAG from './ChatPanelRAG';
 import WorkflowSummary from './WorkflowSummary';
 import ExperimentsPanel from './ExperimentsPanel';
@@ -2085,6 +2086,20 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
           >
             {/* Suggestions work without a trained RF model via frequency/statistical fallback. */}
             <PredictionPanel games={games} disabled={games.length === 0} />
+          </ExpandableCard>
+        </div>
+
+        {/* Odds, ROI and model check */}
+        <div id="section-roi" className={getFocusColClass('roi')}>
+          <ExpandableCard
+            title="Odds, ROI & Model Check"
+            cardKey="roi"
+            focusedCard={expandedCard}
+            neonBorder={true}
+            metadata={{ 'Note': 'Picks cannot change draw odds' }}
+            onToggle={handleCardFocus('roi')}
+          >
+            <RoiPanel games={games} />
           </ExpandableCard>
         </div>
 

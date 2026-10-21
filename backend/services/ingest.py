@@ -3,7 +3,7 @@ import hashlib
 import time
 import os
 import re
-import signal
+import threading
 from datetime import datetime
 from functools import wraps
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
@@ -14,26 +14,32 @@ class TimeoutError(Exception):
     """Raised when an operation exceeds the time limit."""
     pass
 
-def timeout_handler(signum, frame):
-    raise TimeoutError("Operation timed out")
-
 def with_timeout(seconds):
-    """Decorator to add a timeout to a function (Unix/Linux only, will pass on Windows)."""
+    """Decorator: raise TimeoutError if the call takes longer than ``seconds``.
+
+    Thread based, so it works on Windows too (the old SIGALRM version silently
+    did nothing there). The worker thread is a daemon; a call that overruns is
+    abandoned, not killed, so wrap only calls that are safe to abandon.
+    """
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            # On Windows, signal.SIGALRM is not available; just run normally
-            if not hasattr(signal, 'SIGALRM'):
-                return func(*args, **kwargs)
-            
-            old_handler = signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(seconds)
-            try:
-                result = func(*args, **kwargs)
-            finally:
-                signal.alarm(0)  # Cancel alarm
-                signal.signal(signal.SIGALRM, old_handler)
-            return result
+            outcome: dict = {}
+
+            def _run():
+                try:
+                    outcome["value"] = func(*args, **kwargs)
+                except BaseException as exc:  # re-raised in the caller's thread
+                    outcome["error"] = exc
+
+            worker = threading.Thread(target=_run, daemon=True, name=f"timeout:{func.__name__}")
+            worker.start()
+            worker.join(seconds)
+            if worker.is_alive():
+                raise TimeoutError(f"{func.__name__} timed out after {seconds}s")
+            if "error" in outcome:
+                raise outcome["error"]
+            return outcome.get("value")
         return wrapper
     return decorator
 
@@ -48,6 +54,7 @@ from utils.game_validation import (
     validate_game_record,
 )
 from utils.paths import ingestion_cache_dir
+from state.ingest_phase import report_phase
 
 from utils.game_data_parser import (
     _parse_pick3_digits as parse_pick3_digits_util,
@@ -81,6 +88,7 @@ class IngestService:
         self.skip_fetch_threshold = int(os.getenv("INGEST_SKIP_FETCH_THRESHOLD", "50000"))
         self.batch_max_retries = int(os.getenv("INGEST_BATCH_MAX_RETRIES", "2"))
         self.progress_interval_s = float(os.getenv("INGEST_PROGRESS_INTERVAL_S", "0.5"))
+        self.upsert_chunk = max(1, int(os.getenv("INGEST_UPSERT_CHUNK", "200")))
         self.socrata_catalog_url = os.getenv("SOCRATA_CATALOG_URL", "https://api.us.socrata.com/api/catalog/v1")
         self.socrata_domain = os.getenv("SOCRATA_DOMAIN", "data.ny.gov")
         self._catalog_titles: dict[str, str] = {}
@@ -529,7 +537,16 @@ class IngestService:
             batch_stored = False
             for batch_attempt in range(self.batch_max_retries):
                 try:
-                    collection.upsert(documents=chroma_documents, metadatas=chroma_metadatas, ids=chroma_ids)
+                    # Embedding runs inside upsert (CPU). Smaller chunks keep the
+                    # reported progress moving instead of one long silent call.
+                    for start in range(0, len(chroma_ids), self.upsert_chunk):
+                        stop = start + self.upsert_chunk
+                        collection.upsert(documents=chroma_documents[start:stop],
+                                          metadatas=chroma_metadatas[start:stop], ids=chroma_ids[start:stop])
+                        report_phase(game, "embedding_and_writing",
+                                     detail=f"{total_rows_processed_in_run + min(stop, len(chroma_ids)):,} rows written",
+                                     rows_done=total_rows_processed_in_run + min(stop, len(chroma_ids)),
+                                     rows_total=len(all_rows))
                     existing_ids.update(chroma_ids)
                     rows_added += len(chroma_ids)
                     batch_stored = True
@@ -589,6 +606,40 @@ class IngestService:
 
         collection_name = game_key
         try:
+            return self._fetch_and_sync(game_key, collection_name, progress_callback, force)
+        except Exception as exc:
+            report_phase(game_key, "error", detail=str(exc)[:300])
+            raise
+
+    def _warm_embedding_model(self, game_key: str, collection) -> None:
+        """Load (and on first run download) Chroma's default embedding model, visibly.
+
+        Draw collections use Chroma's default all-MiniLM ONNX embedding because the
+        RAG chat runs semantic ``query_texts`` searches over them. The first upsert
+        would otherwise download ~80 MB silently.
+        """
+        try:
+            from chromadb.api.models.Collection import Collection as _ChromaCollection
+        except Exception:  # pragma: no cover
+            return
+        if not isinstance(collection, _ChromaCollection):
+            return  # test doubles / custom stores embed nothing
+        report_phase(game_key, "loading_embedding_model",
+                     detail="First run downloads the all-MiniLM ONNX model (~80 MB); later runs reuse it.")
+        try:
+            chroma_repository.default_ef(["warmup"])
+        except Exception as exc:
+            print(f"  ⚠ Embedding model warm-up failed ({exc}); the first write will retry it.")
+
+    def _fetch_and_sync(self, game_key: str, collection_name: str, progress_callback, force: bool) -> dict:
+        user_callback = progress_callback
+
+        def progress_callback(rows_done, rows_total):  # noqa: F811 - wraps the caller's callback
+            if user_callback:
+                user_callback(rows_done, rows_total)
+
+        report_phase(game_key, "waiting_on_chroma", detail="Opening this game's Chroma collection")
+        try:
             collection = chroma_repository.get_or_create_collection(collection_name)
             print(f"✓ Connected to collection '{collection_name}'")
         except Exception as conn_error:
@@ -618,6 +669,7 @@ class IngestService:
                 raise ValueError(f"No endpoints found for game '{game_key}'.")
 
             total_estimated_game_rows = 0
+            report_phase(game_key, "counting_rows")
             for ep in endpoints:
                 try:
                     parsed_url = urlparse(ep)
@@ -646,11 +698,18 @@ class IngestService:
 
             if progress_callback:
                 progress_callback(0, total_estimated_game_rows)
+            report_phase(game_key, "fetching", detail=f"0 of ~{total_estimated_game_rows:,} rows",
+                         rows_done=0, rows_total=total_estimated_game_rows)
+
+            def fetch_progress(rows_done, rows_total):
+                report_phase(game_key, "fetching", detail=f"{rows_done:,} of ~{rows_total:,} rows",
+                             rows_done=rows_done, rows_total=rows_total)
+                progress_callback(rows_done, rows_total)
 
             all_rows, column_names = self._fetch_all_rows_from_api(
                 game=game_key,
                 endpoints=endpoints,
-                progress_callback=progress_callback,
+                progress_callback=fetch_progress,
                 total_estimated_game_rows=total_estimated_game_rows
             )
 
@@ -703,6 +762,9 @@ class IngestService:
                     print(f"  ↳ Skipping ID preload ({existing_count} > {self.max_id_preload}); upsert dedupe only")
 
         rejected: dict[str, int] = {}
+        self._warm_embedding_model(game_key, collection)
+        report_phase(game_key, "embedding_and_writing", detail=f"0 of {len(all_rows):,} rows written",
+                     rows_done=0, rows_total=len(all_rows))
         total_rows_processed, total_rows_added = self._process_rows_from_file(
             game=game_key,
             all_rows=all_rows,
@@ -722,6 +784,7 @@ class IngestService:
         # Remove rows a previous (unvalidated) ingest stored in this game's collection.
         repair_summary = None
         if self.auto_repair:
+            report_phase(game_key, "repairing")
             try:
                 from services.data_repair import repair_game_collection
 
@@ -751,6 +814,8 @@ class IngestService:
             pass
         if progress_callback:
             progress_callback(final_total, final_total)
+        report_phase(game_key, "done", detail=f"{final_total:,} draws stored", rows_done=final_total,
+                     rows_total=final_total)
 
         net_added = max(final_total - existing_count, 0)
         

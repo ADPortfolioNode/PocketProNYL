@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from routes import health, games, models, chroma, ingestion, predictions, training, experiments, chat
+from routes import accuracy, chain, roi
 from middleware.rate_limit import rate_limit_middleware
 from middleware.auth import api_key_auth_middleware
 from state.ingestion_worker import start_background_ingestion
@@ -74,6 +75,9 @@ app.include_router(predictions.router)
 app.include_router(training.router)
 app.include_router(experiments.router)
 app.include_router(chat.router)
+app.include_router(accuracy.router)
+app.include_router(chain.router)
+app.include_router(roi.router)
 
 if __name__ == "__main__":
     import uvicorn
