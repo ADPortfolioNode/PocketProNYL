@@ -3,6 +3,7 @@ import axios from 'axios';
 import getApiBase from '../utils/apiBase';
 import { hasSuggestionResponse, isPredictionForGame } from '../utils/suggestionUtils';
 import PredictionDisplay from './PredictionDisplay';
+import AccuracyReportPanel from './AccuracyReportPanel';
 import './PredictionDisplay.css';
 
 export default function GamePrediction({ game }) {
@@ -86,6 +87,7 @@ export default function GamePrediction({ game }) {
           <PredictionDisplay prediction={prediction} />
         )
       )}
+      <AccuracyReportPanel game={game} />
     </div>
   );
 }
