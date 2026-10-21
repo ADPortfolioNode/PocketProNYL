@@ -146,4 +146,10 @@ def build_accuracy_report(
         "draws_error": info.get("draws_error"),
         "disclaimer": game_odds.PICKS_CANNOT_CHANGE_ODDS,
     }
+    try:
+        from prediction.chain.champion_store import champion_summary
+
+        report["model_champion"] = champion_summary(game)
+    except Exception:
+        report["model_champion"] = None
     return report

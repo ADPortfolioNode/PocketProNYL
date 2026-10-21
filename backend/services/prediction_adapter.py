@@ -132,6 +132,7 @@ class PredictionAdapter:
             return {"status": "error", "message": str(exc)}
         if str(getattr(ticket, "game", game) or game).lower() != game:
             return {"status": "error", "message": f"Engine returned a ticket for '{ticket.game}', not '{game}'."}
+        model_strategy, model_champion = self._apply_chain_champion(game, history, ticket)
 
         prediction_dt = self._current_prediction_datetime()
         session_draw_count = self._get_session_draw_count(game, prediction_dt)
@@ -164,13 +165,37 @@ class PredictionAdapter:
             "prediction_date": prediction_dt.date().isoformat(),
             "prediction_weekday": prediction_dt.strftime("%A"),
             "prediction_timezone": self.prediction_timezone,
-            "model_strategy": "ensemble",
+            "model_strategy": model_strategy,
+            "model_champion": model_champion,
             "blend_weight": None,
             "strategy_weights": ticket.weights_used,
             "strategy_contributions": ticket.strategy_contributions,
             "metrics": ticket.metrics,
             "engine": "modular",
         }
+
+    def _apply_chain_champion(self, game: str, history, ticket) -> tuple[str, str]:
+        """Swap in the chained-ensemble ticket only when an evaluation promoted it.
+
+        Promotion requires beating the incumbent on validation (Bonferroni) and
+        on the untouched holdout; otherwise the incumbent ticket is served as is.
+        """
+        try:
+            from prediction.chain import champion_store
+            from prediction.chain.chained import ChainVariant, live_chained_ticket
+            from prediction.chain.posterior import BetaPosterior
+
+            champion, variant = champion_store.current_champion(game)
+            if champion != champion_store.CHAINED or not variant:
+                return "ensemble", champion_store.INCUMBENT
+            carried = BetaPosterior.from_dict(champion_store.load(game).get("posterior"))
+            chained = live_chained_ticket(self.engine, game, history, ChainVariant.from_dict(variant), carried)
+            if chained.get("primary"):
+                ticket.primary = list(chained["primary"])
+                return "chained_ensemble", champion_store.CHAINED
+        except Exception:
+            pass
+        return "ensemble", "incumbent"
 
     def _load_ready_payload(self, game: str) -> dict:
         path = self._ready_marker(game)
