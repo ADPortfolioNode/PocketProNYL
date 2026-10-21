@@ -88,7 +88,7 @@ class IngestService:
         self.skip_fetch_threshold = int(os.getenv("INGEST_SKIP_FETCH_THRESHOLD", "50000"))
         self.batch_max_retries = int(os.getenv("INGEST_BATCH_MAX_RETRIES", "2"))
         self.progress_interval_s = float(os.getenv("INGEST_PROGRESS_INTERVAL_S", "0.5"))
-        self.upsert_chunk = max(1, int(os.getenv("INGEST_UPSERT_CHUNK", "500")))
+        self.upsert_chunk = max(1, int(os.getenv("INGEST_UPSERT_CHUNK", "200")))
         self.socrata_catalog_url = os.getenv("SOCRATA_CATALOG_URL", "https://api.us.socrata.com/api/catalog/v1")
         self.socrata_domain = os.getenv("SOCRATA_DOMAIN", "data.ny.gov")
         self._catalog_titles: dict[str, str] = {}
