@@ -21,6 +21,7 @@ meta-learner's out-of-fold log loss against the chance base rate.
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from typing import Iterable
 
 import numpy as np
@@ -28,7 +29,7 @@ import numpy as np
 from prediction.chain import champion_store
 from prediction.chain.chained import DEFAULT_VARIANTS, ChainedPredictor, ChainVariant
 from prediction.chain.posterior import BetaPosterior, update, usable_carried
-from prediction.chain.stacking import forward_oof_log_loss
+from prediction.chain.stacking import DEFAULT_C, forward_oof_log_loss, tune_C_walk_forward
 from prediction.chain.stats import chi_square_uniformity, number_frequency_tests
 from prediction.config.loader import game_rules_from_config
 from prediction.core.ensemble import build_ticket
@@ -39,8 +40,7 @@ from prediction.metrics.evaluator import (
     paired_permutation_p_value,
     random_baseline_metrics,
     random_hits_p_value,
-    resolve_holdout_size,
-    resolve_test_start,
+    three_way_split,
 )
 
 
@@ -76,25 +76,17 @@ def evaluate_chain(
     max_test_draws: int | None = None,
     seed: int = 13,
     min_history: int | None = None,
+    tune_C: bool = True,
+    pattern_search: bool = True,
 ) -> dict:
     started = time.time()
     config = engine._load_config(game)
     rules = game_rules_from_config(game)
     variants = list(variants or DEFAULT_VARIANTS)
     metrics_cfg = config.metrics
-    min_draws = int(metrics_cfg.min_backtest_draws)
     n = len(history)
-    holdout_size = resolve_holdout_size(
-        n, min_draws=min_draws,
-        holdout_draws=holdout_draws if holdout_draws is not None else getattr(metrics_cfg, "holdout_draws", None),
-        holdout_fraction=float(getattr(metrics_cfg, "holdout_fraction", 0.15)),
-        max_holdout_draws=int(getattr(metrics_cfg, "max_holdout_draws", 60)),
-    )
-    holdout_start = n - holdout_size
-    test_start = resolve_test_start(
-        holdout_start, min_draws=min_draws,
-        max_test_draws=max_test_draws if max_test_draws is not None else getattr(metrics_cfg, "max_test_draws", None),
-    )
+    test_start, holdout_start, holdout_size = three_way_split(
+        n, metrics_cfg, holdout_draws=holdout_draws, max_test_draws=max_test_draws)
     if holdout_size == 0 or test_start >= holdout_start:
         return {"status": "insufficient_data", "game": game, "draws_available": n,
                 "note": "Not enough draws for a train / validation / untouched holdout split."}
@@ -106,6 +98,40 @@ def evaluate_chain(
     predictor = ChainedPredictor(engine, game, history, base_posterior, seed=seed, min_history=min_history)
     builder = predictor.builder
     champion_weights = dict(engine._resolve_weights(game, config))
+    oof_positions = list(range(max(builder.min_history, test_start - 120), test_start))
+
+    # Regularization: choose the meta-learner's L2 strength by walk-forward CV on the
+    # train prefix only (positions < validation start). Explicit non-default C is kept.
+    c_tuning = {"status": "skipped"}
+    if tune_C:
+        c_tuning = tune_C_walk_forward(builder, oof_positions)
+        if c_tuning.get("status") == "ok":
+            variants = [replace(v, C=c_tuning["C"]) if v.C == DEFAULT_C else v for v in variants]
+
+    # Pattern search on the same split: signals that pass validation (BH-FDR) become
+    # extra meta-learner features in additional challenger variants. They still have
+    # to win the same Bonferroni validation test and the untouched holdout.
+    patterns_report = None
+    predictors = {(): predictor}
+    if pattern_search:
+        from prediction.patterns.search import run_pattern_search
+
+        patterns_report = run_pattern_search(game, history, rules=rules, metrics_cfg=metrics_cfg,
+                                             holdout_draws=holdout_draws, max_test_draws=max_test_draws)
+        feature_signals = tuple(patterns_report.get("feature_signals") or ())
+        if feature_signals:
+            predictors[feature_signals] = ChainedPredictor(
+                engine, game, history, base_posterior, seed=seed, min_history=min_history,
+                pattern_signals=feature_signals)
+            variants = variants + [replace(v, patterns=feature_signals) for v in variants if not v.patterns]
+
+    def ticket(index: int, variant: ChainVariant) -> list[int]:
+        chosen = predictors.get(tuple(variant.patterns))
+        if chosen is None:
+            chosen = predictors[tuple(variant.patterns)] = ChainedPredictor(
+                engine, game, history, base_posterior, seed=seed, min_history=min_history,
+                pattern_signals=tuple(variant.patterns))
+        return chosen.ticket_at(index, variant)["primary"]
 
     def incumbent_ticket(index: int) -> list[int]:
         # Same ticket as engine.predict(game, history[:index], use_nn=False, weights_override=...).
@@ -120,7 +146,7 @@ def evaluate_chain(
     incumbent_val = [_hits(incumbent_ticket(i), history[i]) for i in validation_idx]
     variant_rows = []
     for variant in variants:
-        hits = [_hits(predictor.ticket_at(i, variant)["primary"], history[i]) for i in validation_idx]
+        hits = [_hits(ticket(i, variant), history[i]) for i in validation_idx]
         variant_rows.append({"variant": variant, "hits": hits, "mean": float(np.mean(hits))})
     best = max(variant_rows, key=lambda row: (row["mean"], -row["variant"].votes))
     decision = champion_challenger_decision(
@@ -129,7 +155,7 @@ def evaluate_chain(
 
     # The holdout is scored once, for the one selected variant and the incumbent.
     best_variant: ChainVariant = best["variant"]
-    chain_hold = [_hits(predictor.ticket_at(i, best_variant)["primary"], history[i]) for i in holdout_idx]
+    chain_hold = [_hits(ticket(i, best_variant), history[i]) for i in holdout_idx]
     inc_hold = [_hits(incumbent_ticket(i), history[i]) for i in holdout_idx]
     hold_diff = float(np.mean(chain_hold) - np.mean(inc_hold))
     hold_p = paired_permutation_p_value(chain_hold, inc_hold)
@@ -144,7 +170,6 @@ def evaluate_chain(
         reason = (f"Not promoted: passed validation but not the untouched holdout (diff={hold_diff:+.4f}, "
                   f"p={hold_p}). Incumbent stays.")
 
-    oof_positions = list(range(max(builder.min_history, test_start - 120), test_start))
     report = {
         "status": "ok",
         "game": game,
@@ -175,8 +200,12 @@ def evaluate_chain(
         "stats": {
             "chi_square_uniformity": chi_square_uniformity(history, rules),
             "per_number_frequency_bh_fdr": number_frequency_tests(history, rules),
-            "meta_learner_oof": forward_oof_log_loss(builder, oof_positions),
+            "meta_learner_oof": forward_oof_log_loss(builder, oof_positions, C=best_variant.C),
             "note": "Uniformity and frequency tests are descriptive (full history); they are not used for selection.",
+        },
+        "regularization": {"meta_learner_C": c_tuning},
+        "pattern_search": None if patterns_report is None else {
+            k: patterns_report.get(k) for k in ("status", "feature_signals", "passed_holdout", "tested")
         },
         "posterior": {"status": posterior_status, "carried_runs": (carried.runs if carried else 0)},
         "committed": bool(commit),

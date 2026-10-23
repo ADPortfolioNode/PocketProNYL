@@ -158,6 +158,33 @@ def resolve_holdout_size(
     return size if size >= MIN_HOLDOUT_DRAWS else 0
 
 
+def three_way_split(
+    history_len: int,
+    metrics_cfg=None,
+    *,
+    holdout_draws: int | None = None,
+    max_test_draws: int | None = None,
+) -> tuple[int, int, int]:
+    """(validation_start, holdout_start, holdout_size) for train / validation / untouched holdout.
+
+    Same arithmetic the chain evaluation has always used; shared so the pattern
+    search scores signals on exactly the same windows.
+    """
+    min_draws = int(getattr(metrics_cfg, "min_backtest_draws", 50) or 50)
+    holdout_size = resolve_holdout_size(
+        history_len, min_draws=min_draws,
+        holdout_draws=holdout_draws if holdout_draws is not None else getattr(metrics_cfg, "holdout_draws", None),
+        holdout_fraction=float(getattr(metrics_cfg, "holdout_fraction", DEFAULT_HOLDOUT_FRACTION)),
+        max_holdout_draws=int(getattr(metrics_cfg, "max_holdout_draws", DEFAULT_MAX_HOLDOUT_DRAWS)),
+    )
+    holdout_start = history_len - holdout_size
+    test_start = resolve_test_start(
+        holdout_start, min_draws=min_draws,
+        max_test_draws=max_test_draws if max_test_draws is not None else getattr(metrics_cfg, "max_test_draws", None),
+    )
+    return test_start, holdout_start, holdout_size
+
+
 def random_hits_p_value(
     observed_total_hits: int,
     draws: list[Draw],

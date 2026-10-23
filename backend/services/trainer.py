@@ -43,6 +43,18 @@ _PER_RUN_KNOBS = (
 )
 
 
+def _parse_max_features(raw):
+    """'sqrt' / 'log2' / a fraction like '0.5' / '1.0' (all features)."""
+    text = str(raw or "").strip().lower()
+    if text in ("sqrt", "log2"):
+        return text
+    try:
+        value = float(text)
+    except ValueError:
+        return "sqrt"
+    return 1.0 if value >= 1.0 or value <= 0 else value
+
+
 class TrainerService:
     def __init__(self):
         self._train_lock = threading.RLock()
@@ -59,6 +71,10 @@ class TrainerService:
         self.data_limit = int(os.environ.get("TRAIN_DATA_LIMIT", defaults["data_limit"]))
         self.window_size = int(os.environ.get("TRAIN_WINDOW_SIZE", defaults["window_size"]))
         self.auto_tune = str(os.environ.get("TRAIN_AUTO_TUNE", "1")).lower() not in ("0", "false", "no")
+        # Regularization for the random forest (tree equivalent of L2/shrinkage):
+        # larger leaves, feature subsampling, and no depth growth across retry attempts.
+        self.min_samples_leaf = max(1, int(os.environ.get("TRAIN_MIN_SAMPLES_LEAF", "5")))
+        self.max_features = _parse_max_features(os.environ.get("TRAIN_MAX_FEATURES", "sqrt"))
 
     @staticmethod
     def get_training_defaults(game: str | None = None):
@@ -403,15 +419,19 @@ class TrainerService:
             estimators_cap = 300
             depth_cap = 20
         n_estimators = min(base_estimators + ((attempt - 1) * 20), estimators_cap)
-        max_depth = min(base_depth + max(0, attempt - 1), depth_cap)
+        # Retries vary the seed and ensemble size only; depth no longer grows per
+        # attempt (growing it just fit the validation window harder).
+        max_depth = min(base_depth, depth_cap)
         n_jobs = self._rf_n_jobs(len(X_train), n_estimators)
+        min_leaf = int(getattr(self, "min_samples_leaf", 5) or 1)
         model = RandomForestRegressor(
             n_estimators=n_estimators,
             random_state=int(self.random_state or 42) + attempt,
             n_jobs=n_jobs,
             max_depth=max_depth,
-            min_samples_split=max(2, 4 - (attempt // 6)),
-            min_samples_leaf=1,
+            min_samples_split=max(4, 2 * min_leaf),
+            min_samples_leaf=min_leaf,
+            max_features=getattr(self, "max_features", "sqrt"),
         )
         model.fit(X_train, y_train)
 

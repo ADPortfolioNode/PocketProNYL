@@ -4,6 +4,7 @@ import axios from 'axios';
 import getApiBase from '../utils/apiBase';
 import PredictionPanel from './PredictionPanel';
 import RoiPanel from './RoiPanel';
+import PatternSearchPanel from './PatternSearchPanel';
 import ChatPanelRAG from './ChatPanelRAG';
 import WorkflowSummary from './WorkflowSummary';
 import ExperimentsPanel from './ExperimentsPanel';
@@ -2115,6 +2116,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
             onToggle={handleCardFocus('roi')}
           >
             <RoiPanel games={games} />
+            {games.length > 0 && <PatternSearchPanel games={games} />}
           </ExpandableCard>
         </div>
 

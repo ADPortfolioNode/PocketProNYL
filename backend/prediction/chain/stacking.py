@@ -119,3 +119,25 @@ def forward_oof_log_loss(builder: FeatureBuilder, positions: list[int], folds: i
         "improvement": round(base - meta, 6),
         "beats_chance": meta < base,
     }
+
+
+C_GRID = (0.05, 0.15, 0.5, 1.5)
+
+
+def tune_C_walk_forward(builder: FeatureBuilder, positions: list[int], grid=C_GRID, folds: int = 5) -> dict:
+    """Pick the L2 strength C by walk-forward (expanding-window, time-ordered) CV.
+
+    Each C is scored with ``forward_oof_log_loss`` (every block predicted by a
+    model fit only on earlier blocks), never with shuffled folds. Ties go to the
+    smaller C (stronger shrinkage). Only positions before the validation window
+    are passed in, so validation and the holdout stay untouched.
+    """
+    rows = []
+    for C in grid:
+        result = forward_oof_log_loss(builder, positions, folds=folds, C=float(C))
+        if result.get("status") != "ok":
+            return {"status": result.get("status"), "C": DEFAULT_C, "grid": []}
+        rows.append({"C": float(C), "oof_log_loss": result["oof_log_loss"],
+                     "chance_log_loss": result["chance_log_loss"]})
+    best = min(rows, key=lambda r: (round(r["oof_log_loss"], 6), r["C"]))
+    return {"status": "ok", "C": best["C"], "method": "walk_forward_expanding_window", "grid": rows}
