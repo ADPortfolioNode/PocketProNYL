@@ -148,8 +148,10 @@ def test_pattern_report_endpoint(tmp_path, monkeypatch):
 
     import prediction.core.draw_loader as loader
     from routes import patterns
+    from services import pattern_scheduler
 
     monkeypatch.setenv("PREDICTION_STATE_DIR", str(tmp_path / "prediction"))
+    monkeypatch.setenv("PATTERN_AUTO_PROMOTE", "0")
     calls = []
 
     def fake_from_chroma(game, limit=500):
@@ -157,18 +159,27 @@ def test_pattern_report_endpoint(tmp_path, monkeypatch):
         return make_history(300, game=game, seed=7)
 
     monkeypatch.setattr(loader, "from_chroma", fake_from_chroma)
-    app = FastAPI()
-    app.include_router(patterns.router)
-    client = TestClient(app)
-    first = client.get("/api/pattern_report", params={"game": "take5"}).json()
-    assert first["status"] == "ok" and first["game"] == "take5" and first["cached"] is False
-    for row in first["signals"]:
-        assert row["label"] in {"passed holdout", "not significant", "passed validation, failed holdout",
-                                "not applicable"}
-    second = client.get("/api/pattern_report", params={"game": "take5"}).json()
-    assert second["cached"] is True
-    assert client.get("/api/pattern_report", params={"game": "nope"}).status_code == 400
-    assert calls[0] == ("take5", 1000)
+    sched = pattern_scheduler.PatternScheduler(
+        runner=lambda g, trigger, limit: pattern_scheduler.run_scan(g, trigger=trigger, count_fn=lambda _g: 300),
+        count_fn=lambda g: 300)
+    pattern_scheduler.set_scheduler(sched)
+    try:
+        app = FastAPI()
+        app.include_router(patterns.router)
+        client = TestClient(app)
+        first = client.get("/api/pattern_report", params={"game": "take5"}).json()
+        assert first["scan_status"] == "running" and first["cached"] is False  # first view starts a scan
+        assert sched.wait_idle("take5", 120)
+        done = client.get("/api/pattern_report", params={"game": "take5"}).json()
+        assert done["status"] == "ok" and done["game"] == "take5" and done["cached"] is True
+        assert done["scan_status"] == "fresh" and done["last_run_at"] and done["draw_count"] == 300
+        for row in done["signals"]:
+            assert row["label"] in {"passed holdout", "not significant", "passed validation, failed holdout",
+                                    "not applicable"}
+        assert client.get("/api/pattern_report", params={"game": "nope"}).status_code == 400
+        assert calls[0] == ("take5", 1000)
+    finally:
+        pattern_scheduler.set_scheduler(None)
 
 
 # ------------------------------------------------------------ ensemble + regularization
