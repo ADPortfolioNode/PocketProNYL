@@ -6,6 +6,9 @@ public multi-customer servers use `docker-compose.distribution.yml` (see `docs/d
 Stack: `frontend` (nginx, container :80, proxies `/api` to `backend:5000`) -> `backend`
 (FastAPI/hypercorn, container :5000) -> `chroma` (chromadb/chroma 0.5.3, container :8000).
 
+Deploy with Docker: build locally or pull the GHCR images (`docker-compose.ghcr.yml`). Vercel is not
+supported (it cannot run `backend/`); `vercel.json` only sets `git.deploymentEnabled: false`.
+
 ## 1. Windows quickstart (Docker Desktop, PowerShell)
 
 ```powershell
