@@ -1,82 +1,68 @@
-"""Pattern-search report: each signal's lift vs chance, p, BH-FDR q, and holdout verdict."""
+"""Pattern-search report: each signal's lift vs chance, p, BH-FDR q, drift, holdout verdict.
 
-import json
-import os
-import threading
-from pathlib import Path
+The scan runs in the background (``services.pattern_scheduler``): after ingests that
+add draws, on first view, or on ``?refresh=1``. This endpoint never blocks on a scan;
+it returns the latest cached result plus ``scan_status`` (fresh / running / stale).
+"""
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.concurrency import run_in_threadpool
 
-from prediction.chain import champion_store
-from utils.paths import prediction_state_dir
 from utils.validation import _require_game_key
 
 router = APIRouter()
-_LOCKS: dict[str, threading.Lock] = {}
-_GUARD = threading.Lock()
 
 
-def _history_limit(raw: int | None) -> int:
-    default = int(os.getenv("PATTERN_HISTORY_LIMIT", "1000") or 1000)
-    return max(100, min(int(raw or default), 3000))
+def build_report(game: str, limit: int | None = None, refresh: bool = False, history=None) -> dict:
+    """Synchronous scan (CLI / tests). Reuses the cache unless the draws changed or refresh is set."""
+    from services.pattern_scheduler import _fingerprint, load_cached, run_scan
+
+    if history is not None and not refresh:
+        cached = load_cached(game)
+        if cached and cached.get("fingerprint") == _fingerprint(history):
+            return {**cached, "cached": True}
+    return {**run_scan(game, history=history, limit=limit), "cached": False}
 
 
-def _cache_path(game: str) -> Path:
-    return Path(prediction_state_dir()) / "patterns" / f"{game}.json"
+def report_payload(game: str, refresh: bool = False, limit: int | None = None) -> dict:
+    from prediction.patterns.auto import load_promoted, read_events
+    from prediction.patterns.settings import load_settings
+    from services.pattern_scheduler import get_scheduler, load_cached
 
-
-def _fingerprint(history) -> dict:
-    last = history[-1] if history else None
+    scheduler = get_scheduler()
+    if refresh:
+        scheduler.request(game, delay=0, trigger="manual_refresh", limit=limit)
+    cached = load_cached(game)
+    status = scheduler.status(game, cached)
+    if cached is None and status["scan_status"] != "running" and not status.get("last_error"):
+        scheduler.request(game, delay=0, trigger="first_view", limit=limit)
+        status = scheduler.status(game, cached)
+    body = cached or {"game": game, "status": "pending", "signals": [], "feature_signals": [], "passed_holdout": []}
+    promoted = load_promoted(game).get("signals", {})
     return {
-        "draws": len(history),
-        "last_draw_id": str(getattr(last, "draw_id", "") or ""),
-        "last_draw_date": str(getattr(last, "draw_date", "") or ""),
+        **body,
+        "cached": cached is not None,
+        "scan_status": status["scan_status"],
+        "scan": {k: status.get(k) for k in ("phase", "pending", "trigger", "runs", "last_error", "scheduled_for",
+                                             "last_started_at", "last_finished_at")},
+        "last_run_at": body.get("last_run_at"),
+        "promoted_signals": sorted(promoted.keys()),
+        "history": read_events(game, 50),
+        "config": load_settings(game).to_dict(),
     }
-
-
-def build_report(game: str, limit: int, refresh: bool = False, history=None) -> dict:
-    """Run (or reuse) the pattern search for one game's own draws."""
-    from prediction.patterns.search import run_pattern_search
-
-    if history is None:
-        from prediction.core.draw_loader import from_chroma
-
-        history = from_chroma(game, limit=limit)
-    fingerprint = _fingerprint(history)
-    path = _cache_path(game)
-    with _GUARD:
-        lock = _LOCKS.setdefault(game, threading.Lock())
-    with lock:
-        if not refresh and path.exists():
-            try:
-                cached = json.loads(path.read_text(encoding="utf-8"))
-                if cached.get("fingerprint") == fingerprint and cached.get("game") == game:
-                    return {**cached, "cached": True}
-            except (OSError, json.JSONDecodeError):
-                pass
-        report = run_pattern_search(game, history)
-        report["fingerprint"] = fingerprint
-        report["champion"] = champion_store.champion_summary(game)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(report, default=str), encoding="utf-8")
-        tmp.replace(path)
-        return {**report, "cached": False}
 
 
 @router.get("/api/pattern_report")
 async def pattern_report(
     game: str = Query(...),
     refresh: bool = Query(False),
-    limit: int | None = Query(None, ge=1),
+    limit: int | None = Query(None, ge=100, le=5000),
 ):
-    """Per-signal lift vs chance, permutation p, BH-FDR q and pass/fail for one game."""
+    """Latest per-signal report for one game plus its scan status; ``refresh=1`` forces a rerun."""
     try:
         game_key = _require_game_key(game)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     try:
-        return await run_in_threadpool(build_report, game_key, _history_limit(limit), refresh)
-    except Exception as exc:  # collection missing, chroma down, ...
-        return {"status": "error", "game": game_key, "message": str(exc), "signals": []}
+        return report_payload(game_key, refresh=refresh, limit=limit)
+    except Exception as exc:  # never surface as a crash; the panel keeps polling
+        return {"status": "error", "game": game_key, "message": str(exc), "signals": [], "scan_status": "stale"}

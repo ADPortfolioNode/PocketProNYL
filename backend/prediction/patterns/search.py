@@ -22,6 +22,8 @@ list and the game's own rules, nothing else.
 
 from __future__ import annotations
 
+import math
+import re
 import time
 from collections import Counter
 
@@ -68,6 +70,92 @@ DESCRIPTIONS = {
     "high_low": "Modal high-number count of recent draws",
     "bonus_frequency": "Most frequent bonus ball in the last 100 draws",
 }
+
+
+# Adaptive search: windowed signal families. ``<base>_w<W>`` (W draws) or
+# ``<base>_wall`` (expanding window over all prior draws). Legacy names above are
+# fixed points of the same families, so callers and stored variants keep working.
+WINDOWED_BASES = ("hot", "cold", "positional", "pair_cooccurrence", "triplet_cooccurrence", "day_of_week",
+                  "sum_band", "odd_even", "high_low", "bonus_frequency")
+FIXED_BASES = ("gap_overdue", "repeat_last")
+LEGACY = {
+    "hot_w20": ("hot", 20), "hot_w50": ("hot", 50), "hot_w200": ("hot", 200), "cold_w50": ("cold", 50),
+    "positional": ("positional", POSITIONAL_WINDOW), "pair_cooccurrence": ("pair_cooccurrence", PAIR_LOOKBACK),
+    "triplet_cooccurrence": ("triplet_cooccurrence", PAIR_LOOKBACK), "day_of_week": ("day_of_week", DOW_WINDOW),
+    "sum_band": ("sum_band", CLASS_WINDOW), "odd_even": ("odd_even", CLASS_WINDOW),
+    "high_low": ("high_low", CLASS_WINDOW), "bonus_frequency": ("bonus_frequency", BONUS_WINDOW),
+    "gap_overdue": ("gap_overdue", None), "repeat_last": ("repeat_last", None),
+}
+BASE_DESCRIPTIONS = {
+    "hot": "Most frequent numbers", "cold": "Least frequent numbers",
+    "positional": "Most frequent number per (sorted) position",
+    "pair_cooccurrence": "Numbers that co-occur most with the last draw",
+    "triplet_cooccurrence": "Numbers seen with 2+ numbers of the last draw",
+    "day_of_week": "Most frequent numbers on the target draw's weekday",
+    "sum_band": "Modal sum band (null quintiles)", "odd_even": "Modal odd count",
+    "high_low": "Modal high-number count", "bonus_frequency": "Most frequent bonus ball",
+    "gap_overdue": "Numbers with the longest gap since last drawn", "repeat_last": "Repeat numbers from the last draw",
+}
+_NAME_RE = re.compile(r"^([a-z_]+?)_w(all|\d+)$")
+
+
+def parse_signal(name: str) -> tuple[str, int | None]:
+    """Signal name -> (base, window). Window 0 = all prior draws; None = no window."""
+    if name in LEGACY:
+        return LEGACY[name]
+    m = _NAME_RE.match(str(name))
+    if m and m.group(1) in WINDOWED_BASES:
+        return m.group(1), 0 if m.group(2) == "all" else int(m.group(2))
+    raise KeyError(name)
+
+
+def signal_name(base: str, window: int | None) -> str:
+    if window is None:
+        return base
+    return f"{base}_w{'all' if window == 0 else int(window)}"
+
+
+def signal_family(name: str) -> str:
+    base, _ = parse_signal(name)
+    if base in ("sum_band", "odd_even", "high_low"):
+        return "class"
+    return "bonus" if base == "bonus_frequency" else "number"
+
+
+def describe_signal(name: str) -> str:
+    if name in DESCRIPTIONS:
+        return DESCRIPTIONS[name]
+    base, w = parse_signal(name)
+    text = BASE_DESCRIPTIONS.get(base, base)
+    if w is None:
+        return text
+    return f"{text} ({'all prior draws' if w == 0 else f'last {w} draws'})"
+
+
+def parse_windows(raw) -> list[int]:
+    """'25,50,all' / [25, 'all'] -> sorted unique ints (0 = all)."""
+    items = raw.split(",") if isinstance(raw, str) else list(raw or [])
+    out = set()
+    for item in items:
+        text = str(item).strip().lower()
+        if not text:
+            continue
+        if text in ("all", "0"):
+            out.add(0)
+        elif text.isdigit() and int(text) > 0:
+            out.add(int(text))
+    return sorted(out, key=lambda w: (w == 0, w))
+
+
+def candidate_signals(windows, available_prior: int) -> list[str]:
+    """Every (base, window) pair worth testing, windows capped by the draws available."""
+    usable = [w for w in parse_windows(windows) if w == 0 or MIN_PRIOR <= w <= max(available_prior, MIN_PRIOR)]
+    if not usable:
+        usable = [0]
+    names = list(FIXED_BASES)
+    for base in WINDOWED_BASES:
+        names += [signal_name(base, w) for w in usable]
+    return names
 
 
 def _onehot_rows(values: np.ndarray, size: int) -> np.ndarray:
@@ -137,10 +225,10 @@ class PatternMatrix:
 
     # ---------------------------------------------------------------- windows
     def _window(self, i: int, w: int) -> np.ndarray:
-        return self.cum_incl[i] - self.cum_incl[max(0, i - w)]
+        return self.cum_incl[i] - self.cum_incl[0 if w <= 0 else max(0, i - w)]
 
     def _window_pos(self, i: int, w: int) -> np.ndarray:
-        return self.cum_pos[i] - self.cum_pos[max(0, i - w)]
+        return self.cum_pos[i] - self.cum_pos[0 if w <= 0 else max(0, i - w)]
 
     def _pooled(self, scores: np.ndarray) -> np.ndarray:
         """Digit games: the same pooled score on every position."""
@@ -149,18 +237,19 @@ class PatternMatrix:
     # ---------------------------------------------------------------- signals
     def scores(self, name: str, i: int) -> np.ndarray:
         """Signal scores for draw ``i`` from ``history[:i]``: (size,) or (k, size) for digit games."""
-        if name.startswith("hot_w"):
-            return self._pooled(self._window(i, int(name[5:])))
-        if name == "cold_w50":
-            return self._pooled(-self._window(i, 50))
-        if name == "gap_overdue":
+        base, w = parse_signal(name)
+        if base == "hot":
+            return self._pooled(self._window(i, w))
+        if base == "cold":
+            return self._pooled(-self._window(i, w))
+        if base == "gap_overdue":
             return self.gaps_pos[i].copy() if self.digit else self.gaps[i].copy()
-        if name == "positional":
-            counts = self._window_pos(i, POSITIONAL_WINDOW)
+        if base == "positional":
+            counts = self._window_pos(i, w)
             return counts if self.digit else counts.max(axis=0)
-        if name in ("pair_cooccurrence", "triplet_cooccurrence"):
-            return self._cooccurrence(i, triplet=name.startswith("triplet"))
-        if name == "repeat_last":
+        if base in ("pair_cooccurrence", "triplet_cooccurrence"):
+            return self._cooccurrence(i, triplet=base.startswith("triplet"), lookback=w)
+        if base == "repeat_last":
             if i < 1:
                 return self._pooled(np.zeros(self.size))
             tiebreak = self._window(i, 50) / 1000.0
@@ -168,21 +257,23 @@ class PatternMatrix:
                 last = _onehot_rows(self.pos[i - 1: i], self.size)[0]
                 return last + np.tile(tiebreak, (self.k, 1))
             return self.incl[i - 1] + tiebreak
-        if name == "day_of_week":
+        if base == "day_of_week":
             wd = int(self.weekday[i]) if i < self.n else -1
             if wd < 0:
-                return self.scores("hot_w200", i)
-            rows = np.nonzero(self.weekday[:i] == wd)[0][-DOW_WINDOW:]
+                return self._pooled(self._window(i, w))
+            rows = np.nonzero(self.weekday[:i] == wd)[0]
+            if w > 0:
+                rows = rows[-w:]
             if self.digit:
                 onehot = _onehot_rows(self.pos[rows], self.size) if rows.size else np.zeros((1, self.k, self.size))
                 return onehot.sum(axis=0)
             return self.incl[rows].sum(axis=0) if rows.size else np.zeros(self.size)
         raise KeyError(name)
 
-    def _cooccurrence(self, i: int, triplet: bool) -> np.ndarray:
+    def _cooccurrence(self, i: int, triplet: bool, lookback: int = PAIR_LOOKBACK) -> np.ndarray:
         if i < (3 if triplet else 2):
             return self._pooled(np.zeros(self.size))
-        start = max(0, i - 1 - PAIR_LOOKBACK)
+        start = 0 if lookback <= 0 else max(0, i - 1 - lookback)
         if self.digit:
             # Digit games: per-position transition (pair) / second-order (triplet) counts.
             out = np.zeros((self.k, self.size))
@@ -275,26 +366,32 @@ class PatternMatrix:
 # -------------------------------------------------------------------- scoring
 
 def _applicable(pm: PatternMatrix, name: str) -> tuple[bool, str]:
-    if name == "bonus_frequency":
+    base, _ = parse_signal(name)
+    if base == "bonus_frequency":
         if pm.rules.bonus_count <= 0:
             return False, "Game has no bonus ball."
         if pm.n == 0 or np.mean(pm.bonus >= 0) < 0.8:
             return False, "Bonus ball missing from most stored draws."
-    if name == "day_of_week":
+    if base == "day_of_week":
         known = pm.weekday[pm.weekday >= 0]
         if known.size < 0.8 * max(pm.n, 1) or np.unique(known).size < 2:
             return False, "Needs dated draws on 2+ weekdays."
     return True, ""
 
 
+def _since(i: int, w: int) -> int:
+    return 0 if w <= 0 else max(0, i - w)
+
+
 def _score(pm: PatternMatrix, name: str, indices: list[int], classes_cache: dict) -> dict:
     """Per-draw hits, chance expectation, and the null sampler parameters."""
-    if name in CLASS_SIGNALS:
-        labels = classes_cache.setdefault(name, pm.draw_classes(name))
-        probs = pm.null_model()[name]
+    base, w = parse_signal(name)
+    if base in CLASS_SIGNALS:
+        labels = classes_cache.setdefault(base, pm.draw_classes(base))
+        probs = pm.null_model()[base]
         hits, expected = [], []
         for i in indices:
-            recent = labels[max(0, i - CLASS_WINDOW): i]
+            recent = labels[_since(i, w): i]
             if recent.size == 0:
                 continue
             counts = Counter(int(v) for v in recent)
@@ -302,13 +399,13 @@ def _score(pm: PatternMatrix, name: str, indices: list[int], classes_cache: dict
             hits.append(1.0 if int(labels[i]) == pred else 0.0)
             expected.append(float(probs.get(pred, 0.0)))
         return {"hits": np.array(hits), "expected": np.array(expected), "null": "bernoulli"}
-    if name == "bonus_frequency":
+    if base == "bonus_frequency":
         hits, expected = [], []
         p0 = 1.0 / max(pm.bonus_size, 1)
         for i in indices:
             if pm.bonus[i] < 0:
                 continue
-            past = pm.bonus[max(0, i - BONUS_WINDOW): i]
+            past = pm.bonus[_since(i, w): i]
             past = past[past >= 0]
             if past.size == 0:
                 continue
@@ -362,6 +459,59 @@ def _summary(scored: dict, p: float | None) -> dict:
     }
 
 
+DRIFT_MIN_CHUNK = 25
+DRIFT_CHUNKS = 6
+DRIFT_ALPHA = 0.10
+
+
+def drift(scored: dict, *, alpha: float = DRIFT_ALPHA) -> dict:
+    """Descriptive drift of a signal's lift across rolling chunks of its scored window.
+
+    Lift per consecutive chunk, plus a Welch test of (hits - chance) in the recent
+    half vs the earlier half. ``strengthening`` / ``fading`` only when that
+    difference is significant at ``alpha``; otherwise ``stable``. Never used to
+    select or promote; the FDR + holdout guard stays the judge.
+    """
+    hits, expected = np.asarray(scored.get("hits", []), float), np.asarray(scored.get("expected", []), float)
+    n = hits.size
+    if n < 2 * DRIFT_MIN_CHUNK:
+        return {"trend": "insufficient", "rolling_lift": [], "chunk": None}
+    chunk = max(DRIFT_MIN_CHUNK, n // DRIFT_CHUNKS)
+    rolling = []
+    for start in range(0, n - chunk + 1, chunk):
+        e = expected[start:start + chunk].sum()
+        rolling.append(round(float(hits[start:start + chunk].sum() / e), 4) if e > 0 else None)
+    excess = hits - expected
+    half = n // 2
+    a, b = excess[:half], excess[half:]
+    se = math.sqrt(a.var(ddof=1) / a.size + b.var(ddof=1) / b.size) if a.size > 1 and b.size > 1 else 0.0
+    diff = float(b.mean() - a.mean())
+    if se <= 0:
+        p = 1.0 if abs(diff) < 1e-12 else 0.0
+    else:
+        p = math.erfc(abs(diff / se) / math.sqrt(2.0))
+    ea, eb = expected[:half].sum(), expected[half:].sum()
+    early = float(hits[:half].sum() / ea) if ea > 0 else None
+    recent = float(hits[half:].sum() / eb) if eb > 0 else None
+    xs = np.arange(len([r for r in rolling if r is not None]), dtype=float)
+    ys = np.array([r for r in rolling if r is not None], dtype=float)
+    slope = float(np.polyfit(xs, ys, 1)[0]) if ys.size >= 2 else 0.0
+    trend = "stable"
+    if p <= alpha:
+        trend = "strengthening" if diff > 0 else "fading"
+    return {"trend": trend, "rolling_lift": rolling, "chunk": int(chunk),
+            "early_lift": None if early is None else round(early, 4),
+            "recent_lift": None if recent is None else round(recent, 4),
+            "slope_per_chunk": round(slope, 5), "p_value": round(float(p), 6)}
+
+
+def score_signal_on(pm: PatternMatrix, name: str, indices: list[int], *, replicates: int = NULL_REPLICATES,
+                    seed: int = 77) -> dict:
+    """Score one signal on arbitrary (e.g. newly arrived) draws: summary with p vs chance."""
+    scored = _score(pm, name, indices, {})
+    return _summary(scored, _p_value(pm, scored, replicates, seed))
+
+
 def run_pattern_search(
     game: str,
     history: list[Draw],
@@ -374,9 +524,17 @@ def run_pattern_search(
     alpha: float = DEFAULT_SIGNIFICANCE_ALPHA,
     replicates: int = NULL_REPLICATES,
     signals: tuple[str, ...] | None = None,
+    windows=None,
     seed: int = 29,
 ) -> dict:
-    """Score every signal walk-forward on validation, BH-FDR, then the holdout once."""
+    """Score every signal walk-forward on validation, BH-FDR, then the holdout once.
+
+    ``windows`` (e.g. ``[25, 50, 100, 200, "all"]``) switches on the adaptive search:
+    every windowed signal family is tested at each window that fits the draws
+    available before validation. Every (signal, window) pair tested is one member
+    of the BH-FDR family, so a wider search raises the bar instead of inflating
+    false positives.
+    """
     started = time.time()
     if rules is None or metrics_cfg is None:
         from prediction.config.loader import game_rules_from_config, load_game_config
@@ -387,34 +545,51 @@ def run_pattern_search(
     test_start, holdout_start, holdout_size = three_way_split(
         n, metrics_cfg, holdout_draws=holdout_draws,
         max_test_draws=PATTERN_VALIDATION_DRAWS if max_test_draws is None else max_test_draws)
-    base = {"game": game, "draws_available": n, "fdr_q": fdr_q, "alpha": alpha,
+    adaptive = windows is not None and signals is None
+    base = {"game": game, "draws_available": n, "fdr_q": fdr_q, "alpha": alpha, "adaptive": adaptive,
             "method": ("Walk-forward; chance baseline = hypergeometric / positional / class null; "
-                       "ball-relabel permutation p (Monte Carlo); BH-FDR across signals on validation; "
-                       "passing signals scored once on the untouched holdout.")}
+                       "ball-relabel permutation p (Monte Carlo); BH-FDR across every signal x window tested "
+                       "on validation; passing signals scored once on the untouched holdout.")}
     validation_idx = list(range(max(test_start, MIN_PRIOR), holdout_start))
     if holdout_size == 0 or len(validation_idx) < 5:
         return {**base, "status": "insufficient_data", "signals": [], "feature_signals": [], "passed_holdout": [],
                 "note": "Not enough draws for a train / validation / untouched holdout split."}
     holdout_idx = list(range(holdout_start, n))
     pm = PatternMatrix(history, rules)
-    names = [s for s in (signals or SIGNAL_NAMES) if s in SIGNAL_NAMES]
+    if adaptive:
+        names = candidate_signals(windows, validation_idx[0])
+    else:
+        names = []
+        for s in (signals or SIGNAL_NAMES):
+            try:
+                parse_signal(s)
+                names.append(s)
+            except KeyError:
+                continue
     classes_cache: dict = {}
-    rows, tested = [], []
+    rows, tested, scored_by = [], [], {}
     for offset, name in enumerate(names):
         ok, why = _applicable(pm, name)
-        family = "number" if name in NUMBER_SIGNALS else ("class" if name in CLASS_SIGNALS else "bonus")
-        row = {"signal": name, "family": family, "description": DESCRIPTIONS[name]}
+        sig_base, window = parse_signal(name)
+        row = {"signal": name, "base": sig_base, "window": ("all" if window == 0 else window),
+               "family": signal_family(name), "description": describe_signal(name)}
         if not ok:
             rows.append({**row, "status": "not_applicable", "label": "not applicable", "note": why})
             continue
         scored = _score(pm, name, validation_idx, classes_cache)
-        p = _p_value(pm, scored, replicates, seed + offset)
-        row["validation"] = _summary(scored, p)
-        row["_p"] = p
+        scored_by[name] = scored
         rows.append(row)
         tested.append(row)
+    m = len(tested)
+    # Resolution guard: the smallest attainable permutation p must sit well under BH's
+    # first threshold q/m, or a bigger family could never pass anything.
+    reps = max(int(replicates), int(math.ceil(4 * max(m, 1) / max(fdr_q, 1e-6))))
+    for offset, row in enumerate(tested):
+        row["_p"] = _p_value(pm, scored_by[row["signal"]], reps, seed + offset)
+        row["validation"] = _summary(scored_by[row["signal"]], row["_p"])
+        row["drift"] = drift(scored_by[row["signal"]])
     q_values, _ = benjamini_hochberg([r["_p"] for r in tested], fdr_q)
-    for row, qv in zip(tested, q_values):
+    for offset, (row, qv) in enumerate(zip(tested, q_values)):
         row["q_value"] = round(float(qv), 6)
         lift = row["validation"].get("lift") or 0.0
         row["passed_validation"] = bool(lift > 1.0 and qv <= fdr_q)
@@ -422,7 +597,7 @@ def run_pattern_search(
         if row["passed_validation"]:
             # The untouched holdout is scored once, only for validation survivors.
             scored = _score(pm, row["signal"], holdout_idx, classes_cache)
-            p_hold = _p_value(pm, scored, replicates, seed + 1000 + SIGNAL_NAMES.index(row["signal"]))
+            p_hold = _p_value(pm, scored, reps, seed + 1000 + offset)
             row["holdout"] = _summary(scored, p_hold)
             hl = row["holdout"].get("lift") or 0.0
             row["passed_holdout"] = bool(hl > 1.0 and p_hold <= alpha)
@@ -434,6 +609,16 @@ def run_pattern_search(
             row["status"], row["label"] = "validation_only", "passed validation, failed holdout"
         else:
             row["status"], row["label"] = "not_significant", "not significant"
+    # Best window per signal family (descriptive: which lookback fits this game best).
+    best_params = {}
+    for row in tested:
+        if row["window"] is None:
+            continue
+        lift = row["validation"].get("lift") or 0.0
+        cur = best_params.get(row["base"])
+        if cur is None or lift > cur["lift"]:
+            best_params[row["base"]] = {"window": row["window"], "lift": lift, "q_value": row["q_value"]}
+    trends = Counter(r["drift"]["trend"] for r in tested)
     return {
         **base,
         "status": "ok",
@@ -441,8 +626,13 @@ def run_pattern_search(
         "seconds": round(time.time() - started, 2),
         "split": {"draws": n, "validation_start": validation_idx[0], "holdout_start": holdout_start,
                   "validation_draws": len(validation_idx), "holdout_draws": holdout_size},
+        "windows": [("all" if w == 0 else w) for w in parse_windows(windows)] if adaptive else None,
         "signals": rows,
-        "tested": len(tested),
+        "tested": m,
+        "family_size": m,
+        "replicates": reps,
+        "best_params": best_params,
+        "trend_counts": dict(trends),
         "feature_signals": [r["signal"] for r in tested if r["passed_validation"] and r["family"] == "number"],
         "passed_holdout": [r["signal"] for r in tested if r["passed_holdout"]],
     }

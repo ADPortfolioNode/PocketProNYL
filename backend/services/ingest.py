@@ -510,10 +510,15 @@ class IngestService:
 
         collection_name = game_key
         try:
-            return self._fetch_and_sync(game_key, collection_name, progress_callback, force)
+            result = self._fetch_and_sync(game_key, collection_name, progress_callback, force)
         except Exception as exc:
             report_phase(game_key, "error", detail=str(exc)[:300])
             raise
+        # New draws -> debounced background rerun of this game's pattern scan.
+        from services.pattern_scheduler import notify_ingest
+
+        notify_ingest(game_key, result)
+        return result
 
     def _warm_embedding_model(self, game_key: str, collection) -> None:
         """Load (and on first run download) Chroma's default embedding model, visibly.

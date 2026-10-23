@@ -108,3 +108,11 @@
   color: var(--ip-text);
   border-color: var(--ip-line);
 }
+
+/* Pattern search: trend arrows + promote/demote history (cyan up, violet down). */
+.insight-panel .pattern-trend-up { color: var(--ip-cyan); font-weight: 600; }
+.insight-panel .pattern-trend-down { color: var(--ip-violet); font-weight: 600; }
+.insight-panel .pattern-trend-flat { color: var(--ip-muted); }
+.insight-panel .pattern-btn-violet { border-color: var(--ip-violet); color: var(--ip-violet); }
+.insight-panel .pattern-history { list-style: none; padding-left: 0; margin: 0; font-size: 0.85rem; }
+.insight-panel .pattern-history li { padding: 0.2rem 0; border-top: 1px solid var(--ip-line); }

@@ -115,9 +115,12 @@ def evaluate_chain(
     predictors = {(): predictor}
     if pattern_search:
         from prediction.patterns.search import run_pattern_search
+        from prediction.patterns.settings import load_settings
 
+        pattern_cfg = load_settings(game)
         patterns_report = run_pattern_search(game, history, rules=rules, metrics_cfg=metrics_cfg,
-                                             holdout_draws=holdout_draws, max_test_draws=max_test_draws)
+                                             holdout_draws=holdout_draws, max_test_draws=max_test_draws,
+                                             windows=list(pattern_cfg.windows), fdr_q=pattern_cfg.fdr_q)
         feature_signals = tuple(patterns_report.get("feature_signals") or ())
         if feature_signals:
             predictors[feature_signals] = ChainedPredictor(
