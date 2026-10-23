@@ -12,6 +12,7 @@ from services.predictor import predictor_service
 from services.prediction_adapter import prediction_adapter
 from experiments.store import ExperimentStore
 from utils.validation import _require_game_key
+from config import GAME_CONFIGS, is_game_retired
 from utils.timestamps import normalize_experiment_record, runtime_timestamp_fields
 from utils.paths import experiments_file
 from services.suggestion_ledger import suggestion_ledger
@@ -137,6 +138,18 @@ def _normalize_prediction_result(
         "model_metadata": result.get("model_metadata"),
         "strategy_used": result.get("strategy_used"),
         "generated_at": result.get("generated_at"),
+        **_retired_fields(game_key),
+    }
+
+
+def _retired_fields(game_key: str) -> dict:
+    """Label suggestions for retired games (e.g. Cash4Life, ended 2026-02-21)."""
+    if not is_game_retired(game_key):
+        return {}
+    return {
+        "retired": True,
+        "retired_date": (GAME_CONFIGS.get(game_key) or {}).get("retired_date"),
+        "status_label": "Retired: history only",
     }
 
 

@@ -126,6 +126,55 @@ def blend_outputs(
     return primary, bonus, contributions, used_weights
 
 
+def history_bonus_picks(
+    history: list,
+    rules: GameRules,
+    exclude: list[int] | None = None,
+    half_life: int = 60,
+) -> list[int]:
+    """Pick bonus balls from the game's own bonus history (recency-weighted).
+
+    No strategy plugin emits ``bonus_scores``, so without this every bonus game
+    was padded with ``bonus_min`` (always 1). Uses only this game's draws, and
+    skips values already in ``exclude`` (e.g. NY Lotto's bonus comes from the
+    same drum as the main numbers). Ties break toward the most recent value.
+    """
+    if rules.bonus_count <= 0:
+        return []
+    size = (rules.bonus_max - rules.bonus_min) + 1
+    scores = np.zeros(size, dtype=float)
+    last_seen = np.full(size, -1, dtype=int)
+    total = len(history or [])
+    decay = 0.5 ** (1.0 / max(1, half_life))
+    for index, draw in enumerate(history or []):
+        weight = decay ** (total - 1 - index)
+        for value in getattr(draw, "bonus", None) or []:
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                continue
+            if rules.bonus_min <= value <= rules.bonus_max:
+                scores[value - rules.bonus_min] += weight
+                last_seen[value - rules.bonus_min] = index
+    if not scores.any():
+        return []
+    blocked = {int(n) for n in (exclude or [])}
+    ranked = sorted(
+        range(size),
+        key=lambda i: (scores[i], last_seen[i]),
+        reverse=True,
+    )
+    picks: list[int] = []
+    for i in ranked:
+        number = rules.bonus_min + i
+        if number in blocked or number in picks:
+            continue
+        picks.append(number)
+        if len(picks) >= rules.bonus_count:
+            break
+    return picks
+
+
 def build_ticket(
     game: str,
     outputs: list[StrategyOutput],

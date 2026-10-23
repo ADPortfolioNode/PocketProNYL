@@ -1,0 +1,14 @@
+.retired-badge {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid rgba(167, 139, 250, 0.6);
+  border-radius: 999px;
+  background: rgba(124, 58, 237, 0.15);
+  color: #c4b5fd;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+  white-space: nowrap;
+}

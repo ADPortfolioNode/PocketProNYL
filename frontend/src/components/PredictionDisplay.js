@@ -1,10 +1,11 @@
 import React from 'react';
 import NextGameScheduleBanner from './NextGameScheduleBanner';
+import RetiredBadge, { isRetiredGame } from './RetiredBadge';
 import './PredictionDisplay.css';
 
 const hasBlendWeight = (value) => value !== undefined && value !== null && value !== '';
 
-const PredictionDisplay = ({ prediction }) => {
+const PredictionDisplayBody = ({ prediction }) => {
   if (!prediction) {
     return null;
   }
@@ -151,6 +152,24 @@ const PredictionDisplay = ({ prediction }) => {
       </div>
       {renderPredictionBlock(singlePrediction, 'single')}
     </div>
+  );
+};
+
+// Suggestions for retired games (e.g. Cash4Life) stay available but carry a label.
+const PredictionDisplay = ({ prediction }) => {
+  if (!prediction) {
+    return null;
+  }
+  if (!isRetiredGame(prediction)) {
+    return <PredictionDisplayBody prediction={prediction} />;
+  }
+  return (
+    <>
+      <div className="prediction-retired-note mb-2">
+        <RetiredBadge date={prediction.retired_date} className="ms-0" />
+      </div>
+      <PredictionDisplayBody prediction={prediction} />
+    </>
   );
 };
 
