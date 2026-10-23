@@ -68,7 +68,9 @@ GAME_CONFIGS = {
         "primary_unique": True,
         "bonus_count": 1,
         "bonus_min": 1,
-        "bonus_max": 25,
+        # Mega Ball matrix 1-24 since the April 8, 2025 redesign (old draws up
+        # to 25 still validate via HISTORICAL_RANGE_OVERRIDES).
+        "bonus_max": 24,
         "bonus_keys": ["mega_ball", "megaball"],
     },
     "pick10": {
@@ -87,6 +89,9 @@ GAME_CONFIGS = {
         "bonus_min": 1,
         "bonus_max": 4,
         "bonus_keys": ["cash_ball", "cashball"],
+        # Final Cash4Life draw was Feb 21, 2026: history only.
+        "retired": True,
+        "retired_date": "2026-02-21",
     },
     "quickdraw": {
         "primary_count": 20,
@@ -210,7 +215,7 @@ GAME_PREDICTION_FORMATS = {
         "main_max": 70,
         "bonus_count": 1,
         "bonus_min": 1,
-        "bonus_max": 25,
+        "bonus_max": 24,
         "unique_main": True,
         "sort_main": True,
         "main_label": "White Balls",
@@ -350,8 +355,13 @@ GAME_PREDICTION_SCHEDULES = {
         "draw_sessions": ["midday", "evening"],
         "weekday_draws": {},
     },
-    "millionaireforlife": {"daily_draws": 0, "weekday_draws": {0: 1, 2: 1, 5: 1}},
+    # Nightly draw at 11:15 pm ET.
+    "millionaireforlife": {"daily_draws": 1, "draw_times": ["23:15"], "weekday_draws": {}},
 }
+
+
+def is_game_retired(game_key: str | None) -> bool:
+    return bool((GAME_CONFIGS.get(str(game_key or "")) or {}).get("retired"))
 
 
 def _normalize_game_token(value: str | None) -> str:
