@@ -6,10 +6,10 @@
 services:
   backend:
     ports:
-      - "127.0.0.1:${BACKEND_HOST_PORT:-5001}:5000"
+      - "127.0.0.1:${BACKEND_PORT:-${BACKEND_HOST_PORT:-5002}}:5000"
   chroma:
     ports:
       - "127.0.0.1:${CHROMA_HOST_PORT:-8001}:8000"
   frontend:
     ports:
-      - "127.0.0.1:${FRONTEND_HOST_PORT:-3000}:80"
+      - "127.0.0.1:${FRONTEND_PORT:-${FRONTEND_HOST_PORT:-3002}}:80"
