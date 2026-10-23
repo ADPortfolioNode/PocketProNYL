@@ -21,7 +21,7 @@ MIN_HISTORY = 30
 
 class FeatureBuilder:
     def __init__(self, engine, game: str, history: list[Draw], base_posterior: BetaPosterior,
-                 min_history: int = MIN_HISTORY):
+                 min_history: int = MIN_HISTORY, pattern_signals: tuple[str, ...] = ()):
         self.engine = engine
         self.game = game
         self.history = list(history)
@@ -33,6 +33,14 @@ class FeatureBuilder:
         self._features: dict[int, np.ndarray] = {}
         self.plugin_names: list[str] = list(self.config.enabled_strategies) + list(self.config.enabled_agents)
         self.feature_names = [f"plugin:{n}" for n in self.plugin_names] + ["posterior_mean_ratio", "gap_ratio"]
+        # Pattern-search signals that passed validation for THIS game (rank-normalized columns).
+        self.pattern_signals: tuple[str, ...] = tuple(pattern_signals or ())
+        self._patterns = None
+        if self.pattern_signals:
+            from prediction.patterns.search import PatternMatrix
+
+            self._patterns = PatternMatrix(self.history, self.rules)
+            self.feature_names += [f"pattern:{name}" for name in self.pattern_signals]
         n = len(self.history)
         incl = np.zeros((n, self.size), dtype=float)
         for row, draw in enumerate(self.history):
@@ -83,6 +91,10 @@ class FeatureBuilder:
         columns.append(self.posterior_means_at(i) / max(self.p0, 1e-9))
         expected_gap = 1.0 / max(self.p0, 1e-9)
         columns.append(np.minimum(self._gaps[i] / expected_gap, 10.0))
+        for name in self.pattern_signals:
+            raw = self._patterns.number_scores(name, i)
+            ranks = np.argsort(np.argsort(raw, kind="stable"), kind="stable").astype(float)
+            columns.append(ranks / max(self.size - 1, 1))
         matrix = np.vstack(columns).T
         self._features[i] = matrix
         return matrix

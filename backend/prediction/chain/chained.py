@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 from prediction.chain.features import FeatureBuilder
 from prediction.chain.posterior import BetaPosterior, usable_carried
@@ -24,18 +24,22 @@ class ChainVariant:
     use_subtargets: bool = True
     window: int = 120
     C: float = DEFAULT_C
+    # Pattern-search signals (validated for this game) added as meta-learner features.
+    patterns: tuple[str, ...] = field(default_factory=tuple)
 
     @property
     def name(self) -> str:
-        return f"chain_k{self.votes}_{'sub' if self.use_subtargets else 'nosub'}_w{self.window}"
+        base = f"chain_k{self.votes}_{'sub' if self.use_subtargets else 'nosub'}_w{self.window}"
+        return f"{base}_pat{len(self.patterns)}" if self.patterns else base
 
     def to_dict(self) -> dict:
-        return {**asdict(self), "name": self.name}
+        return {**asdict(self), "patterns": list(self.patterns), "name": self.name}
 
     @classmethod
     def from_dict(cls, data: dict) -> "ChainVariant":
         return cls(votes=int(data.get("votes", 5)), use_subtargets=bool(data.get("use_subtargets", True)),
-                   window=int(data.get("window", 120)), C=float(data.get("C", DEFAULT_C)))
+                   window=int(data.get("window", 120)), C=float(data.get("C", DEFAULT_C)),
+                   patterns=tuple(str(p) for p in (data.get("patterns") or ())))
 
 
 DEFAULT_VARIANTS = (
@@ -50,9 +54,10 @@ class ChainedPredictor:
     """Builds chained-ensemble tickets for any index of one game's history."""
 
     def __init__(self, engine, game: str, history: list[Draw], base_posterior: BetaPosterior,
-                 seed: int = 13, min_history: int | None = None):
+                 seed: int = 13, min_history: int | None = None, pattern_signals: tuple[str, ...] = ()):
         kwargs = {} if min_history is None else {"min_history": min_history}
-        self.builder = FeatureBuilder(engine, game, history, base_posterior, **kwargs)
+        self.builder = FeatureBuilder(engine, game, history, base_posterior,
+                                      pattern_signals=tuple(pattern_signals or ()), **kwargs)
         self.rules = self.builder.rules
         self.seed = int(seed)
         self._votes: dict[tuple, dict] = {}
@@ -93,5 +98,5 @@ def live_chained_ticket(engine, game: str, history: list[Draw], variant: ChainVa
 
     rules = game_rules_from_config(game)
     base, _ = usable_carried(carried, history, len(history), game, rules)
-    predictor = ChainedPredictor(engine, game, history, base)
+    predictor = ChainedPredictor(engine, game, history, base, pattern_signals=variant.patterns)
     return predictor.ticket_at(len(history), variant)
