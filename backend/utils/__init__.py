@@ -1,1 +1,1 @@
-# Utility functions for PocketPro:NYL backend
+# Utility functions for PocketProNYGames backend

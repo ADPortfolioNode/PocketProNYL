@@ -1,5 +1,5 @@
 """
-Central training defaults for PocketPro:NYL.
+Central training defaults for PocketProNYGames.
 
 Base knobs match ``TrainerService.get_training_defaults`` / env overrides.
 Per-game profiles follow the Training Optimization Guide (complexity,
@@ -18,8 +18,8 @@ DEFAULT_TRAINING_CONFIG: Dict[str, Any] = {
     "target_accuracy": 0.90,
     "max_iterations": 40,
     "train_size": 0.25,
-    "n_estimators": 250,
-    "max_depth": 18,
+    "n_estimators": 180,
+    "max_depth": 12,
     "random_state": 42,
     "blend_step": 0.05,
     "data_limit": 0,
@@ -27,6 +27,7 @@ DEFAULT_TRAINING_CONFIG: Dict[str, Any] = {
     "auto_tune": True,
     "validation_size": None,
     "model_strategy": "ensemble",
+    "overfit_gap_limit_percent": 2.0,
 }
 
 # Env var names that TrainerService already honors
@@ -49,129 +50,128 @@ ENV_KEY_MAP: Dict[str, str] = {
 GAME_TRAINING_DEFAULTS: Dict[str, Dict[str, Any]] = {
     "pick3": {
         "target_accuracy": 0.85,
-        "max_iterations": 30,
-        "train_size": 0.30,
-        "n_estimators": 150,
-        "max_depth": 12,
+        "max_iterations": 12,
+        "train_size": 0.35,
+        "n_estimators": 100,
+        "max_depth": 8,
         "window_size": 2,
         "blend_step": 0.06,
         "data_limit": 0,
         "reasoning": (
-            "Pick 3 is high-frequency with a small digit space; use a lower "
-            "target, smaller trees, and a short window to avoid overfitting noise."
+            "Pick 3 has frequent, noisy draws; use shallow trees, fewer estimators, "
+            "and a larger validation share to limit overfitting."
         ),
     },
     "win4": {
         "target_accuracy": 0.84,
-        "max_iterations": 30,
-        "train_size": 0.30,
-        "n_estimators": 160,
-        "max_depth": 12,
+        "max_iterations": 12,
+        "train_size": 0.35,
+        "n_estimators": 100,
+        "max_depth": 8,
         "window_size": 2,
         "blend_step": 0.06,
         "data_limit": 0,
         "reasoning": (
-            "Win 4 is the same twice-daily digit cadence as Pick 3 with one extra "
-            "digit; keep a short window and a modest target so history noise does "
-            "not dominate."
+            "Win 4 has frequent, noisy draws; use shallow trees, fewer estimators, "
+            "and a larger validation share to limit overfitting."
         ),
     },
     "take5": {
         "target_accuracy": 0.88,
-        "max_iterations": 35,
-        "train_size": 0.25,
-        "n_estimators": 200,
-        "max_depth": 16,
+        "max_iterations": 15,
+        "train_size": 0.30,
+        "n_estimators": 140,
+        "max_depth": 10,
         "window_size": 3,
         "blend_step": 0.05,
         "data_limit": 0,
         "reasoning": (
-            "Take 5 is medium complexity with daily draws; balanced estimators "
-            "and window capture recent patterns without excess depth."
+            "Take 5 uses a moderate model with a larger validation share; stop "
+            "promoting configurations when performance no longer improves."
         ),
     },
     "powerball": {
         "target_accuracy": 0.92,
-        "max_iterations": 50,
-        "train_size": 0.20,
-        "n_estimators": 350,
-        "max_depth": 22,
+        "max_iterations": 18,
+        "train_size": 0.30,
+        "n_estimators": 180,
+        "max_depth": 12,
         "window_size": 5,
         "blend_step": 0.04,
         "data_limit": 0,
         "reasoning": (
-            "Powerball has a large primary/bonus space and fewer draws; use more "
-            "trees, deeper depth, and a longer window for sparse signal."
+            "Powerball has a large number space and fewer draws; constrain tree "
+            "depth and prefer validated gains over a higher training score."
         ),
     },
     "megamillions": {
         "target_accuracy": 0.92,
-        "max_iterations": 50,
-        "train_size": 0.20,
-        "n_estimators": 350,
-        "max_depth": 22,
+        "max_iterations": 18,
+        "train_size": 0.30,
+        "n_estimators": 180,
+        "max_depth": 12,
         "window_size": 5,
         "blend_step": 0.04,
         "data_limit": 0,
         "reasoning": (
-            "Mega Millions matches Powerball complexity and low frequency; apply "
-            "the same conservative, higher-capacity defaults."
+            "Mega Millions has a large number space and fewer draws; constrain "
+            "tree depth and prefer validated gains over a higher training score."
         ),
     },
     "pick10": {
         "target_accuracy": 0.90,
-        "max_iterations": 45,
-        "train_size": 0.25,
-        "n_estimators": 300,
-        "max_depth": 20,
+        "max_iterations": 15,
+        "train_size": 0.30,
+        "n_estimators": 160,
+        "max_depth": 10,
         "window_size": 4,
         "blend_step": 0.05,
         "data_limit": 0,
         "reasoning": (
-            "Pick 10 selects many numbers from a wide field; extra estimators and "
-            "a moderate window help model high-dimensional co-occurrence."
+            "Pick 10 selects many numbers from a wide field; limit model capacity "
+            "and keep a larger chronological validation share."
         ),
     },
     "cash4life": {
         "target_accuracy": 0.89,
-        "max_iterations": 40,
-        "train_size": 0.25,
-        "n_estimators": 250,
-        "max_depth": 18,
+        "max_iterations": 15,
+        "train_size": 0.30,
+        "n_estimators": 150,
+        "max_depth": 10,
         "window_size": 3,
         "blend_step": 0.05,
         "data_limit": 0,
         "reasoning": (
-            "Cash4Life is medium complexity with daily draws; keep near-baseline "
-            "defaults with a slight accuracy/estimator balance."
+            "Cash4Life has daily draws; use moderate model capacity and only keep "
+            "measured validation improvements."
         ),
     },
     "quickdraw": {
         "target_accuracy": 0.82,
-        "max_iterations": 25,
-        "train_size": 0.35,
-        "n_estimators": 120,
-        "max_depth": 10,
+        "max_iterations": 10,
+        "train_size": 0.40,
+        "n_estimators": 80,
+        "max_depth": 6,
         "window_size": 1,
         "blend_step": 0.08,
         "data_limit": 100_000,
         "reasoning": (
-            "Quick Draw is extremely high frequency; focus on the most recent "
-            "window, cap data volume, and use a lower target to limit overfitting."
+            "Quick Draw is extremely high frequency; use shallow trees, a short "
+            "window, capped data, and a large validation share."
         ),
     },
     "nylotto": {
         "target_accuracy": 0.91,
-        "max_iterations": 45,
-        "train_size": 0.22,
-        "n_estimators": 320,
-        "max_depth": 20,
+        "max_iterations": 16,
+        "train_size": 0.30,
+        "n_estimators": 170,
+        "max_depth": 11,
         "window_size": 4,
         "blend_step": 0.04,
         "data_limit": 0,
         "reasoning": (
-            "NY Lotto draws less often with a medium-high number space; favor "
-            "more estimators and a longer pattern window."
+            "NY Lotto draws less often with a medium-high number space; keep tree "
+            "capacity bounded and prefer reproducible validation gains."
         ),
     },
 }

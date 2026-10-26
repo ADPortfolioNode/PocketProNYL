@@ -1,5 +1,5 @@
 """
-Central storage paths for PocketPro:NYL.
+Central storage paths for PocketProNYGames.
 
 Every module resolves its on-disk locations through these helpers so one
 environment variable moves all state. Defaults match the Docker volume layout

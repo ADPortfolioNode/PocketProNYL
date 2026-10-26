@@ -1,1 +1,1 @@
-# API routes for PocketPro:NYL Project backend
+# API routes for PocketProNYGames backend

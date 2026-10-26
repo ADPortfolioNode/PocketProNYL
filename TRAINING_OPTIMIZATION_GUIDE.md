@@ -1,8 +1,10 @@
-# Game-Specific Training Optimization Guide
+# PocketProNYGames Training Profiles
 
 ## Overview
 
-The training optimization system provides game-specific default settings for ML model training, automatically optimized for each lottery game's unique characteristics. This ensures highest accuracy by considering game complexity, draw frequency, data volume, and pattern complexity.
+Per-game profiles are applied when the training API omits a parameter. Profiles bound model capacity (shallower trees, fewer estimators and attempts) and reserve a larger chronological validation share. They are starting points, not evidence that any lottery outcome is predictable.
+
+Draws are random. Training can improve backtest metrics without creating a real predictive edge, so treat accuracy targets as soft stopping goals rather than guarantees.
 
 ## How It Works
 
@@ -15,47 +17,13 @@ The optimizer analyzes each game based on:
 3. **Pattern Complexity**: Derived from number ranges and selection counts
 4. **Historical Performance**: Incorporates previous training results and accuracy metrics
 
-### Game-Specific Optimizations
+### Profile Approach
 
-#### Pick 3
-- **Characteristics**: Simple digit patterns, high frequency (2x daily)
-- **Optimization**: Lower target accuracy (85%), smaller window (2), fewer estimators (150)
-- **Reasoning**: High randomness with frequent draws - focus on recent patterns to avoid overfitting
+Profiles are maintained in `backend/utils/training_defaults.py`. Current profiles use a maximum tree depth of 12, at most 200 estimators, at most 18 attempts, and a train split of at least 30% (the remaining chronological rows are used for validation). Individual games use lower capacity where draw cadence or dataset size warrants it. The train endpoint accepts explicit parameter overrides; omitted values resolve to that game's profile and then its saved per-game recreation settings.
 
-#### Take 5  
-- **Characteristics**: Medium complexity, daily draws
-- **Optimization**: Balanced parameters (88% target, 3 window, 200 estimators)
-- **Reasoning**: Moderate complexity with daily frequency needs balanced approach
+Training accepts only improving validation rounds and stops when the target is reached or improvement patience is exhausted. Results report validation and untouched holdout scores separately. A validation-to-holdout gap of 2.0 percentage points is the overfit warning boundary. The final holdout is evaluated once after selection; it is deliberately not used to choose settings, because repeatedly tuning against it would itself overfit the holdout.
 
-#### Powerball
-- **Characteristics**: High complexity, large number space, low frequency (3x weekly)
-- **Optimization**: Higher target (92%), larger window (5), more estimators (350), deeper trees (22)
-- **Reasoning**: Complex patterns with limited data - needs deeper analysis and long-term pattern capture
-
-#### Mega Millions
-- **Characteristics**: Similar to Powerball, high complexity, low frequency (2x weekly)
-- **Optimization**: Same conservative approach as Powerball
-- **Reasoning**: Similar complexity requires robust pattern detection
-
-#### Pick 10
-- **Characteristics**: High dimensional (20 numbers from 80), daily draws
-- **Optimization**: High estimators (300), moderate window (4), 90% target
-- **Reasoning**: Large selection space needs more trees for complex pattern detection
-
-#### Cash4Life
-- **Characteristics**: Medium complexity, small bonus range, daily draws
-- **Optimization**: Balanced parameters (89% target, 3 window, 250 estimators)
-- **Reasoning**: Daily draws with medium complexity need standard optimization
-
-#### Quick Draw
-- **Characteristics**: Extremely high frequency (360+ draws/day), high randomness
-- **Optimization**: Lowest target (82%), minimal window (1), recent data only (100K limit)
-- **Reasoning**: Extremely high frequency requires focus on current patterns only
-
-#### NY Lotto
-- **Characteristics**: Medium-high complexity, weekly draws (2x weekly)
-- **Optimization**: High target (91%), larger window (4), more estimators (320)
-- **Reasoning**: Weekly draws with medium complexity need long-term pattern analysis
+The dashboard shows live validation round, evaluated draw count and provisional validation score. At completion it shows validation, untouched holdout and whether the overfit boundary was reached.
 
 ## API Integration
 
@@ -72,20 +40,20 @@ Returns optimized defaults for the specific game:
   "game": "powerball",
   "defaults": {
     "target_accuracy": 0.92,
-    "max_iterations": 50,
-    "train_size": 0.20,
-    "n_estimators": 350,
-    "max_depth": 22,
+    "max_iterations": 18,
+    "train_size": 0.30,
+    "n_estimators": 180,
+    "max_depth": 12,
     "window_size": 5,
     "auto_tune": true,
     "blend_step": 0.04
   },
   "optimized_defaults": {
     "target_accuracy": 0.92,
-    "max_iterations": 50,
-    "train_size": 0.20,
-    "n_estimators": 350,
-    "max_depth": 22,
+    "max_iterations": 18,
+    "train_size": 0.30,
+    "n_estimators": 180,
+    "max_depth": 12,
     "window_size": 5,
     "auto_tune": true,
     "blend_step": 0.04,
@@ -200,25 +168,9 @@ const data = await comparison.json();
 // data.optimized_defaults.reasoning explains the optimization logic
 ```
 
-## Performance Impact
+## Performance and Limitations
 
-### Expected Improvements
-
-Based on game characteristics, the optimization system provides:
-
-- **Pick 3**: 15-20% faster training with focused recent data
-- **Powerball/Mega Millions**: 10-15% better accuracy through deeper analysis
-- **Quick Draw**: 40-50% faster training with data limiting
-- **Daily Games**: 5-10% better accuracy through balanced parameters
-
-### Training Time Comparison
-
-| Game | Generic | Optimized | Improvement |
-|------|---------|-----------|-------------|
-| Pick 3 | 45s | 38s | 16% faster |
-| Take 5 | 3m 20s | 3m 15s | 3% faster |
-| Powerball | 8m 30s | 9m 45s | 15% slower (but more accurate) |
-| Quick Draw | 12m | 6m 30s | 46% faster |
+The bounded profiles are intended to reduce unnecessary capacity and overfitting risk. They do not guarantee shorter runs or higher accuracy; runtime depends on data size and hardware. Because lottery draws are random, a better historical score does not establish a future edge.
 
 ## Configuration
 
@@ -334,11 +286,4 @@ To validate optimization effectiveness:
 
 ## Conclusion
 
-The game-specific training optimization system provides a robust, data-driven approach to ML model training for lottery prediction. By considering each game's unique characteristics, it delivers optimal performance while maintaining flexibility for manual adjustments when needed.
-
-The system is designed to be:
-- **Automatic**: No manual configuration needed for standard use
-- **Transparent**: Clear reasoning for each optimization decision
-- **Flexible**: Easy to override or extend for specific needs
-- **Measurable**: Built-in comparison and validation tools
-- **Maintainable**: Clean separation of concerns and well-documented code
+Use the per-game profile as a conservative default, monitor validation and holdout separately, and do not interpret training metrics as improved lottery odds.

@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions
-title PocketPro:NYL - Starting
+title PocketProNYGames - Starting
 
 cd /d "%~dp0"
 if not exist "docker-compose.yml" (
@@ -11,7 +11,7 @@ if not exist "docker-compose.yml" (
 
 echo.
 echo ============================================================
-echo   PocketPro:NYL - Starting
+echo   PocketProNYGames - Starting
 echo ============================================================
 echo.
 
@@ -34,7 +34,7 @@ if exist ".env" (
     echo.
 )
 
-echo [START] Docker check and PocketPro:NYL stack startup via PowerShell ...
+echo [START] Docker check and PocketProNYGames stack startup via PowerShell ...
 if not exist "%~dp0start-windows.ps1" (
     echo [ERROR] Missing start-windows.ps1 in %~dp0
     goto :fail
@@ -55,7 +55,7 @@ if errorlevel 1 (
 
 echo.
 echo ============================================================
-echo   PocketPro:NYL is running.
+echo   PocketProNYGames is running.
 echo   Open:  http://127.0.0.1:3000
 echo   Stop:  StopPocketProNYL.bat
 echo ============================================================

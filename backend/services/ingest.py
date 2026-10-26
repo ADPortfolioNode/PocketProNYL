@@ -83,7 +83,7 @@ class IngestService:
         # how other games' draws were stored and trained as Take 5.
         self.enable_catalog_fallback = os.getenv("INGEST_ENABLE_CATALOG_FALLBACK", "1") == "1"
         self.fallback_on_empty = os.getenv("INGEST_FALLBACK_ON_EMPTY", "1") == "1"
-        self.max_catalog_candidates = int(os.getenv("INGEST_MAX_CATALOG_CANDIDATES", "3")) # PocketPro:NYL Project
+        self.max_catalog_candidates = int(os.getenv("INGEST_MAX_CATALOG_CANDIDATES", "3")) # PocketProNYGames project
         self.max_id_preload = int(os.getenv("INGEST_MAX_ID_PRELOAD", "5000")) # Lowered from 15000 to prevent OOM on large collections
         self.skip_fetch_threshold = int(os.getenv("INGEST_SKIP_FETCH_THRESHOLD", "50000"))
         self.batch_max_retries = int(os.getenv("INGEST_BATCH_MAX_RETRIES", "2"))

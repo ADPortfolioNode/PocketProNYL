@@ -1,4 +1,4 @@
-/** Shared training payload + result formatting for PocketPro:NYL dashboards. */
+/** Shared training payload + result formatting for PocketProNYGames dashboards. */
 
 import { parseExperimentTimestampMs } from './timestampUtils';
 
@@ -242,7 +242,7 @@ export function formatTrainingErrorMessage(error, formatApiError) {
       'Backend unavailable during training (HTTP '
       + (status || '502')
       + '). The API container may have restarted or run out of memory on large games like Powerball. '
-      + 'Wait 30s, check docker logs for pocketpro_nyl_backend, then retry with Target Accuracy 85% to 90%, '
+      + 'Wait 30s, check docker logs for pocketpro_nygames_backend, then retry with Target Accuracy 85% to 90%, '
       + 'Max Iterations 10 to 12, N Estimators 150, and Auto-tune off. '
       + 'Also confirm a completed experiment was not already saved.'
     );

@@ -86,6 +86,7 @@ class TrainerService:
                     "data_limit",
                     "window_size",
                     "auto_tune",
+                    "overfit_gap_limit_percent",
                 )
                 if key in defaults
             }
@@ -101,6 +102,7 @@ class TrainerService:
                 "data_limit": 0,
                 "window_size": 3,
                 "auto_tune": True,
+                "overfit_gap_limit_percent": 2.0,
             }
 
     @staticmethod
@@ -852,7 +854,7 @@ class TrainerService:
             training_target=training_target,
         )
 
-    def train_model(self, game: str):
+    def train_model(self, game: str, progress_callback=None):
         if self._uses_modular_engine():
             from services.prediction_adapter import prediction_adapter
 
@@ -862,6 +864,7 @@ class TrainerService:
                 game,
                 refresh_only=refresh_only,
                 baseline_accuracy=baseline,
+                progress_callback=progress_callback,
             )
 
         from .chroma_client import chroma_client
@@ -1309,7 +1312,7 @@ class TrainerService:
             "best_training_params": best_training_params,
         }
 
-    def train(self, game: str, *args, **kwargs):
+    def train(self, game: str, *args, progress_callback=None, **kwargs):
         """Train one game with its own knobs, then restore the shared defaults.
 
         The module-level ``trainer_service`` is shared by every game. Per-game
@@ -1320,7 +1323,12 @@ class TrainerService:
         with self._train_lock:
             saved = {name: getattr(self, name) for name in _PER_RUN_KNOBS if hasattr(self, name)}
             try:
-                return self._train_game(game, *args, **kwargs)
+                return self._train_game(
+                    game,
+                    *args,
+                    progress_callback=progress_callback,
+                    **kwargs,
+                )
             finally:
                 for name, value in saved.items():
                     setattr(self, name, value)
@@ -1338,6 +1346,7 @@ class TrainerService:
         data_limit: int = None,
         window_size: int = None,
         auto_tune: bool = None,
+        progress_callback=None,
     ):
         """Backward-compatible alias used by API routes and tooling."""
         import logging
@@ -1445,7 +1454,7 @@ class TrainerService:
                 return 0
 
         def _precision_first_defaults(record_count: int) -> dict:
-            defaults = self.get_training_defaults()
+            defaults = self.get_training_defaults(game_key)
             baseline = self._load_stored_baseline(game_key)
             if record_count > 3000:
                 n_estimators = 120
@@ -1900,7 +1909,7 @@ class TrainerService:
             )
 
             existing_leaderboard = _load_existing_leaderboard()
-            result = self.train_model(game_key)
+            result = self.train_model(game_key, progress_callback=progress_callback)
 
             if self._uses_modular_engine() and str(result.get("status", "")).lower() == "success":
                 result = self._enrich_modular_train_result(result, record_before=record_baseline)

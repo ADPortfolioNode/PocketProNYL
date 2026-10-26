@@ -7,7 +7,7 @@ export default function Header() {
       <div className="header-content">
         <div className="logo-section">
           <h1 className="app-title">
-            <span className="title-accent">⚡</span> PocketPro:NYL
+            <span className="title-accent">⚡</span> PocketProNYGames
           </h1>
           <p className="app-subtitle">AI-Powered NY Lottery Data Analysis &amp; Suggestions</p>
         </div>

@@ -118,6 +118,8 @@ HONEST_METRIC_KEYS: tuple[str, ...] = (
     "best_round_accuracy_is_optimistic",
     "best_round_accuracy_label",
     "overfit_gap_percent",
+    "overfit_boundary_percent",
+    "overfit_boundary_reached",
     "holdout_lift_vs_random",
     "holdout_p_value",
     "holdout_p_value_method",
@@ -380,6 +382,9 @@ def walk_forward_backtest(
         payload = {
             "evaluated": evaluated,
             "round": rounds_run,
+            "max_rounds": max_rounds,
+            "validation_draws": max(0, holdout_start - test_start),
+            "phase": "validation",
             "accuracy_percent": current_percent,
             "highest_accuracy_percent": (
                 highest_suggestion.get("accuracy_percent") if highest_suggestion else None
@@ -779,6 +784,10 @@ def walk_forward_backtest(
         "validation_accuracy_percent": round(validation_accuracy * 100, 2),
         "validation_metrics": validation_metrics,
         "overfit_gap_percent": overfit_gap,
+        "overfit_boundary_percent": OVERFIT_GAP_WARN_PERCENT,
+        "overfit_boundary_reached": bool(
+            overfit_gap is not None and overfit_gap >= OVERFIT_GAP_WARN_PERCENT
+        ),
         "trials_tested": rounds_run,
         "overfit_warning": bool(warning_reasons),
         "overfit_warning_reasons": warning_reasons,

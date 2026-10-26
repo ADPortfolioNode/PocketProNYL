@@ -1,5 +1,5 @@
 {
-  "name": "pocketpro-nyl-frontend",
+  "name": "pocketpro-nygames-frontend",
   "version": "0.1.0",
   "private": true,
   "dependencies": {
@@ -32,11 +32,11 @@
       "last 1 safari version"
     ]
   },
-  "description": "PocketPro:NYL Suggestion RAG",
+  "description": "PocketProNYGames Suggestion RAG",
   "main": "index.js",
   "repository": {
     "type": "git",
-    "url": "PocketPro:NYL  Suggestion RAG"
+    "url": "PocketProNYGames Suggestion RAG"
   },
   "author": "deoism",
   "license": "ISC"

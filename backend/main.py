@@ -1,4 +1,4 @@
-"""PocketPro:NYL FastAPI bootstrap."""
+"""PocketProNYGames FastAPI bootstrap."""
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,7 +29,7 @@ async def lifespan(app: FastAPI):
     import asyncio
     import os
 
-    print("PocketPro:NYL backend starting up...", flush=True)
+    print("PocketProNYGames backend starting up...", flush=True)
     # Mark ready first so /api/health responds even if ingest/LM work is slow.
     health.APP_IS_READY = True
     install_capped_fetch(ingest_service)
@@ -40,7 +40,7 @@ async def lifespan(app: FastAPI):
     else:
         print("SKIP_STARTUP_INGEST=1 — background ingest not started", flush=True)
     yield
-    print("PocketPro:NYL backend shutting down...", flush=True)
+    print("PocketProNYGames backend shutting down...", flush=True)
 
 
 app = FastAPI(lifespan=lifespan)

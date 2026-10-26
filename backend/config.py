@@ -5,7 +5,7 @@ class Settings(BaseSettings):
     """
     Centralized configuration for the application.
     """
-    PROJECT_NAME: str = "PocketPro:NYL Project"
+    PROJECT_NAME: str = "PocketProNYGames"
     
     # OpenAI
     OPENAI_API_KEY: str | None = None
@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     GROK_MODEL: str = "grok-3-mini-beta"
     
     # ChromaDB
-    CHROMA_HOST: str = "pocketpro_nyl_chroma" # Ensure consistent naming
+    CHROMA_HOST: str = "pocketpro_nygames_chroma" # Ensure consistent naming
     CHROMA_PORT: int = 8000
 
     # Production: comma-separated origins, e.g. https://mensa.example.com

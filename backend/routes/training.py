@@ -25,14 +25,14 @@ exp_store = ExperimentStore(experiments_file())
 
 class TrainingRequest(BaseModel):
     game: str
-    target_accuracy: float = Field(default=0.90, ge=0.5, le=0.99)
-    max_iterations: int = Field(default=40, ge=1, le=100)
-    train_size: float = Field(default=0.25, ge=0.10, le=0.50)
-    n_estimators: int = Field(default=250, ge=50, le=600)
-    max_depth: int = Field(default=18, ge=4, le=32)
-    random_state: int = Field(default=42, ge=0)
-    window_size: int = Field(default=3, ge=1, le=8)
-    auto_tune: bool = True
+    target_accuracy: float | None = Field(default=None, ge=0.5, le=0.99)
+    max_iterations: int | None = Field(default=None, ge=1, le=100)
+    train_size: float | None = Field(default=None, ge=0.10, le=0.50)
+    n_estimators: int | None = Field(default=None, ge=50, le=600)
+    max_depth: int | None = Field(default=None, ge=4, le=32)
+    random_state: int | None = Field(default=None, ge=0)
+    window_size: int | None = Field(default=None, ge=1, le=8)
+    auto_tune: bool | None = None
     blend_step: float | None = Field(default=None, ge=0.01, le=0.5)
 
     @field_validator("target_accuracy", mode="before")
@@ -47,14 +47,14 @@ class TrainingRequest(BaseModel):
 
 class TrainAllRequest(BaseModel):
     games: list[str] | None = None
-    target_accuracy: float = Field(default=0.90, ge=0.5, le=0.99)
-    max_iterations: int = Field(default=40, ge=1, le=100)
-    train_size: float = Field(default=0.25, ge=0.10, le=0.50)
-    n_estimators: int = Field(default=250, ge=50, le=600)
-    max_depth: int = Field(default=18, ge=4, le=32)
-    random_state: int = Field(default=42, ge=0)
-    window_size: int = Field(default=3, ge=1, le=8)
-    auto_tune: bool = True
+    target_accuracy: float | None = Field(default=None, ge=0.5, le=0.99)
+    max_iterations: int | None = Field(default=None, ge=1, le=100)
+    train_size: float | None = Field(default=None, ge=0.10, le=0.50)
+    n_estimators: int | None = Field(default=None, ge=50, le=600)
+    max_depth: int | None = Field(default=None, ge=4, le=32)
+    random_state: int | None = Field(default=None, ge=0)
+    window_size: int | None = Field(default=None, ge=1, le=8)
+    auto_tune: bool | None = None
 
 
 def _dataset_snapshot(game: str) -> dict:
@@ -206,7 +206,7 @@ def _training_data_status(game_key: str, *, incremental: dict | None = None) -> 
     }
 
 
-def _run_trainer(game_key: str, request: TrainingRequest):
+def _run_trainer(game_key: str, request: TrainingRequest, progress_callback=None):
     if hasattr(trainer_service, "train"):
         return trainer_service.train(
             game_key,
@@ -219,6 +219,7 @@ def _run_trainer(game_key: str, request: TrainingRequest):
             blend_step=request.blend_step,
             window_size=request.window_size,
             auto_tune=request.auto_tune,
+            progress_callback=progress_callback,
         )
     if hasattr(trainer_service, "train_model"):
         trainer_service.configure_training(
@@ -232,7 +233,7 @@ def _run_trainer(game_key: str, request: TrainingRequest):
             auto_tune=request.auto_tune,
             blend_step=request.blend_step,
         )
-        return trainer_service.train_model(game_key)
+        return trainer_service.train_model(game_key, progress_callback=progress_callback)
     raise RuntimeError("TrainerService is missing train/train_model methods")
 
 
@@ -386,14 +387,45 @@ def _post_train_optimize(game_key: str, train_result: dict) -> dict:
         "holdout_p_value": optimized.get("holdout_p_value"),
         "trials_tested": optimized.get("trials_tested"),
         "overfit_warning": optimized.get("overfit_warning"),
+        "overfit_boundary_percent": optimized.get("overfit_boundary_percent"),
+        "overfit_boundary_reached": optimized.get("overfit_boundary_reached"),
     }
+    for key in (
+        "holdout_accuracy_percent",
+        "validation_accuracy_percent",
+        "overfit_gap_percent",
+        "overfit_boundary_percent",
+        "overfit_boundary_reached",
+        "overfit_warning",
+    ):
+        train_result[key] = optimized.get(key)
     train_result["message"] = (train_result.get("message") or "Training completed.") + extra
     return train_result
 
 
 def _training_worker(game_key: str, request: TrainingRequest):
     try:
-        result = _run_trainer(game_key, request)
+        def publish_progress(metrics: dict):
+            max_rounds = max(1, int(metrics.get("max_rounds") or 1))
+            validation_draws = max(1, int(metrics.get("validation_draws") or 1))
+            completed = max(0, int(metrics.get("evaluated") or 0))
+            planned = max_rounds * validation_draws
+            progress = min(90, max(1, int(completed / planned * 90)))
+            round_number = int(metrics.get("round") or 0)
+            message = (
+                f"Validating round {round_number}/{max_rounds}: "
+                f"{completed} draw(s) evaluated."
+            )
+            set_job(game_key, {
+                **get_job(game_key),
+                "status": "running",
+                "phase": "validation",
+                "progress": progress,
+                "message": message,
+                "training_metrics": metrics,
+            })
+
+        result = _run_trainer(game_key, request, progress_callback=publish_progress)
         status = str((result or {}).get("status") or "").lower()
         if status in ("success", "completed", "ok"):
             try:
@@ -419,9 +451,26 @@ def _is_all_training_scope(value: str | None) -> bool:
     return token in _ALL_SCOPE_TOKENS or compact in {"all", "allgames"}
 
 
-def _training_request_for_game(game_key: str) -> TrainingRequest:
+def _training_request_for_game(
+    game_key: str,
+    overrides: dict | None = None,
+) -> TrainingRequest:
     defaults = trainer_service.get_training_defaults(game_key) or {}
-    payload = {}
+    incremental = trainer_service.get_incremental_training_context(
+        game_key,
+        requested_target=defaults.get("target_accuracy"),
+    )
+    payload = {
+        key: value
+        for key, value in (incremental.get("recreate_defaults") or {}).items()
+        if value is not None
+    }
+    payload = {**defaults, **payload}
+    payload.update({
+        key: value
+        for key, value in (overrides or {}).items()
+        if key != "game" and value is not None
+    })
     for field_name in (
         "target_accuracy",
         "max_iterations",
@@ -433,12 +482,15 @@ def _training_request_for_game(game_key: str) -> TrainingRequest:
         "auto_tune",
         "blend_step",
     ):
-        if defaults.get(field_name) is not None:
-            payload[field_name] = defaults[field_name]
+        if payload.get(field_name) is None:
+            payload.pop(field_name, None)
     return TrainingRequest(game=game_key, **payload)
 
 
-def enqueue_training_games(games: list[str] | None = None) -> dict:
+def enqueue_training_games(
+    games: list[str] | None = None,
+    overrides: dict | None = None,
+) -> dict:
     """Queue one or more games for background training and return immediately."""
     if not games or (len(games) == 1 and _is_all_training_scope(games[0])):
         targets = list(GAME_CONFIGS.keys())
@@ -459,7 +511,7 @@ def enqueue_training_games(games: list[str] | None = None) -> dict:
 
     def _run_queue():
         for game_key in queued:
-            request = _training_request_for_game(game_key)
+            request = _training_request_for_game(game_key, overrides)
             set_job(game_key, {
                 "status": "running",
                 "message": "Training in progress",
@@ -581,6 +633,10 @@ async def get_train_status(game: str = None):
 async def train_model(request: TrainingRequest):
     try:
         game_key = _require_game_key(request.game)
+        request = _training_request_for_game(
+            game_key,
+            request.model_dump(exclude={"game"}),
+        )
         if is_running(game_key):
             job = get_job(game_key)
             return {"status": "already_running", "game": game_key, "message": "Training already in progress.", **job}
@@ -612,21 +668,13 @@ async def train_model(request: TrainingRequest):
 @router.post("/api/train_all")
 async def train_all_models(request: TrainAllRequest):
     try:
-        trainer_service.configure_training(
-            target_accuracy=request.target_accuracy,
-            max_iterations=request.max_iterations,
-            train_size=request.train_size,
-            n_estimators=request.n_estimators,
-            max_depth=request.max_depth,
-            random_state=request.random_state,
-            window_size=request.window_size,
-            auto_tune=request.auto_tune,
-        )
-
         game_keys = None
         if request.games:
             game_keys = [_require_game_key(game) for game in request.games]
 
-        return enqueue_training_games(game_keys)
+        return enqueue_training_games(
+            game_keys,
+            request.model_dump(exclude={"games"}, exclude_none=True),
+        )
     except Exception as e:
         return {"status": "error", "message": str(e)}

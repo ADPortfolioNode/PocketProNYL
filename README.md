@@ -1,4 +1,4 @@
-# PocketPro:NYL Predictive RAG
+# PocketProNYGames
 
 Lottery data pipeline with ingestion, model training, suggestions, and optional AI chat (Gemini, OpenAI, Grok). Stack: **React** frontend, **FastAPI** backend, **ChromaDB** vector store — Docker Compose.
 
@@ -39,7 +39,7 @@ Or: `./start.sh --build`
 If APIs fail from the UI:
 
 - `REACT_APP_API_BASE=` (empty) in `.env`
-- `CHROMA_HOST=pocketpro_nyl_chroma`
+- `CHROMA_HOST=pocketpro_nygames_chroma`
 - scripts/tests use `http://127.0.0.1:5001`
 
 Do not commit `.env`.
@@ -71,4 +71,4 @@ DATA_DIR=/tmp/pocketpro-data python -m pytest -q tests
 
 Proprietary, all rights reserved. See `LICENSE`.
 
-PocketPro:NYL is statistical analysis for entertainment only. Lottery draws are random and no tool can predict or improve the odds. Not affiliated with the New York Lottery or the New York State Gaming Commission. 18+. Gambling problem? Call 1-877-8-HOPENY.
+PocketProNYGames is statistical analysis for entertainment only. Lottery draws are random and no tool can predict or improve the odds. Not affiliated with the New York Lottery or the New York State Gaming Commission. 18+. Gambling problem? Call 1-877-8-HOPENY.

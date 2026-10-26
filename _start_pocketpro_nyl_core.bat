@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions
-title PocketProNYL - Starting
+title PocketProNYGames - Starting
 
 cd /d "%~dp0"
 if not exist "docker-compose.yml" (
@@ -11,7 +11,7 @@ if not exist "docker-compose.yml" (
 
 echo.
 echo ============================================================
-echo   PocketProNYL - Starting
+echo   PocketProNYGames - Starting
 echo ============================================================
 echo.
 
@@ -45,7 +45,7 @@ if exist ".env" (
 :env_ready
 
 echo.
-echo [START] Docker check and PocketProNYL stack startup via PowerShell ...
+echo [START] Docker check and PocketProNYGames stack startup via PowerShell ...
 if exist ".env" (
     findstr /B /C:"POCKETPRO_NYL_REGISTRY=pocketpro-nyl-local" ".env" >nul 2>&1 # Renamed registry variable
     if not errorlevel 1 (
@@ -85,7 +85,7 @@ if errorlevel 1 (
 
 echo.
 echo ============================================================
-echo   PocketProNYL is running. Your browser should open automatically.
+echo   PocketProNYGames is running. Your browser should open automatically.
 echo   If not, open:  http://127.0.0.1:3000
 echo   To stop:      StopPocketProNYL.bat
 echo ============================================================

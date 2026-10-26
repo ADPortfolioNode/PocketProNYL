@@ -1,8 +1,8 @@
-# PocketPro:NYL Optimized Deployment Guide
+# PocketProNYGames Optimized Deployment Guide
 
 ## Overview
 
-This guide explains the optimized architecture and deployment workflow for PocketPro:NYL with industry-standard practices for consistency, reliability, and maintainability.
+This guide explains the optimized architecture and deployment workflow for PocketProNYGames with industry-standard practices for consistency, reliability, and maintainability.
 
 ## Architecture Improvements
 

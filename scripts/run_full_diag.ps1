@@ -1,4 +1,4 @@
-# Full PocketPro:NYL stack diagnostic + recovery (Windows PowerShell)
+# Full PocketProNYGames stack diagnostic + recovery (Windows PowerShell)
 $ErrorActionPreference = "Continue"
 $ProjectRoot = "E:\2024 RESET\PocketProNYL"
 $LogFile = Join-Path $ProjectRoot "diag_output.log"
@@ -110,7 +110,7 @@ foreach ($c in $checks) {
 }
 
 Write-Log "backend logs (tail 20):"
-docker logs pocketpro_nyl_backend --tail 20 2>&1 | ForEach-Object { Write-Log $_ }
+docker logs pocketpro_nygames_backend --tail 20 2>&1 | ForEach-Object { Write-Log $_ }
 
 # Quick predict probe (pick3 is fast)
 try {

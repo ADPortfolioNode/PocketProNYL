@@ -214,6 +214,7 @@ class PredictionAdapter:
         *,
         refresh_only: bool = False,
         baseline_accuracy: float | None = None,
+        progress_callback=None,
     ) -> dict:
         """Run walk-forward backtest and persist readiness marker."""
         if game not in GAME_CONFIGS:
@@ -263,7 +264,7 @@ class PredictionAdapter:
             }
 
         try:
-            metrics = self.engine.backtest(game)
+            metrics = self.engine.backtest(game, progress_callback=progress_callback)
         except Exception as exc:
             return {"status": "error", "message": str(exc)}
 

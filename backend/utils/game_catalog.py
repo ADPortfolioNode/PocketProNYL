@@ -1,5 +1,5 @@
 """
-Dynamic game catalog for PocketPro:NYL.
+Dynamic game catalog for PocketProNYGames.
 
 Builds the API-facing game list from GAME_CONFIGS / titles / schedules /
 prediction formats, enriched with live (or cached) draw counts and

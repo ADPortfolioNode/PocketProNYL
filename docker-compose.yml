@@ -1,9 +1,9 @@
-# PocketProNYL local stack
+# PocketProNYGames local stack
 # Publish on 0.0.0.0 so Docker Desktop (Windows/WSL2) creates a real host listener.
 
 services:
   backend:
-    container_name: pocketpro_nyl_backend
+    container_name: pocketpro_nygames_backend
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -27,7 +27,7 @@ services:
       - AUTH_MODE=${AUTH_MODE:-off}
       - API_KEYS=${API_KEYS:-}
       - ADMIN_API_KEYS=${ADMIN_API_KEYS:-}
-      - CHROMA_HOST=pocketpro_nyl_chroma
+      - CHROMA_HOST=pocketpro_nygames_chroma
       - HF_HOME=/app/.cache/chroma
       - CHROMA_PORT=8000
       - INGEST_STARTUP_COUNT_WORKERS=1
@@ -47,7 +47,7 @@ services:
       - backend_data:/data
       - chroma_model_cache:/app/.cache/chroma
     networks:
-      - pocketpro-nyl-net
+      - pocketpro-nygames-net
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1',5000),2); s.close()"]
       interval: 15s
@@ -65,7 +65,7 @@ services:
         NODE_VERSION: 22.13.1
         REACT_APP_API_BASE: ""
         CACHE_BUSTER: ${FRONTEND_CACHE_BUSTER:-20260826a}
-    container_name: pocketpro_nyl_frontend
+    container_name: pocketpro_nygames_frontend
     ports:
       - "${DOCKER_BIND_HOST:-0.0.0.0}:${FRONTEND_HOST_PORT:-3000}:80"
     depends_on:
@@ -75,7 +75,7 @@ services:
       - HOME=/app
       - REACT_APP_API_BASE=
     networks:
-      - pocketpro-nyl-net
+      - pocketpro-nygames-net
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
       interval: 15s
@@ -86,7 +86,7 @@ services:
 
   chroma:
     image: chromadb/chroma:0.5.3
-    container_name: pocketpro_nyl_chroma
+    container_name: pocketpro_nygames_chroma
     environment:
       - IS_PERSISTENT=TRUE
       - ANONYMIZED_TELEMETRY=FALSE
@@ -101,11 +101,11 @@ services:
       retries: 10
       start_period: 30s
     networks:
-      - pocketpro-nyl-net
+      - pocketpro-nygames-net
     restart: on-failure
 
 networks:
-  pocketpro-nyl-net:
+  pocketpro-nygames-net:
     driver: bridge
 
 volumes:

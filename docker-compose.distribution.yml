@@ -1,5 +1,5 @@
 # =============================================================================
-# PocketPro:NYL — Production distribution stack (web server / subscribing customers)
+# PocketProNYGames — Production distribution stack (web server / subscribing customers)
 # =============================================================================
 # Uses pre-built images from GHCR (or your registry). Backend + Chroma stay on
 # the internal network; only Caddy (HTTPS) or frontend (direct) is published.
@@ -13,12 +13,12 @@
 #   CADDY_PROFILE=subscribers ./scripts/deploy-production.sh
 # =============================================================================
 
-name: pocketpro-nyl
+name: pocketpro-nygames
 
 x-backend-environment: &backend-environment
   DATA_DIR: /data
   CHROMA_SDK_ENABLED: "1"
-  CHROMA_HOST: pocketpro_nyl_chroma
+  CHROMA_HOST: pocketpro_nygames_chroma
   CHROMA_PORT: "8000"
   CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
   GEMINI_API_KEY: ${GEMINI_API_KEY:-}
@@ -59,12 +59,12 @@ x-backend-environment: &backend-environment
 services:
   backend:
     image: ${POCKETPRO_NYL_REGISTRY:-ghcr.io/adportfolionode}/pocketpro-nyl-backend:${POCKETPRO_NYL_VERSION:-latest}
-    container_name: pocketpro_nyl_backend
+    container_name: pocketpro_nygames_backend
     environment: *backend-environment
     volumes:
       - backend_data:/data
     networks:
-      - pocketpro-nyl-net
+      - pocketpro-nygames-net
     depends_on:
       chroma:
         condition: service_healthy
@@ -88,11 +88,11 @@ services:
 
   frontend:
     image: ${POCKETPRO_NYL_REGISTRY:-ghcr.io/adportfolionode}/pocketpro-nyl-frontend:${POCKETPRO_NYL_VERSION:-latest}
-    container_name: pocketpro_nyl_frontend
+    container_name: pocketpro_nygames_frontend
     expose:
       - "80"
     networks:
-      - pocketpro-nyl-net
+      - pocketpro-nygames-net
     depends_on:
       backend:
         condition: service_healthy
@@ -106,7 +106,7 @@ services:
 
   chroma:
     image: chromadb/chroma:0.5.3
-    container_name: pocketpro_nyl_chroma
+    container_name: pocketpro_nygames_chroma
     environment:
       IS_PERSISTENT: "TRUE"
       ANONYMIZED_TELEMETRY: "FALSE"
@@ -115,7 +115,7 @@ services:
     volumes:
       - chroma_data:/chroma/chroma
     networks:
-      - pocketpro-nyl-net
+      - pocketpro-nygames-net
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
       interval: 30s
@@ -131,7 +131,7 @@ services:
   # TLS termination + optional subscriber basic auth (recommended for public web)
   caddy:
     image: caddy:2-alpine
-    container_name: pocketpro_nyl_caddy
+    container_name: pocketpro_nygames_caddy
     profiles: ["tls"]
     ports:
       - "80:80"
@@ -146,14 +146,14 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     networks:
-      - pocketpro-nyl-net
+      - pocketpro-nygames-net
     depends_on:
       frontend:
         condition: service_healthy
     restart: unless-stopped
 
 networks:
-  pocketpro-nyl-net:
+  pocketpro-nygames-net:
     driver: bridge
 
 volumes:

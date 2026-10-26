@@ -142,6 +142,11 @@ def test_retries_on_random_data_inflate_validation_but_holdout_stays_honest():
         )
         assert result["accuracy_source"] == "holdout"
         assert result["accuracy_percent"] == result["holdout_accuracy_percent"]
+        assert result["overfit_boundary_percent"] == 2.0
+        assert result["overfit_boundary_reached"] == (
+            result["overfit_gap_percent"] is not None
+            and result["overfit_gap_percent"] >= result["overfit_boundary_percent"]
+        )
         assert result["best_round_accuracy_percent"] >= result["validation_accuracy_percent"] - 1e-9
         lifts.append(result["holdout_lift_vs_random"])
         p_values.append(result["holdout_p_value"])

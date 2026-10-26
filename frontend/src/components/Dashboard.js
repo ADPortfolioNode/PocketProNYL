@@ -308,6 +308,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
   const [trainErrorMessage, setTrainErrorMessage] = useState('');
   const [trainProgress, setTrainProgress] = useState(0);
   const [trainStartTime, setTrainStartTime] = useState(null);
+  const [trainTelemetry, setTrainTelemetry] = useState(null);
   const [games, setGames] = useState([]);
   const [gameTitles, setGameTitles] = useState({});
   const [gameCatalog, setGameCatalog] = useState([]);
@@ -1073,10 +1074,9 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
     setTrainPhase('fit');
     setTrainErrorMessage('');
     setTrainProgress(0);
+    setTrainTelemetry(null);
     setTrainStartTime(Date.now());
     setExpandedCard('train');
-    
-    const interval = setInterval(() => setTrainProgress(p => Math.min(p + 5, 95)), 2000);
     try {
       const response = { data: await runTrainingJob(
         axios,
@@ -1087,6 +1087,15 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
         }),
         {
           onStatus: (job) => {
+            const metrics = job?.training_metrics;
+            if (metrics) {
+              setTrainTelemetry({
+                game: job.game || selectedTrainGame,
+                message: job.message,
+                metrics,
+              });
+              setTrainProgress((current) => Math.max(current, Number(job.progress) || 0));
+            }
             if (String(job?.phase || '').toLowerCase() === 'optimize_weights') {
               setTrainPhase('optimize_weights');
               setTrainProgress((p) => Math.max(p, 96));
@@ -1094,11 +1103,15 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
           },
         },
       ) };
-      clearInterval(interval); // Clear interval regardless of outcome
       setTrainProgress(100);
       if (isTrainSuccessStatus(response?.data?.status)) {
         setTrainStatus('completed');
         setTrainPhase('completed');
+        setTrainTelemetry({
+          game: selectedTrainGame,
+          message: response.data.message,
+          metrics: response.data,
+        });
         setTrainErrorMessage('');
         setSummaryRefreshKey((prev) => prev + 1);
         // Refresh experiments
@@ -1142,7 +1155,6 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
         alert(`Training failed: ${response.data.error || response.data.message}`);
       }
     } catch (e) {
-      clearInterval(interval);
       setTrainStatus('error');
       setTrainPhase('error');
       setTrainProgress(0);
@@ -1178,9 +1190,9 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
     setTrainPhase('fit');
     setTrainErrorMessage('');
     setTrainProgress(0);
+    setTrainTelemetry(null);
     setTrainStartTime(Date.now());
     setExpandedCard('train');
-    const interval = setInterval(() => setTrainProgress((p) => Math.min(p + 2, 95)), 2500);
     try {
       const sample = buildTrainRequestBody(gamesWithDraws[0], {
         ...trainParams,
@@ -1190,6 +1202,16 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
       const response = {
         data: await runTrainAllJobs(axios, API_BASE, { ...allBody, games: gamesWithDraws }, {
           onStatus: (job) => {
+            const activeJob = (job?.jobs || []).find((item) => item?.training_metrics)
+              || (job?.jobs || []).find((item) => ['running', 'queued'].includes(String(item?.status || '').toLowerCase()));
+            if (activeJob?.training_metrics) {
+              setTrainTelemetry({
+                game: activeJob.game,
+                message: activeJob.message,
+                metrics: activeJob.training_metrics,
+              });
+              setTrainProgress((current) => Math.max(current, Number(activeJob.progress) || 0));
+            }
             if (String(job?.phase || '').toLowerCase() === 'optimize_weights') {
               setTrainPhase('optimize_weights');
               setTrainProgress((p) => Math.max(p, 96));
@@ -1197,11 +1219,15 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
           },
         }),
       };
-      clearInterval(interval);
       setTrainProgress(100);
       if (isTrainSuccessStatus(response?.data?.status)) {
         setTrainStatus('completed');
         setTrainPhase('completed');
+        setTrainTelemetry({
+          game: 'all games',
+          message: response.data.message,
+          metrics: response.data,
+        });
         setTrainErrorMessage('');
         setSummaryRefreshKey((prev) => prev + 1);
         try {
@@ -1221,7 +1247,6 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
         alert(`Train all failed: ${response.data.error || response.data.message}`);
       }
     } catch (e) {
-      clearInterval(interval);
       setTrainStatus('error');
       setTrainPhase('error');
       setTrainProgress(0);
@@ -1455,7 +1480,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
       <section className="hero-split">
         <div className="hero-copy">
           <p className="magazine-badge">New York Lottery workspace</p>
-          <h1>PocketPro:NYL Concierge</h1>
+          <h1>PocketProNYGames Concierge</h1>
           <p className="lead">
             Ask about Take 5, Pick 3, Powerball, Mega Millions, and the rest of the NYL slate. RAG grounds answers in ingested draw history.
           </p>
@@ -1946,17 +1971,53 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
               </div>
             </div>
 
-            {trainStatus === 'in progress' && (
+            {(trainStatus === 'in progress' || trainStatus === 'completed') && (
               <div className="mb-3">
                 <ProgressiveProgressBar
                   current={trainProgress}
                   total={100}
-                  status="active"
+                  status={trainStatus === 'completed' ? 'completed' : 'active'}
                   label={trainPhase === 'optimize_weights' ? 'Verify + rebalance weights' : 'Training Progress'}
-                  showMetadata={true}
+                  showMetadata={trainStatus === 'in progress'}
                   startTime={trainStartTime}
                   colorScheme="success"
                 />
+                <div className="training-live-status" aria-live="polite">
+                  {trainTelemetry ? (
+                    <>
+                      <strong>{String(trainTelemetry.game || selectedTrainGame || '').toUpperCase()}</strong>
+                      <span>{trainTelemetry.message || 'Evaluating chronological validation draws.'}</span>
+                      <span>
+                        Round {trainTelemetry.metrics.round || 0}/{trainTelemetry.metrics.max_rounds || '?'}
+                        {' · '}
+                        {trainTelemetry.metrics.evaluated || 0} validation draw(s)
+                      </span>
+                      {trainStatus === 'in progress' && trainTelemetry.metrics.accuracy_percent != null && (
+                        <span>
+                          Provisional validation score: {Number(trainTelemetry.metrics.accuracy_percent).toFixed(1)}%
+                          {' · '}final holdout score is measured separately
+                        </span>
+                      )}
+                      {trainStatus === 'completed' && trainTelemetry.metrics.validation_accuracy_percent != null && (
+                        <span>
+                          Validation: {Number(trainTelemetry.metrics.validation_accuracy_percent).toFixed(1)}%
+                          {trainTelemetry.metrics.holdout_accuracy_percent != null
+                            ? ` · untouched holdout: ${Number(trainTelemetry.metrics.holdout_accuracy_percent).toFixed(1)}%`
+                            : ' · no untouched holdout was available'}
+                        </span>
+                      )}
+                      {trainTelemetry.metrics.overfit_gap_percent != null && (
+                        <span>
+                          Validation/holdout gap: {Number(trainTelemetry.metrics.overfit_gap_percent).toFixed(1)} pp
+                          {' · '}boundary {Number(trainTelemetry.metrics.overfit_boundary_percent ?? 2).toFixed(1)} pp
+                          {trainTelemetry.metrics.overfit_boundary_reached ? ' reached' : ' not reached'}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <span>Preparing this game’s profile and chronological validation split…</span>
+                  )}
+                </div>
               </div>
             )}
             <div className="d-flex flex-wrap gap-2">
@@ -2130,7 +2191,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
             focusedCard={expandedCard}
             neonBorder={true}
             metadata={{
-              'Host': 'pocketpro_nyl_chroma',
+              'Host': 'pocketpro_nygames_chroma',
               'Port': '8000'
             }}
             onToggle={handleCardFocus('chroma')}

@@ -76,8 +76,8 @@ export function analyzeError(error) {
             'Use http://127.0.0.1:3000 instead of http://localhost:3000.',
             'Ingestion can block the API for a minute; keep this tab open and wait.',
             'Restart Docker Desktop, then run: docker compose up -d --force-recreate',
-            'Check containers: docker ps --filter name=pocketpro_nyl',
-            'Review backend logs: docker logs pocketpro_nyl_backend --tail 50',
+            'Check containers: docker ps --filter name=pocketpro_nygames',
+            'Review backend logs: docker logs pocketpro_nygames_backend --tail 50',
         ],
         [ErrorCategory.UNKNOWN_ERROR]: [
             'Check the browser console for more details.',
