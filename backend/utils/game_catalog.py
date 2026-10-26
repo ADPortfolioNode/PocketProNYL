@@ -277,6 +277,9 @@ def build_game_entry(game: str, draw_count: int = 0) -> Dict[str, Any]:
         "ready_for_training": int(draw_count or 0) >= 50,
         "ready_for_suggestions": int(draw_count or 0) >= 20,
         "training_defaults": training,
+        "retired": bool(rules.get("retired")),
+        "retired_date": rules.get("retired_date"),
+        "status_label": "Retired: history only" if rules.get("retired") else None,
     }
 
 
@@ -293,6 +296,7 @@ def get_game_catalog(*, refresh_counts: bool = False) -> Dict[str, Any]:
         "games": game_keys,
         "titles": {game: GAME_TITLES.get(game, game) for game in game_keys},
         "catalog": catalog,
+        "retired_games": [item["key"] for item in catalog if item["retired"]],
         "total_games": len(game_keys),
         "populated_games": sum(1 for item in catalog if item["has_draws"]),
     }

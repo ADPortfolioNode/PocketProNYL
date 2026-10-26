@@ -377,115 +377,19 @@ class IngestService:
         progress_callback=None,
         total_estimated_game_rows: int = 0,
     ) -> tuple[list[dict], list[str]]:
+        """Fetch a game's rows, paged and capped at INGEST_MAX_ROWS_PER_GAME.
+
+        Delegates to ``services.socrata_fetch.fetch_rows_capped`` (the same code
+        main.py installs at startup), so the row cap applies on every path; the
+        old loop downloaded whole rows.json dumps (Quick Draw: 1.7M+ rows).
         """
-        Fetches all rows from a list of paginated API endpoints.
-        Returns a tuple of (all_rows, column_names).
-        """
-        socrata_page_size = self.batch_size # Use batch_size as page size for Socrata API
-        all_fetched_rows = []
-        _current_column_names: list[str] = []
-        last_progress_at = 0.0
+        from services.socrata_fetch import fetch_rows_capped
 
-        def _emit_progress(rows_fetched: int, total_rows: int):
-            nonlocal last_progress_at
-            if not progress_callback:
-                return
-            now = time.time()
-            if (rows_fetched >= total_rows or now - last_progress_at >= self.progress_interval_s):
-                progress_callback(rows_fetched, total_rows)
-                last_progress_at = now
-
-        for endpoint_idx, endpoint in enumerate(endpoints):
-            endpoint_last_error = None
-            parsed_url = urlparse(endpoint)
-            base_query_params = parse_qs(parsed_url.query)
-            filtered_query_items = []
-            for key, values in base_query_params.items():
-                if key.lower() == 'accesstype' and any(v.lower() == 'download' for v in values):
-                    continue
-                for value in values:
-                    filtered_query_items.append((key, value))
-
-            print(f"[{game.upper()}] Endpoint {endpoint_idx + 1}/{len(endpoints)}: {endpoint}")
-
-            current_offset = 0
-            while True:
-                paginated_query_params = parse_qs(urlencode(filtered_query_items, doseq=True), keep_blank_values=True)
-                paginated_query_params['$limit'] = [socrata_page_size]
-                paginated_query_params['$offset'] = [current_offset]
-                new_query = urlencode(paginated_query_params, doseq=True)
-                paginated_endpoint = urlunparse(parsed_url._replace(query=new_query))
-                
-                for attempt in range(self.max_retries):
-                    page_success: bool = False
-                    response = None
-                    data = None
-                    try:
-                        print(f"  Fetching from {paginated_endpoint} (attempt {attempt + 1}/{self.max_retries})...")
-                        response = requests.get(paginated_endpoint, timeout=self.request_timeout)
-                        response.raise_for_status()
-                        data = response.json()
-                        page_success = True
-                        break
-                    except requests.Timeout:
-                        endpoint_last_error = f"Request timeout after {self.request_timeout}s for {paginated_endpoint}"
-                        print(f"  ⚠ {endpoint_last_error}")
-                        if attempt < self.max_retries - 1:
-                            time.sleep(self.retry_delay * (2 ** attempt))
-                        else:
-                            break
-                    except requests.RequestException as req_error:
-                        endpoint_last_error = f"Request error: {str(req_error)} for {paginated_endpoint}"
-                        print(f"  ⚠ {endpoint_last_error}")
-                        if hasattr(req_error, 'response') and req_error.response is not None:
-                            print(f"  Response status: {req_error.response.status_code}")
-                            print(f"  Response preview: {req_error.response.text[:200]}")
-                        if attempt < self.max_retries - 1:
-                            time.sleep(self.retry_delay * (2 ** attempt))
-                            continue
-                        else:
-                            break
-                    except ValueError as json_error:
-                        endpoint_last_error = f"Invalid JSON response: {str(json_error)} for {paginated_endpoint}"
-                        print(f"  ⚠ {endpoint_last_error}")
-                        if response:
-                            print(f"  Response preview: {response.text[:200]}") 
-                        break
-                    except Exception as unexpected_error:
-                        endpoint_last_error = f"Unexpected error: {str(unexpected_error)} for {paginated_endpoint}"
-                        print(f"  ✗ {endpoint_last_error}")
-                        import traceback
-                        traceback.print_exc()
-                        break
-
-                if not page_success:
-                    print(f"  ✗ Failed to fetch page at offset {current_offset} from {endpoint}: {endpoint_last_error}")
-                    break
-
-                fetched_rows, extracted_columns = extract_rows_and_columns_util(data)
-                # Provenance tag: lets validation and repair prove which dataset a row came from.
-                fetched_rows = tag_rows_with_source(fetched_rows, endpoint)
-
-                if not _current_column_names and extracted_columns:
-                    _current_column_names = extracted_columns
-                    print(f"  ✓ Extracted {len(_current_column_names)} column names from payload")
-
-                if not fetched_rows:
-                    print(f"  ✓ No more data from {paginated_endpoint} (offset {current_offset})")
-                    break
-                
-                all_fetched_rows.extend(fetched_rows)
-                _emit_progress(len(all_fetched_rows), total_estimated_game_rows)
-                if len(fetched_rows) > socrata_page_size * 2:
-                    # rows.json views ignore $limit/$offset and return the whole
-                    # dataset every time; paging on would loop forever.
-                    print(f"  ↳ Endpoint ignored $limit (got {len(fetched_rows)} rows); using single dump")
-                    break
-                if len(fetched_rows) < socrata_page_size:
-                    break
-                current_offset += len(fetched_rows)
-
-        return all_fetched_rows, _current_column_names
+        return fetch_rows_capped(
+            self, game, endpoints,
+            progress_callback=progress_callback,
+            total_estimated_game_rows=total_estimated_game_rows,
+        )
 
     def _process_rows_from_file(
         self,
@@ -606,10 +510,15 @@ class IngestService:
 
         collection_name = game_key
         try:
-            return self._fetch_and_sync(game_key, collection_name, progress_callback, force)
+            result = self._fetch_and_sync(game_key, collection_name, progress_callback, force)
         except Exception as exc:
             report_phase(game_key, "error", detail=str(exc)[:300])
             raise
+        # New draws -> debounced background rerun of this game's pattern scan.
+        from services.pattern_scheduler import notify_ingest
+
+        notify_ingest(game_key, result)
+        return result
 
     def _warm_embedding_model(self, game_key: str, collection) -> None:
         """Load (and on first run download) Chroma's default embedding model, visibly.
@@ -672,7 +581,9 @@ class IngestService:
             report_phase(game_key, "counting_rows")
             for ep in endpoints:
                 try:
-                    parsed_url = urlparse(ep)
+                    from services.socrata_fetch import pageable_endpoint
+
+                    parsed_url = urlparse(pageable_endpoint(ep))  # views ignore $select; resources count
                     query_params = parse_qs(parsed_url.query)
                     query_params.pop('accessType', None)
                     query_params['$select'] = ['count(*)']
@@ -692,9 +603,14 @@ class IngestService:
                 except Exception as e:
                     print(f"  ⚠ Could not get total row count for an endpoint: {e}.")
             
+            from services.socrata_fetch import max_rows_for
+
+            row_cap = max_rows_for(game_key)
             if total_estimated_game_rows == 0:
-                print(f"  ⚠ Using fallback total of 100000 for progress reporting.")
-                total_estimated_game_rows = 100000
+                print(f"  ⚠ Using the row cap ({row_cap}) as the progress total.")
+                total_estimated_game_rows = row_cap
+            # The fetch never keeps more than the cap, so progress never promises more.
+            total_estimated_game_rows = min(total_estimated_game_rows, row_cap)
 
             if progress_callback:
                 progress_callback(0, total_estimated_game_rows)

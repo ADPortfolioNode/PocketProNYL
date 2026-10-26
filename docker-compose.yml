@@ -1,5 +1,8 @@
 # PocketProNYGames local stack
 # Publish on 0.0.0.0 so Docker Desktop (Windows/WSL2) creates a real host listener.
+# Host ports: FRONTEND_PORT (default 3002) and BACKEND_PORT (default 5002);
+# legacy FRONTEND_HOST_PORT/BACKEND_HOST_PORT still work. Container ports stay 80/5000.
+# Run published GHCR images instead of building: see docker-compose.ghcr.yml / DEPLOY.md.
 
 services:
   backend:
@@ -11,7 +14,7 @@ services:
         CACHE_BUSTER: ${BACKEND_CACHE_BUSTER:-stable}
         SKIP_ONNX: "1"
     ports:
-      - "${DOCKER_BIND_HOST:-0.0.0.0}:${BACKEND_HOST_PORT:-5001}:5000"
+      - "${DOCKER_BIND_HOST:-0.0.0.0}:${BACKEND_PORT:-${BACKEND_HOST_PORT:-5002}}:5000"
     environment:
       - DATA_DIR=/data
       - MAX_CONCURRENT_CLONES=3
@@ -67,7 +70,7 @@ services:
         CACHE_BUSTER: ${FRONTEND_CACHE_BUSTER:-20260826a}
     container_name: pocketpro_nygames_frontend
     ports:
-      - "${DOCKER_BIND_HOST:-0.0.0.0}:${FRONTEND_HOST_PORT:-3000}:80"
+      - "${DOCKER_BIND_HOST:-0.0.0.0}:${FRONTEND_PORT:-${FRONTEND_HOST_PORT:-3002}}:80"
     depends_on:
       backend:
         condition: service_started

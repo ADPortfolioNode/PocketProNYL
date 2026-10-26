@@ -7,7 +7,7 @@ from typing import Callable
 
 from prediction.config.loader import GamePredictionConfig, game_rules_from_config, load_game_config
 from prediction.core.draw_loader import draws_from_lists, from_chroma
-from prediction.core.ensemble import build_ticket
+from prediction.core.ensemble import build_ticket, history_bonus_picks
 from prediction.core.registry import ensure_plugins_loaded, get_agent_class, get_strategy_class
 from prediction.core.types import Draw, PredictionTicket, StrategyOutput
 from prediction.learning.weight_updater import WeightUpdater
@@ -127,7 +127,7 @@ class LotteryPredictionEngine:
             return PredictionTicket(
                 game=game,
                 primary=primary_numbers,
-                bonus=[],
+                bonus=self._bonus_or_history([], history, rules, primary_numbers, game),
                 strategy_used=strategy_name,
                 weights_used={},
                 strategy_contributions={},
@@ -180,7 +180,17 @@ class LotteryPredictionEngine:
             metrics={"nn_blended": bool(nn_scores) and nn_weight > 0},
         )
         ticket.strategy_used = strategy_name
+        ticket.bonus = self._bonus_or_history(ticket.bonus, history, rules, ticket.primary, game)
         return ticket
+
+    @staticmethod
+    def _bonus_or_history(bonus, history, rules, primary, game) -> list[int]:
+        """Keep plugin bonus picks; otherwise derive them from this game's bonus history."""
+        if rules.bonus_count <= 0 or (bonus and len(bonus) >= rules.bonus_count):
+            return list(bonus or [])
+        # NY Lotto draws its bonus from the main drum, so it can't repeat a main pick.
+        exclude = primary if rules.bonus_min == rules.primary_min and rules.bonus_max == rules.primary_max else None
+        return history_bonus_picks(history, rules, exclude=exclude) or list(bonus or [])
 
     def update_weights(
         self,

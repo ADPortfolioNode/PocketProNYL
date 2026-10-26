@@ -47,7 +47,9 @@ class PredictionAdapter:
 
         format_spec = GAME_PREDICTION_FORMATS.get(game, {}) or {}
         rules = game_rules_from_config(game)
-        main_count = int(rules.primary_count or format_spec.get("main_count", len(primary)))
+        # The suggestion format is the ticket the player fills in (Pick 10 = 10 of 80),
+        # while GAME_CONFIGS.primary_count is the draw size (Pick 10 draws 20).
+        main_count = int(format_spec.get("main_count") or rules.primary_count or len(primary))
         bonus_count = int(format_spec.get("bonus_count", 0))
         main_min = int(format_spec.get("main_min", 0))
         main_max = int(format_spec.get("main_max", 99))

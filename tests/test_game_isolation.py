@@ -531,7 +531,8 @@ def _assert_numbers_fit(game, payload):
     if "predicted_main_numbers" not in payload:
         payload = (payload.get("prediction_session") or [{}])[0]
     main = payload["predicted_main_numbers"]
-    assert len(main) == int(cfg["primary_count"]) or len(main) == int(fmt["main_count"])
+    # The ticket size is the suggestion format (Pick 10 = 10), not the draw size (20).
+    assert len(main) == int(fmt["main_count"]), (game, main)
     assert all(fmt["main_min"] <= n <= fmt["main_max"] for n in main), (game, main)
     if fmt.get("unique_main"):
         assert len(set(main)) == len(main)
@@ -564,3 +565,29 @@ def test_predict_all_maps_each_result_to_its_game(store):
         assert item["status"] == "success", item
         assert item["prediction"]["game"] == game
         _assert_numbers_fit(game, item["prediction"])
+
+
+@pytest.mark.parametrize("game", ["cash4life", "nylotto", "powerball", "megamillions"])
+def test_modular_bonus_comes_from_own_bonus_history(game, store, tmp_path):
+    """Bonus balls are derived from the game's own history, not padded with bonus_min."""
+    from services.prediction_adapter import PredictionAdapter
+
+    _seed_collection(store, game)
+    result = PredictionAdapter(state_dir=str(tmp_path / "state")).predict_next_draw(game)
+    assert result["status"] == "success", result
+    fmt = GAME_PREDICTION_FORMATS[game]
+    bonus = result["predicted_bonus_numbers"]
+    assert len(bonus) == fmt["bonus_count"]
+    assert all(fmt["bonus_min"] <= n <= fmt["bonus_max"] for n in bonus)
+    if game == "nylotto":
+        assert not set(bonus) & set(result["predicted_main_numbers"])
+
+
+def test_pick10_suggests_ten_numbers(store, tmp_path):
+    from services.prediction_adapter import PredictionAdapter
+
+    _seed_collection(store, "pick10")
+    result = PredictionAdapter(state_dir=str(tmp_path / "state")).predict_next_draw("pick10")
+    main = result["predicted_main_numbers"]
+    assert len(main) == 10 and len(set(main)) == 10
+    assert all(1 <= n <= 80 for n in main)

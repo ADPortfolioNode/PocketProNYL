@@ -4,12 +4,14 @@ import axios from 'axios';
 import getApiBase from '../utils/apiBase';
 import PredictionPanel from './PredictionPanel';
 import RoiPanel from './RoiPanel';
+import PatternSearchPanel from './PatternSearchPanel';
 import ChatPanelRAG from './ChatPanelRAG';
 import WorkflowSummary from './WorkflowSummary';
 import ExperimentsPanel from './ExperimentsPanel';
 import GameSummaryPanel from './GameSummaryPanel';
 import ChromaStatusPanel from './ChromaStatusPanel';
 import GameSelector from './GameSelector';
+import { RETIRED_LABEL } from './RetiredBadge';
 import IngestionProgressPanel from './IngestionProgressPanel';
 import ExpandableCard from './ExpandableCard';
 import ProgressiveProgressBar from './ProgressiveProgressBar';
@@ -1281,9 +1283,21 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
     [games, trainDataByGame],
   );
 
+  // Retired games (e.g. Cash4Life) stay listed for history, with a label.
+  const retiredByGame = useMemo(() => {
+    const map = {};
+    (gameCatalog || []).forEach((entry) => {
+      const key = entry && (entry.key || entry.id);
+      if (key && entry.retired) map[key] = entry.retired_date || true;
+    });
+    return map;
+  }, [gameCatalog]);
+
   const formatTrainGameOptionLabel = useCallback((game) => {
     const data = trainDataByGame[game];
-    const title = gameTitles[game] || game;
+    const title = retiredByGame[game]
+      ? `${gameTitles[game] || game} · ${RETIRED_LABEL}`
+      : (gameTitles[game] || game);
     const draws = Number(gameContents[game] || 0);
     const base = draws > 0 ? `${title} (${draws.toLocaleString()} draws)` : title;
     if (!data) return base;
@@ -1294,15 +1308,17 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
     }
     if (data.status === 'current') return `${base} — up to date`;
     return base;
-  }, [trainDataByGame, gameTitles, gameContents]);
+  }, [trainDataByGame, gameTitles, gameContents, retiredByGame]);
 
   const gameSelectorOptions = useMemo(
     () => games.map((game) => ({
       id: game,
       name: gameTitles[game] || game,
       draw_count: Number(gameContents[game] || 0),
+      retired: Boolean(retiredByGame[game]),
+      retired_date: typeof retiredByGame[game] === 'string' ? retiredByGame[game] : undefined,
     })),
-    [games, gameTitles, gameContents]
+    [games, gameTitles, gameContents, retiredByGame]
   );
 
   const getGameColorScheme = (gameName) => {
@@ -2161,6 +2177,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
             onToggle={handleCardFocus('roi')}
           >
             <RoiPanel games={games} />
+            {games.length > 0 && <PatternSearchPanel games={games} />}
           </ExpandableCard>
         </div>
 
