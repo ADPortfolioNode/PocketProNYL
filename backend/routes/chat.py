@@ -7,9 +7,11 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
+from config import settings
 from services.lm_router import lm_router
 from services.rag_service import rag_service
 from services.gemini_client import LM_UNAVAILABLE_PREFIX
+from services.llm_common import strip_api_keys
 from utils.chat_tools import (
     _render_tool_response,
     detect_chat_tool,
@@ -20,6 +22,17 @@ from utils.chat_tools import (
 
 
 router = APIRouter()
+
+
+@router.get("/api/llm/status")
+async def llm_status():
+    """Provider-chain status: chain order, per-provider configured /
+    available / model / last error, and whether retrieved text is the
+    last rung. Never returns any API key value."""
+    # Audit lazily so a fresh process reports live provider state, but
+    # do not force a re-probe on every call (audit_connections caches).
+    await lm_router.audit_connections()
+    return lm_router.status()
 
 
 @router.get("/api/tuning_status")
@@ -54,24 +67,26 @@ class ChatResponse(BaseModel):
     context_used: bool = False
     sources_count: int = 0
     lm_provider: Optional[str] = None
+    # Joined, key-stripped chain error (capped at 1000 chars) when every
+    # LM rung failed; None when a provider (or retrieved text) answered.
+    lm_error: Optional[str] = None
     tool_name: Optional[str] = None
     tool_result: Optional[Dict[str, Any]] = None
 
 
-def _chat_fallback_for_lm_unavailable(user_text: str, lm_response: str, raw_game: Optional[str] = None) -> str:
+def _surface_lm_error(lm_response: str, chain_error: Optional[str] = None) -> str:
+    """Replace the old generic apology with the surfaced chain error.
+
+    Previously /api/chat hid every LM failure behind "I apologize, but
+    I'm currently unable to connect...", which made provider failures
+    undiagnosable. Now the caller sees which rungs failed and why
+    (keys already stripped by the router/clients).
     """
-    Generate a helpful fallback response when LLM is unavailable.
-    """
-    if lm_response.startswith(LM_UNAVAILABLE_PREFIX):
-        game_context = ""
-        if raw_game and not is_all_games_scope(raw_game):
-            game_context = f" for {raw_game}"
-        return (
-            f"I apologize, but I'm currently unable to connect to the AI language model{game_context}. "
-            f"This might be due to API key issues or service unavailability. "
-            f"Your message was: \"{user_text}\". "
-            f"Please check your API key configuration or try again later."
-        )
+    detail = chain_error
+    if not detail and lm_response.startswith(LM_UNAVAILABLE_PREFIX):
+        detail = lm_response[len(LM_UNAVAILABLE_PREFIX):].lstrip(":")
+    if detail:
+        return f"All language-model providers failed: {detail}"
     return lm_response
 
 
@@ -133,8 +148,10 @@ async def chat(request: ChatRequest):
             augmented_prompt = request.text
             context_used = False
 
-        # Get response from language model via router (auto-failover across providers)
+        # Get response from language model via router (fixed-order chain:
+        # gemini -> groq -> ollama -> grok -> chatgpt, then retrieved text)
         selected_provider = request.lm_provider or "auto"
+        lm_error = None
         try:
             result = await lm_router.generate_with_provider(
                 augmented_prompt,
@@ -142,16 +159,33 @@ async def chat(request: ChatRequest):
             )
             selected_provider = result.get("provider", selected_provider)
             lm_response = result.get("response", "")
+            lm_error = result.get("error")
 
             if lm_response.startswith(LM_UNAVAILABLE_PREFIX):
-                lm_response = _chat_fallback_for_lm_unavailable(
-                    request.text, lm_response, request.game
-                )
+                # Auto mode only: the retrieved-text rung is the last
+                # rung of the chain. An explicit lm_provider means that
+                # provider only, so its failure is surfaced, not papered
+                # over with retrieved text.
+                if (request.lm_provider or "auto").strip().lower() in ("auto", ""):
+                    lm_response = rag_service._build_local_fallback_response(
+                        request.text, context_docs
+                    )
+                    selected_provider = "retrieved_text"
+                else:
+                    lm_response = _surface_lm_error(lm_response, lm_error)
 
         except Exception as e:
-            lm_response = _chat_fallback_for_lm_unavailable(
-                request.text, f"Error: {str(e)}", request.game
-            )
+            lm_error = strip_api_keys(str(e), [
+                k for k in (
+                    settings.GEMINI_API_KEY,
+                    settings.GROK_API_KEY,
+                    settings.GROQ_API_KEY,
+                    settings.CHAT_GPT_API_KEY,
+                    settings.OPENAI_API_KEY,
+                ) if k
+            ])
+            lm_response = _surface_lm_error("", lm_error)
+            selected_provider = "fallback"
 
         return ChatResponse(
             response=lm_response,
@@ -159,6 +193,7 @@ async def chat(request: ChatRequest):
             context_used=context_used,
             sources_count=len(context_docs),
             lm_provider=selected_provider,
+            lm_error=lm_error if selected_provider in ("fallback", "retrieved_text") else None,
             tool_name=None,
             tool_result=None,
         )

@@ -10,11 +10,25 @@ class Settings(BaseSettings):
     # OpenAI
     OPENAI_API_KEY: str | None = None
     CHAT_GPT_API_KEY: str | None = None
+    CHATGPT_MODEL: str = "gpt-4o-mini"
     GEMINI_API_KEY: str | None = None
-    GEMINI_MODEL: str = "gemini-1.5-flash"
+    # Stale gemini-1.5-flash default replaced with gemini-3.8-flash; a
+    # GEMINI_MODEL line in .env still overrides this default.
+    GEMINI_MODEL: str = "gemini-3.8-flash"
+    # xAI Grok -- NOT Groq. GROK_* must never be merged with GROQ_* below.
     GROK_API_KEY: str | None = None
     GROK_API_BASE: str = "https://api.x.ai/v1"
     GROK_MODEL: str = "grok-3-mini-beta"
+    # Groq (OpenAI-compatible endpoint, requests-based, no new deps).
+    # Distinct from xAI Grok above: different vendor, base, and model.
+    GROQ_API_KEY: str | None = None
+    GROQ_API_BASE: str = "https://api.groq.com/openai/v1"
+    GROQ_MODEL: str = "openai/gpt-oss-20b"
+    # Local Ollama -- only used when OLLAMA_ENABLED is truthy. The
+    # default base reaches Ollama on the Docker host from a container.
+    OLLAMA_ENABLED: bool = False
+    OLLAMA_API_BASE: str = "http://host.docker.internal:11434/v1"
+    OLLAMA_MODEL: str = "llama3.1:8b"
     
     # ChromaDB
     CHROMA_HOST: str = "pocketpro_nygames_chroma" # Ensure consistent naming
