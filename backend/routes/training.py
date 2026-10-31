@@ -549,11 +549,11 @@ def enqueue_training_games(
 
 @router.get("/api/train_settings")
 async def get_train_settings(game: str = None):
-    from utils.training_defaults import get_game_training_defaults
+    from utils.training_defaults import get_optimum_config
 
     if game:
         game_key = _require_game_key(game)
-        game_defaults = get_game_training_defaults(game_key)
+        game_defaults = get_optimum_config(game_key)
         defaults = trainer_service.get_training_defaults(game_key)
         defaults["blend_step"] = float(
             defaults.get("blend_step", trainer_service.blend_step)
@@ -592,7 +592,7 @@ async def get_train_settings(game: str = None):
             game_name,
             requested_target=game_defaults.get("target_accuracy", defaults["target_accuracy"]),
         )
-        profile = get_game_training_defaults(game_name)
+        profile = get_optimum_config(game_name)
         per_game[game_name] = {
             **_dataset_snapshot(game_name),
             "has_saved_model": incremental.get("has_saved_model"),

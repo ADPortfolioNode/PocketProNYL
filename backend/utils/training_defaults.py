@@ -204,6 +204,20 @@ def _merge_defaults(
     return merged
 
 
+def get_optimum_config(game: Optional[str] = None) -> Dict[str, Any]:
+    """Return the single app-wide optimum config for ``game``.
+
+    This is the canonical accessor every part of the app must use --
+    training routes, the game catalog, the optimization panel, the
+    audit script, and the trainer's per-game defaults -- so a game
+    never shows one config in one view and a different config in
+    another. It is exactly ``get_game_training_defaults``: the
+    rule-derived defaults overlaid with the hand-tuned per-game
+    profile. With no game it returns the generic baseline.
+    """
+    return get_game_training_defaults(game)
+
+
 def get_base_training_defaults() -> Dict[str, Any]:
     """Return the generic trainer defaults (no game overlay)."""
     return deepcopy(DEFAULT_TRAINING_CONFIG)
@@ -317,10 +331,10 @@ class TrainingOptimizer:
         }
 
     def get_defaults(self, game: Optional[str] = None) -> Dict[str, Any]:
-        return get_game_training_defaults(game)
+        return get_optimum_config(game)
 
     def get_optimization_payload(self, game: str) -> Dict[str, Any]:
-        optimized = get_game_training_defaults(game)
+        optimized = get_optimum_config(game)
         return {
             "game": str(game).strip().lower(),
             "optimized_defaults": optimized,
@@ -342,4 +356,5 @@ __all__ = [
     "game_training_optimizer",
     "get_base_training_defaults",
     "get_game_training_defaults",
+    "get_optimum_config",
 ]

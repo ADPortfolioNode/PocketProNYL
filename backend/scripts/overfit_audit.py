@@ -54,9 +54,9 @@ def optimum_config_for_game(game: str) -> dict:
     config training defaults to for that game -- not the generic baseline.
     """
     try:
-        from utils.training_defaults import get_game_training_defaults
+        from utils.training_defaults import get_optimum_config
 
-        profile = get_game_training_defaults(game) or {}
+        profile = get_optimum_config(game) or {}
     except Exception:
         profile = {}
     return {

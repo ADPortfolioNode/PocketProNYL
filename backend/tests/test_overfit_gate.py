@@ -99,6 +99,30 @@ def test_stored_candidate_without_holdout_data_passes_through():
     assert stored_candidate_fails_gate(None) is False
 
 
+def test_optimum_config_is_the_app_wide_canonical_accessor():
+    """One accessor, one config, everywhere: optimum == per-game defaults."""
+    from utils.training_defaults import (
+        get_game_training_defaults,
+        get_optimum_config,
+    )
+
+    for game in ("take5", "powerball", "numbers"):
+        assert get_optimum_config(game) == get_game_training_defaults(game)
+    assert get_optimum_config("powerball")["max_depth"] == 12
+    assert get_optimum_config("powerball")["n_estimators"] == 180
+
+
+def test_game_catalog_uses_the_same_optimum_config():
+    """The catalog view must not show different defaults from training."""
+    from utils.game_catalog import build_game_entry
+    from utils.training_defaults import get_optimum_config
+
+    entry = build_game_entry("powerball", draw_count=0)
+    optimum = get_optimum_config("powerball")
+    for key in ("target_accuracy", "max_depth", "n_estimators", "train_size"):
+        assert entry["training_defaults"][key] == optimum[key], key
+
+
 def test_every_live_game_has_a_per_game_profile():
     from utils.training_defaults import GAME_TRAINING_DEFAULTS
 
