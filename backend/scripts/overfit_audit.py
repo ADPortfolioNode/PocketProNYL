@@ -47,6 +47,33 @@ GAMES = [
 ]
 
 
+def optimum_config_for_game(game: str) -> dict:
+    """Return this game's default optimum-accuracy config (per-game view).
+
+    This is the per-game profile from utils/training_defaults, the same
+    config training defaults to for that game -- not the generic baseline.
+    """
+    try:
+        from utils.training_defaults import get_game_training_defaults
+
+        profile = get_game_training_defaults(game) or {}
+    except Exception:
+        profile = {}
+    return {
+        key: profile.get(key)
+        for key in (
+            "target_accuracy",
+            "max_iterations",
+            "train_size",
+            "n_estimators",
+            "max_depth",
+            "window_size",
+            "blend_step",
+            "overfit_gap_limit_percent",
+        )
+    }
+
+
 def audit_game(adapter, game: str) -> dict:
     """Run one game's backtest and return its audit row."""
     result = adapter.train_or_backtest(game)
@@ -54,6 +81,7 @@ def audit_game(adapter, game: str) -> dict:
     gate = result.get("overfit_gate") or {}
     baseline = metrics.get("holdout_random_baseline") or {}
     return {
+        "optimum_config": optimum_config_for_game(game),
         "game": game,
         "status": result.get("status"),
         "validation_accuracy_percent": metrics.get(
@@ -113,6 +141,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"{row['exact_match_rate']} | "
                 f"{'BLOCKED: ' + ','.join(row['gate_reasons']) if row['gate_blocked'] else 'pass'}"
             )
+            print(f"    optimum config (default per game): {row['optimum_config']}")
     return 0
 
 

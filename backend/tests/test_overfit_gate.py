@@ -12,7 +12,10 @@ BACKEND = Path(__file__).resolve().parents[1]
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
-from prediction.metrics.overfit_gate import evaluate_overfit_gate
+from prediction.metrics.overfit_gate import (
+    evaluate_overfit_gate,
+    stored_candidate_fails_gate,
+)
 
 
 def _clean_metrics(**overrides):
@@ -77,3 +80,39 @@ def test_no_metrics_blocks_in_block_mode(monkeypatch):
     monkeypatch.setenv("OVERFIT_GATE_MODE", "block")
     result = evaluate_overfit_gate(None)
     assert result["blocked"] is True
+
+
+def test_stored_candidate_with_explicit_gap_failure_is_skipped():
+    assert stored_candidate_fails_gate(
+        {"overfit_gap_percent": 5.0, "overfit_boundary_percent": 2.0}
+    ) is True
+    assert stored_candidate_fails_gate(
+        {"overfit_boundary_reached": True}
+    ) is True
+    assert stored_candidate_fails_gate({"holdout_p_value": 0.40}) is True
+
+
+def test_stored_candidate_without_holdout_data_passes_through():
+    # Pre-gate stored records have no holdout fields; they are not
+    # discarded, only explicitly failing ones are skipped.
+    assert stored_candidate_fails_gate({"accuracy": 0.91}) is False
+    assert stored_candidate_fails_gate(None) is False
+
+
+def test_every_live_game_has_a_per_game_profile():
+    from utils.training_defaults import GAME_TRAINING_DEFAULTS
+
+    for game in (
+        "take5",
+        "pick3",
+        "powerball",
+        "megamillions",
+        "pick10",
+        "cash4life",
+        "numbers",
+        "win4",
+    ):
+        assert game in GAME_TRAINING_DEFAULTS, game
+    # Numbers is the same 3-digit daily game as Pick 3.
+    assert GAME_TRAINING_DEFAULTS["numbers"]["max_depth"] == 8
+    assert GAME_TRAINING_DEFAULTS["numbers"]["target_accuracy"] == 0.85

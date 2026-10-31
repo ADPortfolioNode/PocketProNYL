@@ -1447,6 +1447,13 @@ class TrainerService:
                 "blend_weight": _coerce_float(stored_params.get("blend_weight") or mapping.get("blend_weight")),
                 "data_limit": _coerce_int(stored_params.get("data_limit") or mapping.get("data_limit")),
                 "training_params": stored_params,
+                # Overfit signals carried through so the optimum-config
+                # selection below can skip gate-failing candidates.
+                "overfit_gap_percent": _coerce_float(mapping.get("overfit_gap_percent")),
+                "overfit_boundary_reached": bool(mapping.get("overfit_boundary_reached")),
+                "overfit_warning_reasons": mapping.get("overfit_warning_reasons") or [],
+                "holdout_p_value": _coerce_float(mapping.get("holdout_p_value")),
+                "holdout_accuracy_percent": _coerce_float(mapping.get("holdout_accuracy_percent")),
             }
             if resolved_accuracy is None and all(
                 config.get(key) is None
@@ -1592,6 +1599,34 @@ class TrainerService:
                         )
                     finally:
                         gc.collect()
+
+            if candidates:
+                # Default optimum = best GATE-PASSING stored config, not
+                # just the highest accuracy. A stored run that explicitly
+                # failed the holdout gate (gap at/over boundary, or
+                # holdout not beating random) is skipped, so an overfit
+                # optimum cannot become the per-game default. Candidates
+                # with no holdout data at all (pre-gate records) pass
+                # through, so legacy optima are not all discarded.
+                try:
+                    from prediction.metrics.overfit_gate import (
+                        stored_candidate_fails_gate,
+                    )
+
+                    passing = [
+                        item
+                        for item in candidates
+                        if not stored_candidate_fails_gate(item)
+                    ]
+                    if len(passing) < len(candidates):
+                        logger.info(
+                            "Skipped %s gate-failing stored optimum candidate(s) for %s",
+                            len(candidates) - len(passing),
+                            game_key,
+                        )
+                    candidates = passing
+                except Exception:
+                    pass
 
             if not candidates:
                 fallback = _precision_first_defaults(record_count)

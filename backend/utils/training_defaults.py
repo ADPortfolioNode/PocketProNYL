@@ -76,6 +76,21 @@ GAME_TRAINING_DEFAULTS: Dict[str, Dict[str, Any]] = {
             "and a larger validation share to limit overfitting."
         ),
     },
+    "numbers": {
+        "target_accuracy": 0.85,
+        "max_iterations": 12,
+        "train_size": 0.35,
+        "n_estimators": 100,
+        "max_depth": 8,
+        "window_size": 2,
+        "blend_step": 0.06,
+        "data_limit": 0,
+        "reasoning": (
+            "Numbers is the same 3-digit daily game as Pick 3; use the same "
+            "shallow, low-capacity profile to limit overfitting. Previously "
+            "Numbers had no profile and fell back to generic defaults."
+        ),
+    },
     "take5": {
         "target_accuracy": 0.88,
         "max_iterations": 15,

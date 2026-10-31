@@ -41,6 +41,45 @@ _BLOCK_REASONS = (
 )
 
 
+def stored_candidate_fails_gate(mapping: dict | None) -> bool:
+    """Check a stored optimum-config candidate for explicit overfit failure.
+
+    Unlike evaluate_overfit_gate(), this does NOT block on missing holdout
+    data: older stored candidates predate the holdout report, and blocking
+    all of them would discard every legacy optimum. It only blocks when
+    the stored record explicitly says the run failed: gap at/over the
+    boundary, a non-significant holdout p-value, or a blocking warning
+    reason. Unknown candidates pass through.
+    """
+    if not isinstance(mapping, dict):
+        return False
+    if mapping.get("overfit_boundary_reached"):
+        return True
+    gap = mapping.get("overfit_gap_percent")
+    if gap is not None:
+        try:
+            boundary = float(
+                mapping.get(
+                    "overfit_boundary_percent", DEFAULT_GAP_BOUNDARY_PERCENT
+                )
+            )
+            if float(gap) >= boundary:
+                return True
+        except (TypeError, ValueError):
+            pass
+    p_value = mapping.get("holdout_p_value")
+    if p_value is not None:
+        try:
+            if float(p_value) >= DEFAULT_SIGNIFICANCE_ALPHA:
+                return True
+        except (TypeError, ValueError):
+            pass
+    for reason in mapping.get("overfit_warning_reasons") or []:
+        if reason in _BLOCK_REASONS:
+            return True
+    return False
+
+
 def gate_mode() -> str:
     """Return the configured gate mode: block (default), warn, or off."""
     mode = str(os.environ.get("OVERFIT_GATE_MODE", "block")).strip().lower()
