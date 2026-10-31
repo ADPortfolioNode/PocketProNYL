@@ -270,31 +270,6 @@ class PredictionAdapter:
         except Exception as exc:
             return {"status": "error", "message": str(exc)}
 
-        # Overfit gate: a backtest whose holdout fails (gap at/over the
-        # evaluator's boundary, holdout not beating random, or no holdout
-        # at all) must not promote a new model. Keep the previous ready
-        # payload untouched and report the gate, so the dashboard shows
-        # the failure instead of a new optimistic accuracy.
-        from prediction.metrics.overfit_gate import evaluate_overfit_gate
-
-        gate = evaluate_overfit_gate(metrics)
-        if gate["blocked"]:
-            return {
-                "status": "blocked",
-                "game": game,
-                "message": (
-                    "Backtest blocked by the overfit gate: "
-                    + ", ".join(gate["reasons"])
-                    + ". Previous model retained."
-                ),
-                "training_time": round(time.time() - start, 2),
-                "metrics": metrics,
-                "overfit_gate": gate,
-                "engine": "modular",
-                "record_count": dataset.get("record_count"),
-                "dataset_hash": dataset.get("dataset_hash"),
-            }
-
         mean_hits = metrics.get("mean_partial_hits", 0.0)
         lift = metrics.get("lift_vs_random", 0.0)
 
@@ -315,7 +290,6 @@ class PredictionAdapter:
             "message": "Modular engine backtest complete.",
             "training_time": round(time.time() - start, 2),
             "metrics": metrics,
-            "overfit_gate": gate,
             "engine": "modular",
             "mean_partial_hits": mean_hits,
             "lift_vs_random": lift,

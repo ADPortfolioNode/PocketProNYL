@@ -82,10 +82,11 @@ class TrainerService:
         try:
             from utils.training_defaults import (
                 get_base_training_defaults,
-                get_game_training_defaults,
+                get_optimum_config,
             )
             if game:
-                defaults = get_game_training_defaults(game)
+                # Canonical app-wide optimum config for this game.
+                defaults = get_optimum_config(game)
             else:
                 defaults = get_base_training_defaults()
             # Strip UI-only fields from trainer runtime knobs
@@ -1444,16 +1445,14 @@ class TrainerService:
                     or mapping.get("max_train_attempts")
                 ),
                 "model_strategy": stored_params.get("model_strategy") or mapping.get("model_strategy"),
-                "blend_weight": _coerce_float(stored_params.get("blend_weight") or mapping.get("blend_weight")),
-                "data_limit": _coerce_int(stored_params.get("data_limit") or mapping.get("data_limit")),
-                "training_params": stored_params,
-                # Overfit signals carried through so the optimum-config
-                # selection below can skip gate-failing candidates.
                 "overfit_gap_percent": _coerce_float(mapping.get("overfit_gap_percent")),
                 "overfit_boundary_reached": bool(mapping.get("overfit_boundary_reached")),
                 "overfit_warning_reasons": mapping.get("overfit_warning_reasons") or [],
                 "holdout_p_value": _coerce_float(mapping.get("holdout_p_value")),
                 "holdout_accuracy_percent": _coerce_float(mapping.get("holdout_accuracy_percent")),
+                "blend_weight": _coerce_float(stored_params.get("blend_weight") or mapping.get("blend_weight")),
+                "data_limit": _coerce_int(stored_params.get("data_limit") or mapping.get("data_limit")),
+                "training_params": stored_params,
             }
             if resolved_accuracy is None and all(
                 config.get(key) is None
@@ -1601,13 +1600,6 @@ class TrainerService:
                         gc.collect()
 
             if candidates:
-                # Default optimum = best GATE-PASSING stored config, not
-                # just the highest accuracy. A stored run that explicitly
-                # failed the holdout gate (gap at/over boundary, or
-                # holdout not beating random) is skipped, so an overfit
-                # optimum cannot become the per-game default. Candidates
-                # with no holdout data at all (pre-gate records) pass
-                # through, so legacy optima are not all discarded.
                 try:
                     from prediction.metrics.overfit_gate import (
                         stored_candidate_fails_gate,

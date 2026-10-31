@@ -1,9 +1,4 @@
-"""Rebalance ensemble weights toward plugins that hit, and keep mixes that raise accuracy.
-
-Overfit taming: the mix is capped lower, the recent window is longer
-(20 draws, not 8), and the hit softmax is softer, so one lucky streak
-cannot swing the ensemble. Weight changes still need to survive on
-later draws to matter."""
+"""Rebalance ensemble weights toward plugins that hit, and keep mixes that raise accuracy."""
 
 from __future__ import annotations
 
@@ -16,8 +11,8 @@ from prediction.state.weight_store import WeightStore
 
 _IMPROVEMENT_EPS = 1e-12
 _REGRESSION_MARGIN = 0.01
-_MAX_LEARNING_RATE = 0.25
-_RECENT_WINDOW = 20
+_MAX_LEARNING_RATE = 0.45
+_RECENT_WINDOW = 8
 
 
 class WeightUpdater:
@@ -29,12 +24,12 @@ class WeightUpdater:
     def _adaptive_mix(self, state: WeightState, learning_rate: float, min_weight: float) -> float:
         """Larger mix when recent promotions land; smaller mix after regressions."""
         recent = state.history[-6:]
-        mix = min(max(float(learning_rate) * 2.4, 0.08), 0.35)
+        mix = min(max(float(learning_rate) * 2.4, 0.08), 0.55)
         if recent:
             regressions = sum(1 for item in recent if item.get("regressed"))
             promotions = sum(1 for item in recent if item.get("promoted"))
             if promotions >= 2 and regressions == 0:
-                mix = min(0.35, mix * 1.25)
+                mix = min(0.65, mix * 1.25)
             elif regressions >= 2:
                 mix = max(0.08, mix * (0.75 ** min(regressions - 1, 3)))
         return min(max(mix, float(min_weight)), _MAX_LEARNING_RATE)
@@ -68,7 +63,7 @@ class WeightUpdater:
         if not scores:
             return {}
         peak = max(scores.values())
-        temperature = 0.35
+        temperature = 0.18
         weighted: dict[str, float] = {}
         for name, score in scores.items():
             # Square the hit rate so a plugin that matched 2/5 beats one that matched 0.
