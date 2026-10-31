@@ -28,7 +28,8 @@ class GameSummaryResponse(BaseModel):
 async def get_games(refresh: bool = Query(False, description="Refresh live Chroma draw counts")):
     """
     Dynamically list all configured games with rules, suggestion formats,
-    schedules, draw counts, and rule-derived training defaults.
+    schedules, draw counts, and per-game optimum training defaults
+    (the same config training and the optimization panel use).
     """
     try:
         catalog = await asyncio.wait_for(

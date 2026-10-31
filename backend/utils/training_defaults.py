@@ -76,6 +76,21 @@ GAME_TRAINING_DEFAULTS: Dict[str, Dict[str, Any]] = {
             "and a larger validation share to limit overfitting."
         ),
     },
+    "numbers": {
+        "target_accuracy": 0.85,
+        "max_iterations": 12,
+        "train_size": 0.35,
+        "n_estimators": 100,
+        "max_depth": 8,
+        "window_size": 2,
+        "blend_step": 0.06,
+        "data_limit": 0,
+        "reasoning": (
+            "Numbers is the same 3-digit daily game as Pick 3; use the same "
+            "shallow, low-capacity profile to limit overfitting. Previously "
+            "Numbers had no profile and fell back to generic defaults."
+        ),
+    },
     "take5": {
         "target_accuracy": 0.88,
         "max_iterations": 15,
@@ -187,6 +202,20 @@ def _merge_defaults(
             if value is not None:
                 merged[key] = value
     return merged
+
+
+def get_optimum_config(game: Optional[str] = None) -> Dict[str, Any]:
+    """Return the single app-wide optimum config for ``game``.
+
+    This is the canonical accessor every part of the app must use --
+    training routes, the game catalog, the optimization panel, the
+    audit script, and the trainer's per-game defaults -- so a game
+    never shows one config in one view and a different config in
+    another. It is exactly ``get_game_training_defaults``: the
+    rule-derived defaults overlaid with the hand-tuned per-game
+    profile. With no game it returns the generic baseline.
+    """
+    return get_game_training_defaults(game)
 
 
 def get_base_training_defaults() -> Dict[str, Any]:
@@ -302,10 +331,10 @@ class TrainingOptimizer:
         }
 
     def get_defaults(self, game: Optional[str] = None) -> Dict[str, Any]:
-        return get_game_training_defaults(game)
+        return get_optimum_config(game)
 
     def get_optimization_payload(self, game: str) -> Dict[str, Any]:
-        optimized = get_game_training_defaults(game)
+        optimized = get_optimum_config(game)
         return {
             "game": str(game).strip().lower(),
             "optimized_defaults": optimized,
@@ -327,4 +356,5 @@ __all__ = [
     "game_training_optimizer",
     "get_base_training_defaults",
     "get_game_training_defaults",
+    "get_optimum_config",
 ]

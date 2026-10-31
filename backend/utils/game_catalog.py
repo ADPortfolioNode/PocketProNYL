@@ -258,7 +258,13 @@ def build_game_entry(game: str, draw_count: int = 0) -> Dict[str, Any]:
     title = GAME_TITLES.get(game, game)
     fmt = suggestion_format_for_game(game)
     schedule = deepcopy(GAME_PREDICTION_SCHEDULES.get(game) or {})
-    training = compute_training_defaults_for_game(game)
+    from utils.training_defaults import get_optimum_config
+
+    # App-wide consistency: catalog training_defaults is the same
+    # per-game optimum config every other view uses, not the raw
+    # rule-derived values (Powerball: derived 0.94/depth 22/380 vs
+    # optimum 0.92/depth 12/180).
+    training = get_optimum_config(game)
     endpoints = list(DATASET_ENDPOINTS.get(game) or [])
     resources = _build_resources(endpoints)
     return {

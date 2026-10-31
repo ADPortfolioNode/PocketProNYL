@@ -82,10 +82,11 @@ class TrainerService:
         try:
             from utils.training_defaults import (
                 get_base_training_defaults,
-                get_game_training_defaults,
+                get_optimum_config,
             )
             if game:
-                defaults = get_game_training_defaults(game)
+                # Canonical app-wide optimum config for this game.
+                defaults = get_optimum_config(game)
             else:
                 defaults = get_base_training_defaults()
             # Strip UI-only fields from trainer runtime knobs
@@ -1444,6 +1445,11 @@ class TrainerService:
                     or mapping.get("max_train_attempts")
                 ),
                 "model_strategy": stored_params.get("model_strategy") or mapping.get("model_strategy"),
+                "overfit_gap_percent": _coerce_float(mapping.get("overfit_gap_percent")),
+                "overfit_boundary_reached": bool(mapping.get("overfit_boundary_reached")),
+                "overfit_warning_reasons": mapping.get("overfit_warning_reasons") or [],
+                "holdout_p_value": _coerce_float(mapping.get("holdout_p_value")),
+                "holdout_accuracy_percent": _coerce_float(mapping.get("holdout_accuracy_percent")),
                 "blend_weight": _coerce_float(stored_params.get("blend_weight") or mapping.get("blend_weight")),
                 "data_limit": _coerce_int(stored_params.get("data_limit") or mapping.get("data_limit")),
                 "training_params": stored_params,
@@ -1592,6 +1598,27 @@ class TrainerService:
                         )
                     finally:
                         gc.collect()
+
+            if candidates:
+                try:
+                    from prediction.metrics.overfit_gate import (
+                        stored_candidate_fails_gate,
+                    )
+
+                    passing = [
+                        item
+                        for item in candidates
+                        if not stored_candidate_fails_gate(item)
+                    ]
+                    if len(passing) < len(candidates):
+                        logger.info(
+                            "Skipped %s gate-failing stored optimum candidate(s) for %s",
+                            len(candidates) - len(passing),
+                            game_key,
+                        )
+                    candidates = passing
+                except Exception:
+                    pass
 
             if not candidates:
                 fallback = _precision_first_defaults(record_count)
