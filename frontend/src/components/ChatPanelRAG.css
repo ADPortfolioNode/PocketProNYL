@@ -356,3 +356,78 @@
   max-height: min(70vh, 640px);
   min-height: 360px;
 }
+
+/* RAG process display: a process panel, never bubble text. */
+.rag-process {
+  margin-top: 0.45rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-tertiary);
+  font-size: 0.8rem;
+}
+
+.rag-process-title {
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+}
+
+.rag-process-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.rag-process-step {
+  display: flex;
+  gap: 0.45rem;
+  align-items: baseline;
+}
+
+.rag-process-step.failed {
+  color: #ff6b6b;
+}
+
+.rag-process-step.warn {
+  color: #ffb454;
+}
+
+.rag-process-step.active {
+  color: var(--accent-green);
+}
+
+.rag-process-step.pending {
+  opacity: 0.65;
+}
+
+.rag-process-mark {
+  font-weight: 700;
+  min-width: 1rem;
+  text-align: center;
+}
+
+/* Ingest -> chat link shown in the Concierge card after an ingest run. */
+.chat-ingest-note {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: 0.85rem;
+}
+
+.chat-ingest-btn {
+  border: 1px solid var(--accent-green);
+  background: transparent;
+  color: var(--accent-green);
+  border-radius: 999px;
+  padding: 0.3rem 0.8rem;
+  cursor: pointer;
+  font-weight: 700;
+}

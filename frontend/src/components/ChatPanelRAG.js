@@ -105,12 +105,68 @@ function detectGameFromPrompt(text, selectedGame) {
   return selectedGame || 'all';
 }
 
-const ChatPanelRAG = ({ game = null, isExpanded = false, onActivityChange = null }) => {
+function scopeLabel(game) {
+  const key = String(game || '').toLowerCase();
+  return GAME_DISPLAY_NAMES[key] || (key ? key.toUpperCase() : 'All games');
+}
+
+// RAG process display. This is a process panel, never bubble text: the
+// bubble stays message-only and sources stay in the "View sources"
+// list. Steps show only real request facts — the live box shows the
+// step the request is actually in (retrieval runs first, synchronously,
+// before generation, so "Retrieving…" is the honest live step), and the
+// completed box is built from the backend rag_trace.
+function RagProcessSteps({ trace, live = false }) {
+  if (!trace) return null;
+  const steps = [];
+  if (trace.tool) {
+    steps.push({ state: live ? 'active' : 'done', text: 'Tool action — no RAG retrieval' });
+  } else if (!trace.ragEnabled) {
+    steps.push({ state: live ? 'active' : 'done', text: 'RAG OFF — answering without retrieval' });
+  } else if (live) {
+    steps.push({ state: 'done', text: 'Question received' });
+    steps.push({ state: 'active', text: `Retrieving from Chroma draw history (${trace.scope || 'All games'})` });
+    steps.push({ state: 'pending', text: 'Generating answer' });
+  } else if (trace.retrieval === 'failed') {
+    steps.push({ state: 'failed', text: 'Retrieval failed — answer is not Chroma-grounded' });
+  } else if (trace.retrieval === 'skipped') {
+    steps.push({ state: 'done', text: 'No retrieval run for this answer' });
+  } else if (trace.sources_count > 0) {
+    steps.push({ state: 'done', text: `Retrieved ${trace.sources_count} chunk${trace.sources_count === 1 ? '' : 's'} from ${trace.scope || 'All games'}` });
+  } else {
+    steps.push({ state: 'warn', text: `No chunks returned for ${trace.scope || 'All games'} — answer is not Chroma-grounded` });
+  }
+  if (!live && !trace.tool && trace.provider) {
+    steps.push({
+      state: trace.fallback ? 'warn' : 'done',
+      text: trace.fallback
+        ? 'Language models unavailable — answered from retrieved text'
+        : `Answered by ${providerLabel(trace.provider)}`,
+    });
+  }
+  const mark = (state) => (state === 'done' ? '✓' : state === 'failed' ? '✕' : state === 'warn' ? '!' : state === 'active' ? '…' : '○');
+  return (
+    <div className="rag-process" aria-label="RAG process">
+      <div className="rag-process-title">{live ? 'RAG process — running' : 'RAG process'}</div>
+      <ul className="rag-process-steps">
+        {steps.map((step, i) => (
+          <li key={i} className={`rag-process-step ${step.state}`}>
+            <span className="rag-process-mark">{mark(step.state)}</span>
+            <span>{step.text}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+const ChatPanelRAG = ({ game = null, isExpanded = false, onActivityChange = null, prefill = null }) => {
   const [messages, setMessages] = useState(() => ([
     { sender: 'bot', text: buildGreeting(game), sources: [] },
   ]));
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [pendingTrace, setPendingTrace] = useState(null);
   const [useRag, setUseRag] = useState(true);
   const [lmProvider, setLmProvider] = useState(() => {
     try {
@@ -121,6 +177,16 @@ const ChatPanelRAG = ({ game = null, isExpanded = false, onActivityChange = null
   });
   const messagesEndRef = useRef(null);
   const greetedGameRef = useRef(game);
+  const prefillRef = useRef(null);
+
+  // Ingest → chat link from the Dashboard: a prefill object fills the
+  // composer (it never auto-sends) so the user can ask about the
+  // latest ingest without leaving the Dashboard.
+  useEffect(() => {
+    if (!prefill || prefill.at === prefillRef.current || isLoading) return;
+    prefillRef.current = prefill.at;
+    setInput(prefill.text || '');
+  }, [prefill, isLoading]);
 
   useEffect(() => {
     Prism.highlightAll();
@@ -165,6 +231,11 @@ const ChatPanelRAG = ({ game = null, isExpanded = false, onActivityChange = null
 
     setMessages((prev) => [...prev, { sender: 'user', text }]);
     setInput('');
+    setPendingTrace(
+      (trainIntent && !tuningIntent) || tuningIntent
+        ? { tool: true, ragEnabled: useRag, scope: scopeLabel(toolGame) }
+        : { tool: false, ragEnabled: useRag, scope: scopeLabel(game) },
+    );
     setIsLoading(true);
 
     try {
@@ -214,6 +285,16 @@ const ChatPanelRAG = ({ game = null, isExpanded = false, onActivityChange = null
           contextUsed: Boolean(data.context_used),
           sourcesCount: data.sources_count || 0,
           lmProvider: data.lm_provider || lmProvider,
+          ragTrace: data.rag_trace ? {
+            tool: Boolean(data.tool_name),
+            ragEnabled: data.rag_trace.rag_enabled,
+            retrieval: data.rag_trace.retrieval,
+            reason: data.rag_trace.reason || null,
+            scope: data.rag_trace.scope,
+            sources_count: data.rag_trace.sources_count || 0,
+            provider: data.rag_trace.provider || null,
+            fallback: Boolean(data.rag_trace.fallback),
+          } : null,
         },
       ]);
     } catch (error) {
@@ -223,9 +304,18 @@ const ChatPanelRAG = ({ game = null, isExpanded = false, onActivityChange = null
           sender: 'bot',
           text: `Error: ${error?.message || 'Could not reach the chat service.'}`,
           sources: [],
+          ragTrace: {
+            ragEnabled: useRag,
+            retrieval: 'failed',
+            scope: scopeLabel(game),
+            sources_count: 0,
+            provider: null,
+            fallback: false,
+          },
         },
       ]);
     } finally {
+      setPendingTrace(null);
       setIsLoading(false);
     }
   };
@@ -323,8 +413,16 @@ const ChatPanelRAG = ({ game = null, isExpanded = false, onActivityChange = null
                 ))}
               </details>
             )}
+
+            {msg.sender === 'bot' && msg.ragTrace && (
+              <RagProcessSteps trace={msg.ragTrace} />
+            )}
           </div>
         ))}
+
+        {isLoading && pendingTrace && (
+          <RagProcessSteps trace={pendingTrace} live />
+        )}
 
         {isLoading && (
           <div className="chat-message-rag bot">
