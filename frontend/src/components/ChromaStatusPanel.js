@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import getApiBase from '../utils/apiBase';
 import chromaStateManager from '../utils/chromaStateManager';
+import CollectionDetailModal from './CollectionDetailModal';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -12,6 +13,7 @@ export default function ChromaStatusPanel() {
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState(null);
     const [apiBase, setApiBase] = useState(null);
+    const [selectedCollection, setSelectedCollection] = useState(null);
     const inFlightRef = useRef(false);
 
     const fetchCollectionsWithRetry = async (baseUrl, maxAttempts = 3) => {
@@ -132,10 +134,23 @@ export default function ChromaStatusPanel() {
             {collections.length > 0 && (
                 <ul className="list-group list-group-flush">
                     {collections.map((collection, index) => (
-                        <li key={`${collection.name}-${index}`} className="list-group-item d-flex justify-content-between align-items-center">
+                        <li
+                            key={`${collection.name}-${index}`}
+                            className="list-group-item d-flex justify-content-between align-items-center"
+                            role="button"
+                            tabIndex={0}
+                            title="View collection details"
+                            onClick={() => setSelectedCollection(collection)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    setSelectedCollection(collection);
+                                }
+                            }}
+                        >
                             <div className="d-flex flex-column">
                                 <span className="fw-bold">{collection.name.toUpperCase()}</span>
-                                <small className="text-muted">Index #{collection.record_index || (index + 1)}</small>
+                                <small className="text-muted">Index #{collection.record_index || (index + 1)} · Click to view</small>
                             </div>
                             <div className="d-flex align-items-center gap-2">
                                 {(collection.state === 'timeout' || collection.state === 'error') && (
@@ -148,6 +163,13 @@ export default function ChromaStatusPanel() {
                         </li>
                     ))}
                 </ul>
+            )}
+            {selectedCollection && (
+                <CollectionDetailModal
+                    collection={selectedCollection}
+                    apiBase={apiBase}
+                    onClose={() => setSelectedCollection(null)}
+                />
             )}
         </div>
     );
