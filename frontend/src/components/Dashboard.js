@@ -325,6 +325,11 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
   const [selectedTrainingExperimentId, setSelectedTrainingExperimentId] = useState('');
   const [expandedCard, setExpandedCard] = useState('chat');
   const [chatIsActive, setChatIsActive] = useState(false);
+  // Ingest -> chat link: the latest completed ingest, so the Concierge
+  // card can offer a prefilled question about it. This persists after
+  // the ingest card auto-collapses, unlike a button inside that card.
+  const [lastIngest, setLastIngest] = useState(null);
+  const [chatPrefill, setChatPrefill] = useState(null);
   const [tuningStatus, setTuningStatus] = useState({
     status: 'idle',
     game: null,
@@ -894,6 +899,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
     if (progress.status === 'completed') {
       setIngestStatus('completed');
       setIngestErrorMessage('');
+      setLastIngest({ game: selectedGame, at: Date.now() });
       setTimeout(() => setExpandedCard(null), 2000); // Auto-collapse after 2s
     } else if (progress.status === 'error') {
       setIngestStatus('error');
@@ -1482,10 +1488,34 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
             <p className="mb-3 text-muted">
               Ask about draws, training, or errors. Toggle RAG for Chroma-grounded answers.
             </p>
+            {lastIngest && (
+              <div className="chat-ingest-note">
+                <span>
+                  Latest ingest complete
+                  {lastIngest.game && lastIngest.game !== ALL_GAMES_VALUE
+                    ? ` for ${String(lastIngest.game).toUpperCase()}`
+                    : ' for all games'}
+                  .
+                </span>
+                <button
+                  type="button"
+                  className="chat-ingest-btn"
+                  onClick={() => setChatPrefill({
+                    at: Date.now(),
+                    text: lastIngest.game && lastIngest.game !== ALL_GAMES_VALUE
+                      ? `What changed for ${String(lastIngest.game).toUpperCase()} after the latest ingest, and what's hot lately?`
+                      : "What changed after the latest ingest, and what's hot lately?",
+                  })}
+                >
+                  Ask about the latest ingest
+                </button>
+              </div>
+            )}
             <ChatPanelRAG
               game={selectedGame}
               isExpanded={expandedCard === 'chat' || chatIsActive}
               onActivityChange={setChatIsActive}
+              prefill={chatPrefill}
             />
           </ExpandableCard>
         </div>

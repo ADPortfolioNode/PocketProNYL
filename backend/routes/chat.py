@@ -55,7 +55,10 @@ def tuning_chart(game: Optional[str] = None):
 
 class ChatRequest(BaseModel):
     text: str = ""
-    game: str = None
+    # Optional: the frontend sends game: null for the all-games scope,
+    # and pydantic v2 rejects an explicit null for a plain `str` field,
+    # which made every default-scope chat request fail validation.
+    game: Optional[str] = None
     use_rag: bool = True
     lm_provider: str = "auto"
     tool: Optional[Dict[str, Any]] = None
@@ -67,6 +70,11 @@ class ChatResponse(BaseModel):
     context_used: bool = False
     sources_count: int = 0
     lm_provider: Optional[str] = None
+    # Step-by-step RAG trace for the dynamic process display. Values are
+    # real request facts (scope, retrieval outcome, provider), never
+    # invented: retrieval is "done" / "skipped" / "failed", and the
+    # detail string is never raw exception text.
+    rag_trace: Optional[Dict[str, Any]] = None
     # Joined, key-stripped chain error (capped at 1000 chars) when every
     # LM rung failed; None when a provider (or retrieved text) answered.
     lm_error: Optional[str] = None
@@ -122,21 +130,52 @@ async def chat(request: ChatRequest):
                 lm_provider=None,
                 tool_name=tool_name,
                 tool_result=tool_result,
+                rag_trace={
+                    "rag_enabled": request.use_rag,
+                    "retrieval": "skipped",
+                    "reason": "tool action does not use RAG retrieval",
+                    "scope": None,
+                    "sources_count": 0,
+                    "provider": None,
+                    "fallback": False,
+                },
             )
 
-        # Prepare context if RAG is enabled
+        # Prepare context if RAG is enabled. Previously retrieval only
+        # ran for a single selected game, so with the Dashboard default
+        # (no game / all games) RAG ON silently retrieved nothing and
+        # the answer was ungrounded. Now RAG ON always retrieves:
+        # one game's collection when a game is selected, otherwise
+        # across all game collections (the retrieval service's own
+        # default for game=None).
         context_docs = []
-        if request.use_rag and request.game and not is_all_games_scope(request.game):
+        retrieval_status = "skipped"
+        retrieval_scope = None
+        if request.use_rag:
+            retrieval_status = "done"
             try:
-                from utils.validation import _require_game_key
-                game_key = _require_game_key(request.game)
-                context_docs = rag_service.retrieve_context(
-                    query=request.text,
-                    game=game_key,
-                    top_k=3,
-                )
+                if request.game and not is_all_games_scope(request.game):
+                    from utils.validation import _require_game_key
+                    game_key = _require_game_key(request.game)
+                    retrieval_scope = game_key
+                    context_docs = rag_service.retrieve_context(
+                        query=request.text,
+                        game=game_key,
+                        top_k=3,
+                    )
+                else:
+                    retrieval_scope = "all games"
+                    context_docs = rag_service.retrieve_context(
+                        query=request.text,
+                        game=None,
+                        use_all_games=True,
+                        top_k=3,
+                    )
             except (ValueError, Exception):
-                # Invalid game key or retrieval failure — continue without RAG
+                # Invalid game key or retrieval failure — continue
+                # without RAG, but report it in the trace instead of
+                # silently returning an ungrounded answer.
+                retrieval_status = "failed"
                 context_docs = []
 
         # Build prompt with context if available
@@ -196,6 +235,14 @@ async def chat(request: ChatRequest):
             lm_error=lm_error if selected_provider in ("fallback", "retrieved_text") else None,
             tool_name=None,
             tool_result=None,
+            rag_trace={
+                "rag_enabled": request.use_rag,
+                "retrieval": retrieval_status,
+                "scope": retrieval_scope,
+                "sources_count": len(context_docs),
+                "provider": selected_provider,
+                "fallback": selected_provider == "retrieved_text",
+            },
         )
 
     except HTTPException:
