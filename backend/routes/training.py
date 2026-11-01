@@ -622,6 +622,51 @@ async def get_train_optimization(game: str):
     return game_training_optimizer.get_optimization_payload(game_key)
 
 
+@router.get("/api/overfit_audit")
+async def get_overfit_audit():
+    """Return per-game overfit audit rows from the last backtest.
+
+    Served by the backend itself (where the deps live) so the audit
+    script can stay stdlib-only: it reads each game's ready-marker
+    metrics via PredictionAdapter and applies the overfit gate, without
+    running a new backtest. A game with no ready model reports
+    has_model False and no holdout numbers.
+    """
+    from prediction.metrics.overfit_gate import evaluate_overfit_gate
+    from services.prediction_adapter import prediction_adapter
+
+    rows = []
+    for game_key in GAME_CONFIGS.keys():
+        summary = prediction_adapter.get_prediction_summary(game_key)
+        metrics = summary.get("metrics") or {}
+        gate = evaluate_overfit_gate(metrics) if metrics else {
+            "blocked": False,
+            "reasons": ["no_metrics"],
+            "mode": "block",
+        }
+        rows.append({
+            "game": game_key,
+            "has_model": bool(summary.get("has_model")),
+            "validation_accuracy_percent": metrics.get(
+                "validation_accuracy_percent"
+            ),
+            "holdout_accuracy_percent": metrics.get(
+                "holdout_accuracy_percent"
+            ),
+            "overfit_gap_percent": metrics.get("overfit_gap_percent"),
+            "holdout_mean_partial_hits": metrics.get(
+                "holdout_mean_partial_hits"
+            ),
+            "holdout_lift_vs_random": metrics.get("holdout_lift_vs_random"),
+            "holdout_p_value": metrics.get("holdout_p_value"),
+            "holdout_evaluated_draws": metrics.get("holdout_evaluated_draws"),
+            "exact_match_rate": metrics.get("exact_match_rate"),
+            "gate_blocked": bool(gate.get("blocked")),
+            "gate_reasons": gate.get("reasons") or [],
+        })
+    return {"status": "ok", "games": rows}
+
+
 @router.get("/api/train_status")
 async def get_train_status(game: str = None):
     if game:
