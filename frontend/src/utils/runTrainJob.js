@@ -69,7 +69,18 @@ export async function runTrainAllJobs(axiosClient, apiBase, body, { timeoutMs = 
 
   while (Date.now() < deadline) {
     await sleep(pollMs);
-    const poll = await axiosClient.get(`${apiBase}/api/train_status`, { timeout: 8000 });
+    let poll;
+    try {
+      poll = await axiosClient.get(`${apiBase}/api/train_status`, { timeout: 8000 });
+    } catch (error) {
+      // Transient poll failure (504 gateway timeout, network timeout, or
+      // a busy backend) must NOT abort the Train All wait: the training
+      // thread on the server keeps running, and the next poll will show
+      // its real status. This mirrors runTrainingJob, which already
+      // swallows poll errors. Only an explicit job error below, or the
+      // 60-minute deadline, ends the wait with a failure.
+      continue;
+    }
     const raw = poll.data?.jobs || poll.data || {};
     const list = Array.isArray(raw) ? raw : Object.values(raw);
     const relevant = watched.length
