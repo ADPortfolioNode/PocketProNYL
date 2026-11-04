@@ -308,6 +308,28 @@ def grade_entry(entry: dict, index: dict[str, list[Draw]], rules: GameRules, gam
         "strategy_weights": entry.get("strategy_weights") or {},
         "strategy_contributions": entry.get("strategy_contributions") or {},
     }
+    # Date labels on EVERY row, whatever its status: when the suggestion
+    # was served, and which draw it is expected to be judged against.
+    # Pending rows need these most — they say which draw is awaited.
+    # Labeling never fails grading.
+    try:
+        from services.suggestion_dates import expected_draw as _expected_draw
+        from services.suggestion_dates import suggestion_date as _suggestion_date
+
+        base["suggestion_date"] = _suggestion_date(entry.get("served_at"))
+        exp_date, exp_session = _expected_draw(
+            game, entry.get("served_at"),
+            target_date=entry.get("target_draw_date"),
+            target_session=entry.get("target_draw_session"),
+            target_basis=entry.get("target_basis"),
+            expected_date=entry.get("expected_draw_date"),
+            expected_session=entry.get("expected_draw_session"))
+        base["expected_draw_date"] = exp_date
+        base["expected_draw_session"] = exp_session
+    except Exception:
+        base["suggestion_date"] = None
+        base["expected_draw_date"] = None
+        base["expected_draw_session"] = None
     try:
         pmf = accuracy_stats.hit_distribution(ticket, rules)
     except ValueError:
