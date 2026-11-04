@@ -20,11 +20,19 @@ SMALL_SAMPLE = 30
 
 
 def _unique_tickets(graded: list[dict]) -> list[dict]:
-    """One ticket per (target draw, numbers): re-serving the same pick is not new evidence."""
+    """One ticket per (draw graded against, numbers): re-serving the same
+    pick is not new evidence. Keyed on the ACTUAL draw, not the claimed
+    target: experiment entries carry no target (their next_draw_date is
+    the serve date), and immediate-next entries grade against a draw
+    other than their target — in both cases the actual draw is the
+    evidence unit. Falls back to the target fields for rows without an
+    actual draw (should not happen for graded rows)."""
     seen: set[tuple] = set()
     unique: list[dict] = []
     for item in graded:
-        key = (item.get("target_draw_date"), item.get("target_draw_session"), tuple(sorted(item.get("numbers") or [])))
+        key = (item.get("actual_draw_date") or item.get("target_draw_date"),
+               item.get("actual_draw_session") or item.get("target_draw_session"),
+               tuple(sorted(item.get("numbers") or [])))
         if key in seen:
             continue
         seen.add(key)
