@@ -189,4 +189,49 @@ def grade_entries(
             info["draws_error"] = str(exc)
     info["draws_loaded"] = len(draws)
     index = index_draws(draws, feedback_draws(reported or [], rules))
+    # Verified fallback: an entry whose target draw is not ingested yet is
+    # graded against the official NY dataset for that date, instead of
+    # staying pending until the next ingest. Read-time only: fetched draws
+    # live in this index, never in Chroma, the ledger, or feedback. Only
+    # past dates are fetched; today's and future draws stay pending.
+    info["verified_draws_fetched"] = 0
+    info["verified_draws_error"] = None
+    try:
+        from services import verified_draws as _verified
+        from services.draw_schedule import lottery_timezone
+
+        if _verified.verified_draws_enabled():
+            today = datetime.now(lottery_timezone()).date()
+            wanted: set[str] = set()
+            for entry in entries:
+                target = str(entry.get("target_draw_date") or "")[:10]
+                if not target:
+                    continue
+                try:
+                    target_day = date.fromisoformat(target)
+                except ValueError:
+                    continue
+                if target_day >= today:
+                    continue
+                if _match_draw(entry, index) is None:
+                    wanted.add(target)
+            for target in sorted(wanted):
+                fetched, error = _verified.official_draws_for_date(
+                    game, date.fromisoformat(target))
+                if error and info["verified_draws_error"] is None:
+                    info["verified_draws_error"] = error
+                bucket = index.setdefault(target, [])
+                for draw in fetched:
+                    if any(_session(d) == _session(draw)
+                           and (d.metadata or {}).get("source") != "user_reported"
+                           for d in bucket):
+                        continue
+                    bucket.append(draw)
+                    info["verified_draws_fetched"] += 1
+            for bucket in index.values():
+                bucket.sort(key=lambda d: (SESSION_ORDER.get(_session(d), 9),
+                                           (d.metadata or {}).get("source") == "user_reported"))
+    except Exception as exc:  # verified fetch must never break grading
+        if info["verified_draws_error"] is None:
+            info["verified_draws_error"] = str(exc)
     return [grade_entry(e, index, rules, game) for e in entries], info
