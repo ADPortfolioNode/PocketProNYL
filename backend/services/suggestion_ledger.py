@@ -30,6 +30,35 @@ _LOCK = threading.Lock()
 logger = logging.getLogger(__name__)
 
 
+def _clean_weights(value) -> dict:
+    """Sanitized strategy weights: {name: float}, non-numeric entries dropped."""
+    cleaned: dict = {}
+    if isinstance(value, dict):
+        for name, weight in value.items():
+            try:
+                cleaned[str(name)] = round(float(weight), 6)
+            except (TypeError, ValueError):
+                continue
+    return cleaned
+
+
+def _clean_contributions(value) -> dict:
+    """Sanitized per-strategy numbers: {name: [ints]}, non-numeric entries dropped."""
+    cleaned: dict = {}
+    if isinstance(value, dict):
+        for name, numbers in value.items():
+            if not isinstance(numbers, (list, tuple)):
+                continue
+            ints = []
+            for number in numbers:
+                try:
+                    ints.append(int(number))
+                except (TypeError, ValueError):
+                    continue
+            cleaned[str(name)] = ints
+    return cleaned
+
+
 def ledger_root() -> str:
     return os.environ.get("LEDGER_DIR") or os.path.join(data_dir(), "ledger")
 
@@ -187,6 +216,15 @@ class SuggestionLedger:
                 "model_version": model_version(result),
                 "source": source,
                 "recent_k": recent_k,
+                # Attribution for graded reweighting: the weights and the
+                # per-strategy numbers that produced this exact ticket.
+                # Without these, a graded hit cannot be credited to any
+                # strategy (the model_version hash alone does not decompose).
+                # Chained-ensemble tickets keep their model name so the
+                # reweighter can skip them: their weights_used still describe
+                # the ensemble blend, not the chained pick that was served.
+                "strategy_weights": _clean_weights(result.get("strategy_weights")),
+                "strategy_contributions": _clean_contributions(result.get("strategy_contributions")),
             }
             return self.append_suggestion(key, entry)
         except Exception as exc:  # pragma: no cover - defensive

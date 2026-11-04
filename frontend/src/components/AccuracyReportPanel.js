@@ -70,6 +70,9 @@ export function AccuracyReportView({ report }) {
                     ? <><Balls numbers={s.actual_numbers} hits={s.matched_numbers || []} />
                       {s.draw_source === 'verified_official'
                         ? <div className="insight-muted">Verified official draw</div>
+                        : null}
+                      {s.graded_against === 'immediate_next' && s.actual_draw_date && s.actual_draw_date !== s.target_draw_date
+                        ? <div className="insight-muted">Next draw after serving</div>
                         : null}</>
                     : <span className="insight-muted">{s.status === 'pending' ? 'Draw not in yet' : (s.reason || s.status)}</span>}
                 </td>
