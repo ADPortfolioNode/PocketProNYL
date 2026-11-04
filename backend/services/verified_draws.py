@@ -98,6 +98,72 @@ def _draws_from_row(game: str, row: dict, rules, dataset_id: str) -> list[Draw]:
     return draws
 
 
+def official_draws_in_range(game: str, start: date, end: date) -> tuple[list[Draw], str | None]:
+    """Official draws for an inclusive date range. Returns ([draws], error-or-None).
+
+    Every configured dataset for the game is queried, not just the first:
+    pick3 has two datasets (one per session feed), and querying one alone
+    silently drops the other session's draws. Rows are merged and deduped
+    by (date, session, numbers). A date range keeps immediate-next-draw
+    grading to one fetch per served date instead of one per missing day.
+    """
+    game = str(game or "").strip().lower()
+    if game in UNSUPPORTED_GAMES:
+        return [], None
+    endpoints = DATASET_ENDPOINTS.get(game) or []
+    if not endpoints:
+        return [], None
+    try:
+        rules = game_rules_from_config(game)
+    except Exception as exc:
+        return [], f"unknown game rules for {game}: {exc}"
+    try:
+        from utils.game_validation import dataset_id_from_url
+    except Exception:
+        return [], None
+    day_after = end + timedelta(days=1)
+    where = (
+        f"draw_date >= '{start.isoformat()}T00:00:00' "
+        f"AND draw_date < '{day_after.isoformat()}T00:00:00'"
+    )
+    params = urllib.parse.urlencode({"$where": where, "$limit": "500", "$order": "draw_date ASC"})
+    draws: list[Draw] = []
+    seen: set = set()
+    errors: list[str] = []
+    for endpoint in endpoints:
+        try:
+            dataset_id = dataset_id_from_url(endpoint)
+        except Exception:
+            continue
+        if not dataset_id:
+            continue
+        url = f"https://{SOCRATA_DOMAIN}/resource/{dataset_id}.json?{params}"
+        request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        try:
+            with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
+                rows = json.load(response)
+        except Exception as exc:
+            errors.append(f"official draw fetch failed for {game} {start.isoformat()}..{end.isoformat()}: {exc}")
+            continue
+        for row in rows or []:
+            if not isinstance(row, dict):
+                continue
+            for draw in _draws_from_row(game, row, rules, dataset_id):
+                key = (draw.draw_date.isoformat() if draw.draw_date else None,
+                       _session_of(draw), tuple(draw.primary), tuple(draw.bonus or []))
+                if key in seen:
+                    continue
+                seen.add(key)
+                draws.append(draw)
+    if not draws and errors:
+        return [], errors[0]
+    return draws, None
+
+
+def _session_of(draw: Draw) -> str:
+    return str((draw.metadata or {}).get("draw_session") or "").strip().lower()
+
+
 def official_draws_for_date(game: str, target: date) -> tuple[list[Draw], str | None]:
     """Official draw(s) for one past date. Returns ([draws], error-or-None).
 
@@ -107,45 +173,7 @@ def official_draws_for_date(game: str, target: date) -> tuple[list[Draw], str | 
     failures return an error string instead of raising, so grading can
     leave the entry pending rather than crash.
     """
-    game = str(game or "").strip().lower()
-    if game in UNSUPPORTED_GAMES:
-        return [], None
-    endpoints = DATASET_ENDPOINTS.get(game) or []
-    if not endpoints:
-        return [], None
-    try:
-        from utils.game_validation import dataset_id_from_url
-
-        dataset_id = dataset_id_from_url(endpoints[0])
-    except Exception:
-        dataset_id = None
-    if not dataset_id:
-        return [], None
-    try:
-        rules = game_rules_from_config(game)
-    except Exception as exc:
-        return [], f"unknown game rules for {game}: {exc}"
-    day_after = target + timedelta(days=1)
-    where = (
-        f"draw_date >= '{target.isoformat()}T00:00:00' "
-        f"AND draw_date < '{day_after.isoformat()}T00:00:00'"
-    )
-    params = urllib.parse.urlencode({"$where": where, "$limit": "100"})
-    url = f"https://{SOCRATA_DOMAIN}/resource/{dataset_id}.json?{params}"
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
-            rows = json.load(response)
-    except (urllib.error.URLError, TimeoutError, ValueError) as exc:
-        return [], f"official draw fetch failed for {game} {target.isoformat()}: {exc}"
-    except Exception as exc:  # pragma: no cover - defensive
-        return [], f"official draw fetch failed for {game} {target.isoformat()}: {exc}"
-    draws: list[Draw] = []
-    for row in rows or []:
-        if not isinstance(row, dict):
-            continue
-        draws.extend(_draws_from_row(game, row, rules, dataset_id))
-    return draws, None
+    return official_draws_in_range(game, target, target)
 
 
 def verified_draws_enabled() -> bool:

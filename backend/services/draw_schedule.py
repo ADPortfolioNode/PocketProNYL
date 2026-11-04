@@ -81,3 +81,31 @@ def next_draw(game: str, now: datetime | None = None) -> dict:
         return {"draw_date": day.isoformat(), "draw_session": None, "draw_time": None,
                 "basis": "next_draw_day_after_today"}
     return {"draw_date": None, "draw_session": None, "draw_time": None, "basis": "unknown"}
+
+
+def scheduled_draw_time(game: str, day: date, session: str | None = None) -> datetime | None:
+    """Scheduled draw datetime for one game/day/session, or None if unknown.
+
+    Session games use the config draw_times/draw_sessions pair; single-draw
+    games use their one configured time, or the published time where known.
+    Used to order draws that carry no timestamp of their own (verified
+    official draws are date-only), and to tell whether a suggestion was
+    served before its target draw.
+    """
+    tz = lottery_timezone()
+    schedule = dict(GAME_PREDICTION_SCHEDULES.get(game, {}) or {})
+    times = [t for t in (_parse_hhmm(v) for v in schedule.get("draw_times") or []) if t]
+    sessions = list(schedule.get("draw_sessions") or [])
+    if times:
+        if session:
+            wanted = str(session).strip().lower()
+            for index, name in enumerate(sessions):
+                if str(name).strip().lower() == wanted and index < len(times):
+                    return datetime.combine(day, times[index], tzinfo=tz)
+        return datetime.combine(day, times[0], tzinfo=tz)
+    published = _PUBLISHED_DRAW_TIMES.get(str(game).strip().lower())
+    if published:
+        parsed = _parse_hhmm(published)
+        if parsed:
+            return datetime.combine(day, parsed, tzinfo=tz)
+    return None
