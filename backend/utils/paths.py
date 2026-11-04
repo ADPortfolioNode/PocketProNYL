@@ -32,5 +32,12 @@ def experiments_file() -> str:
     return os.path.join(experiments_dir(), "experiments.json")
 
 
+def experiments_history_file() -> str:
+    # Append-only archive of experiments evicted by the 3-per-game prune.
+    # The live file stays small; history is where past suggestions by date
+    # survive for accuracy grading.
+    return os.path.join(experiments_dir(), "experiments_history.jsonl")
+
+
 def ingestion_cache_dir() -> str:
     return os.path.join(data_dir(), "ingestion_cache")

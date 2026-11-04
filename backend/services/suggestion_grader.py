@@ -93,11 +93,19 @@ def _draw_moment(draw: Draw, game: str) -> datetime | None:
     Prefers a timestamp the draw itself carries, then the game's scheduled
     draw time for that date/session (session games draw 14:30/22:30 ET,
     powerball 22:59, megamillions 23:00, millionaireforlife 23:15).
+
+    A timestamp of exactly midnight is NOT a draw time: ingestion stores
+    date-only draws as midnight (e.g. draw_datetime "2026-10-28T00:00:00"),
+    and no NY game draws at midnight. Trusting it would make every draw
+    sort before any same-day suggestion, so same-day suggestions would
+    wrongly grade against the next day's draw. Midnight values fall
+    through to the scheduled time below.
     """
     meta = draw.metadata or {}
     for key in ("draw_datetime", "drawn_at"):
         parsed = _parse_iso(meta.get(key))
-        if parsed is not None:
+        if parsed is not None and not (
+                parsed.hour == 0 and parsed.minute == 0 and parsed.second == 0):
             return parsed
     raw_time = meta.get("draw_time")
     if raw_time and draw.draw_date:
@@ -295,6 +303,7 @@ def grade_entry(entry: dict, index: dict[str, list[Draw]], rules: GameRules, gam
         "model": entry.get("model"),
         "model_version": entry.get("model_version"),
         "source": entry.get("source"),
+        "recent_k": entry.get("recent_k"),
         # Attribution carried through for graded reweighting (absent on old entries).
         "strategy_weights": entry.get("strategy_weights") or {},
         "strategy_contributions": entry.get("strategy_contributions") or {},
@@ -306,6 +315,15 @@ def grade_entry(entry: dict, index: dict[str, list[Draw]], rules: GameRules, gam
     base["expected_hits_by_chance"] = round(accuracy_stats.expected_hits(pmf), 4) if pmf else None
     if str(entry.get("game") or game) != game:
         return {**base, "status": "rejected_other_game"}
+    if entry.get("target_basis") == "experiment":
+        # Experiments carry no target claim (their next_draw_date is the
+        # serve date, not the draw date), so there is no target guard to
+        # fail: the immediate-next resolution itself is the guard, since
+        # the graded draw is always after served_at by construction.
+        draw = _resolve_immediate_next(entry, index, game)
+        if draw is None:
+            return {**base, "status": "pending", "reason": "next draw not in yet"}
+        return _score_against(entry, draw, base, pmf, rules, game, "immediate_next")
     if entry.get("target_basis") == "requested" or _parse_iso(entry.get("served_at")) is None:
         # Explicitly requested target, or no serve time to order by: legacy
         # target-date rule, unchanged.
