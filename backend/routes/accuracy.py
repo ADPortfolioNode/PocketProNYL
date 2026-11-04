@@ -5,6 +5,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from services.accuracy_history import build_accuracy_history
 from services.accuracy_report import build_accuracy_report
 from services.accuracy_overview import build_accuracy_overview
 from services.suggestion_ledger import suggestion_ledger
@@ -46,6 +47,30 @@ async def accuracy_overview():
         return await asyncio.to_thread(build_accuracy_overview)
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
+
+
+@router.get("/api/accuracy_history")
+async def accuracy_history(
+    game: str = Query(...),
+    period: str = Query("monthly"),
+):
+    """Accuracy tracked over time, bucketed by suggestion_date.
+
+    Ledger and experiments are separate series (the same pick exists
+    in both — never add them together). Read-only; the history is
+    computed from the persistent suggestion records, so it accumulates
+    as new suggestions are served and graded.
+    """
+    if period not in ("monthly", "weekly"):
+        raise HTTPException(status_code=400, detail="period must be 'monthly' or 'weekly'")
+    try:
+        game_key = _require_game_key(game)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    try:
+        return await asyncio.to_thread(build_accuracy_history, game_key, period)
+    except Exception as exc:
+        return {"status": "error", "game": game_key, "message": str(exc)}
 
 
 @router.get("/api/suggestion_ledger")

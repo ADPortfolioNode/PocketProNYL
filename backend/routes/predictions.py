@@ -3,6 +3,7 @@ Predictions API routes.
 """
 import asyncio # Keep asyncio for async operations
 import os
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -111,6 +112,19 @@ def _normalize_prediction_result(
     )
 
     runtime_ts = runtime_timestamp_fields()
+    # Label this suggestion at save time: when it was served, and which
+    # draw it is expected to be judged against (the next scheduled draw
+    # after serving). next_draw_date below stays as it was (the serve
+    # date, for backward compatibility); the expected draw is explicit.
+    try:
+        from services.draw_schedule import next_draw as _next_draw
+        from services.suggestion_dates import suggestion_date as _suggestion_date
+
+        _expected = _next_draw(game_key, datetime.now(timezone.utc))
+        _suggestion_day = _suggestion_date(runtime_ts["timestamp_iso"])
+    except Exception:
+        _expected = {"draw_date": None, "draw_session": None}
+        _suggestion_day = None
     exp_store.save_experiment(normalize_experiment_record({
         "experiment_id": f"predict-{game_key}-{runtime_ts['timestamp_seconds']}",
         "game": game_key,
@@ -120,6 +134,9 @@ def _normalize_prediction_result(
         "recent_k": recent_k,
         "prediction": result,
         "next_draw_date": next_draw_date,
+        "suggestion_date": _suggestion_day,
+        "expected_draw_date": _expected.get("draw_date"),
+        "expected_draw_session": _expected.get("draw_session"),
     }))
 
     # Append-only real-world ledger: every served suggestion is kept for grading.

@@ -49,7 +49,8 @@ export function AccuracyReportView({ report }) {
         <table className="insight-table mt-2">
           <thead>
             <tr>
-              <th>Target draw</th>
+              <th>Suggested on</th>
+              <th>Expected draw</th>
               <th>Suggested</th>
               <th>Drawn</th>
               <th>Hits vs chance</th>
@@ -60,20 +61,15 @@ export function AccuracyReportView({ report }) {
           <tbody>
             {report.suggestions.map((s) => (
               <tr key={s.id || `${s.served_at}-${(s.numbers || []).join('-')}`}>
+                <td>{s.suggestion_date || '—'}</td>
                 <td>
-                  {s.target_draw_date || '—'}
-                  {s.target_draw_session ? <div className="insight-muted">{s.target_draw_session}</div> : null}
+                  {s.expected_draw_date || s.target_draw_date || '—'}
+                  {(s.expected_draw_session || s.target_draw_session) ? <div className="insight-muted">{s.expected_draw_session || s.target_draw_session}</div> : null}
                 </td>
                 <td><Balls numbers={s.numbers} hits={s.matched_numbers || []} /></td>
                 <td>
                   {s.status === 'graded'
-                    ? <><Balls numbers={s.actual_numbers} hits={s.matched_numbers || []} />
-                      {s.draw_source === 'verified_official'
-                        ? <div className="insight-muted">Verified official draw</div>
-                        : null}
-                      {s.graded_against === 'immediate_next' && s.actual_draw_date && s.actual_draw_date !== s.target_draw_date
-                        ? <div className="insight-muted">Next draw after serving</div>
-                        : null}</>
+                    ? <Balls numbers={s.actual_numbers} hits={s.matched_numbers || []} />
                     : <span className="insight-muted">{s.status === 'pending' ? 'Draw not in yet' : (s.reason || s.status)}</span>}
                 </td>
                 <td>

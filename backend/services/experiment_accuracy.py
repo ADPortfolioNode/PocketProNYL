@@ -95,6 +95,11 @@ def experiment_to_entry(exp: dict, game: str) -> dict | None:
         "target_draw_session": None,
         "target_draw_time": None,
         "target_basis": "experiment",
+        # Explicit expected-draw label when a newer record carries one;
+        # otherwise the grader computes it from the schedule (never from
+        # next_draw_date, which is the serve date, not a draw date).
+        "expected_draw_date": exp.get("expected_draw_date"),
+        "expected_draw_session": exp.get("expected_draw_session"),
         "model": prediction.get("model_strategy") or prediction.get("strategy_used")
                  or exp.get("model_strategy") or "unknown",
         "engine": prediction.get("engine") or "modular",
