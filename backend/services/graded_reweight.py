@@ -5,7 +5,7 @@ toward the current weights by how much graded evidence exists, and gated:
 
 - at least MIN_GRADED unique graded tickets for the game, or the weights
   do not move at all (with 3 graded suggestions any move is noise);
-- at least one strategy with a significant per-strategy lift (binomial
+- at least one strategy with a significant per-strategy lift (exact
   upper tail p < 0.05) and a material lift (outside 0.8..1.2), or hold;
 - the candidate is a blend, never a jump: candidate = (1-a) * current +
   a * target with a = MIX_CAP * n / (n + SHRINKAGE_K), and no strategy
@@ -24,8 +24,13 @@ Per-strategy credit comes from the ledger's strategy_contributions (the
 numbers each strategy contributed to the served ticket), not from the
 ticket as a whole: a strategy earns hits only for its own numbers.
 Expected hits for k contributed numbers are k * primary_count / universe
-(random baseline); the p-value is a binomial upper tail, which ignores
-without-replacement and is therefore conservative for a gate.
+(random baseline); the p-value is EXACT, not binomial: each entry's
+strategy hits follow a hypergeometric distribution (k distinct numbers
+drawn without replacement from a drum with primary_count winners), and
+the total across entries is the convolution of those per-entry
+distributions. The old binomial tail treated every picked number as an
+independent coin flip, overstating the variance and hiding small real
+edges — the exact test is what lets this loop detect the subtle.
 
 This module never touches backtest holdout metrics: the overfit gate owns
 promotion on backtest data, and this loop owns promotion on live served
@@ -68,6 +73,8 @@ def dedupe_graded(graded: list[dict]) -> list[dict]:
 
 
 def _binomial_upper_tail(trials: int, p: float, at_least: int) -> float:
+    """Binomial upper tail. Kept as a utility; strategy credit no longer
+    uses it (see _exact_upper_tail above)."""
     if trials <= 0 or at_least <= 0:
         return 1.0
     if at_least > trials:
@@ -78,12 +85,55 @@ def _binomial_upper_tail(trials: int, p: float, at_least: int) -> float:
     return min(max(total, 0.0), 1.0)
 
 
+def _hypergeometric_pmf(universe: int, winners: int, picks: int) -> list[float]:
+    """P(X = k) for k distinct picks from a drum with `winners` winners."""
+    if picks < 0 or winners < 0 or universe <= 0 or picks > universe:
+        return []
+    total = math.comb(universe, picks)
+    pmf = []
+    for k in range(min(picks, winners) + 1):
+        if picks - k > universe - winners:
+            pmf.append(0.0)
+        else:
+            pmf.append(math.comb(winners, k) * math.comb(universe - winners, picks - k) / total)
+    return pmf
+
+
+def _exact_upper_tail(per_entry: list[tuple[int, int, int]], at_least: int) -> float:
+    """Exact P(total hits >= at_least) for independent per-entry draws.
+
+    Each entry contributes one hypergeometric draw (universe, winners,
+    picks); the total is their convolution. This replaces the binomial
+    tail, which wrongly treated picks within one ticket as independent
+    coin flips and overstated the variance.
+    """
+    if at_least <= 0:
+        return 1.0
+    dist = [1.0]
+    for universe, winners, picks in per_entry:
+        pmf = _hypergeometric_pmf(universe, winners, picks)
+        if not pmf:
+            return 1.0
+        new = [0.0] * (len(dist) + len(pmf) - 1)
+        for i, p in enumerate(dist):
+            if p == 0.0:
+                continue
+            for j, q in enumerate(pmf):
+                new[i + j] += p * q
+        dist = new
+    if at_least >= len(dist):
+        return 0.0
+    return min(max(sum(dist[at_least:]), 0.0), 1.0)
+
+
 def strategy_credit(graded: list[dict], game: str) -> dict[str, dict]:
     """Per-strategy hits vs chance, from ledger contributions only."""
     rules = game_rules_from_config(game)
     universe = max(rules.primary_max - rules.primary_min + 1, 1)
-    p_hit = rules.primary_count / universe
+    winners = rules.primary_count
+    p_hit = winners / universe
     credit: dict[str, dict] = {}
+    draws: dict[str, list[tuple[int, int, int]]] = {}
     for item in dedupe_graded(graded):
         if item.get("model") == "chained_ensemble":
             continue
@@ -102,12 +152,14 @@ def strategy_credit(graded: list[dict], game: str) -> dict[str, dict]:
             row["entries"] += 1
             row["numbers"] += len(picks)
             row["hits"] += len(set(picks) & actual)
-    for row in credit.values():
+            draws.setdefault(str(name), []).append((universe, winners, len(picks)))
+    for name, row in credit.items():
         expected = row["numbers"] * p_hit
         row["expected_hits"] = round(expected, 4)
         row["lift"] = round(row["hits"] / expected, 4) if expected > 0 else None
         row["p_value"] = round(
-            _binomial_upper_tail(row["numbers"], p_hit, row["hits"]), 6)
+            _exact_upper_tail(draws.get(name, []), row["hits"]), 6)
+        row["p_value_method"] = "exact convolution of per-entry hypergeometrics"
     return credit
 
 

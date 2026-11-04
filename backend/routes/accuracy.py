@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from services.accuracy_report import build_accuracy_report
+from services.accuracy_overview import build_accuracy_overview
 from services.suggestion_ledger import suggestion_ledger
 from utils.validation import _require_game_key
 
@@ -30,6 +31,21 @@ async def accuracy_report(
         return await asyncio.to_thread(build_accuracy_report, game_key, last)
     except Exception as exc:
         return {"status": "error", "game": game_key, "message": str(exc)}
+
+
+@router.get("/api/accuracy_overview")
+async def accuracy_overview():
+    """All games at once: graded counts, verdicts, reweight readiness.
+
+    Read-only. Grades every game's ledger (ingested draws + verified
+    fallback) and reports which games have reached the 30-unique-graded
+    threshold for a reweight proposal. Quick Draw is excluded (draws
+    every 4 minutes cannot be pinned by date).
+    """
+    try:
+        return await asyncio.to_thread(build_accuracy_overview)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
 
 
 @router.get("/api/suggestion_ledger")

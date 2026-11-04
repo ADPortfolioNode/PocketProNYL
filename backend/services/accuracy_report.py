@@ -52,6 +52,32 @@ def pooled_stats(graded: list[dict], game: str) -> dict[str, Any]:
     wins = sum(1 for g in items if (g.get("tier") or {}).get("wins"))
     p_any = game_odds.any_prize_probability(game)
     binom_p = accuracy_stats.binomial_upper_tail(wins, n, p_any) if p_any else None
+    # Bonus balls were graded per ticket (bonus_hit) but never pooled, so
+    # bonus-game performance was invisible in the verdict. Each entry's
+    # bonus pick is one independent Bernoulli, so the binomial tail IS
+    # exact here (unlike primary picks within a ticket).
+    bonus_summary = None
+    try:
+        rules = game_rules_from_config(game)
+        bonus_universe = max(rules.bonus_max - rules.bonus_min + 1, 1)
+        if rules.bonus_count > 0:
+            bonus_items = [g for g in items if g.get("bonus_hit") is not None]
+            if bonus_items:
+                # bonus_hit compares the first bonus ball only, so the
+                # chance baseline is 1 pick from the bonus drum.
+                b_hits = sum(1 for g in bonus_items if g["bonus_hit"])
+                b_p = 1.0 / bonus_universe
+                b_expected = len(bonus_items) * b_p
+                bonus_summary = {
+                    "n": len(bonus_items),
+                    "hits": b_hits,
+                    "expected_hits": round(b_expected, 4),
+                    "p_value": round(accuracy_stats.binomial_upper_tail(
+                        b_hits, len(bonus_items), b_p), 6),
+                    "p_value_method": "exact binomial (one independent bonus pick per entry)",
+                }
+    except Exception:
+        bonus_summary = None
     mean_hits = total_hits / n
     expected_mean = expected_total / max(len(pmfs), 1)
     if p_total is not None and p_total < SIGNIFICANCE_ALPHA:
@@ -72,6 +98,7 @@ def pooled_stats(graded: list[dict], game: str) -> dict[str, Any]:
         "prize_wins": wins,
         "any_prize_probability_per_play": round(p_any, 6) if p_any else None,
         "binomial_p_value_prize_wins": round(binom_p, 6) if binom_p is not None else None,
+        "bonus": bonus_summary,
         "verdict": verdict,
     }
 
