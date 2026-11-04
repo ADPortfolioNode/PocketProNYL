@@ -144,6 +144,8 @@ def build_accuracy_report(
                   "primary_max": rules.primary_max, "primary_unique": rules.primary_unique},
         "draws_loaded": info.get("draws_loaded"),
         "draws_error": info.get("draws_error"),
+        "verified_draws_fetched": info.get("verified_draws_fetched", 0),
+        "verified_draws_error": info.get("verified_draws_error"),
         "disclaimer": game_odds.PICKS_CANNOT_CHANGE_ODDS,
     }
     try:
