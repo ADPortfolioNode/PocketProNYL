@@ -79,7 +79,21 @@ def _draws_from_row(game: str, row: dict, rules, dataset_id: str) -> list[Draw]:
     meta_base = {"source": "verified_official", "dataset": dataset_id}
     if row.get("winning_numbers"):
         primary = _numbers(row["winning_numbers"])
-        if len(primary) != rules.primary_count:
+        if len(primary) == rules.primary_count:
+            pass
+        elif (rules.bonus_count > 0
+                and len(primary) == rules.primary_count + rules.bonus_count):
+            # NY's powerball dataset appends the bonus ball to
+            # winning_numbers ("01 21 44 50 57 05" = 5 mains + Powerball
+            # 05) instead of a separate column. Split it the same way
+            # the Chroma path does (metadata_to_draw's embedded bonus),
+            # so a verified powerball draw grades instead of being
+            # silently dropped for having one number too many. An
+            # explicit bonus column, when present, still wins.
+            if not bonus:
+                bonus = primary[rules.primary_count:]
+            primary = primary[:rules.primary_count]
+        else:
             return []
         return [Draw(primary=primary, bonus=bonus, draw_id=None,
                      metadata=dict(meta_base), date=day)]

@@ -138,6 +138,49 @@ def backtest_gap(game: str, real: dict, metrics: dict | None) -> dict[str, Any]:
     return out
 
 
+def _dedupe_key(entry: dict):
+    """Identity of one served pick: serve minute + numbers.
+
+    The ledger and the experiment store record the SAME serve event
+    twice (both are written by _normalize_prediction_result, seconds
+    apart), so the report must not show or count it twice. Minute
+    granularity absorbs that skew; identical numbers served in the
+    same minute are the same suggestion for grading purposes. Entries
+    without a serve timestamp are never deduped.
+    """
+    epoch = entry.get("served_at_epoch")
+    try:
+        minute = int(float(epoch) // 60) if epoch is not None else None
+    except (TypeError, ValueError):
+        minute = None
+    return (minute, tuple(entry.get("primary") or []),
+            tuple(entry.get("bonus") or []))
+
+
+def _merged_entries(ledger_entries, experiment_entries):
+    """Ledger + experiment suggestions, one row per served pick.
+
+    The ledger is kept whole (it carries the stored targets); an
+    experiment row that duplicates a ledger row is dropped. The result
+    is sorted by serve time, so the last-N slice is the most recent
+    suggestions from either source.
+    """
+    seen = set()
+    merged = []
+    for entry in ledger_entries:
+        key = _dedupe_key(entry)
+        if key[0] is not None:
+            seen.add(key)
+        merged.append(entry)
+    for entry in experiment_entries or []:
+        key = _dedupe_key(entry)
+        if key[0] is not None and key in seen:
+            continue
+        merged.append(entry)
+    merged.sort(key=lambda e: float(e.get("served_at_epoch") or 0))
+    return merged
+
+
 def build_accuracy_report(
     game: str,
     last: int = 3,
@@ -147,11 +190,27 @@ def build_accuracy_report(
     draws=None,
     backtest_metrics: dict | None = None,
     include_backtest: bool = True,
+    experiment_entries=None,
 ) -> dict[str, Any]:
     ledger = ledger or suggestion_ledger
     rules = game_rules_from_config(game)
-    entries = sorted(ledger.read_suggestions(game), key=lambda e: float(e.get("served_at_epoch") or 0))
+    ledger_entries = sorted(ledger.read_suggestions(game), key=lambda e: float(e.get("served_at_epoch") or 0))
     reported = ledger.read_feedback(game)
+    # Real-world accuracy grades the suggestion history, and the
+    # history lives in two places: the ledger AND the experiments.
+    # A game whose ledger is empty (or predates the ledger) still has
+    # experiment suggestions, and grading only the ledger would report
+    # "no suggestions served" while experiments sit ungraded. The
+    # experiment bridge is imported here, not at module level, because
+    # it imports pooled_stats from this module.
+    if experiment_entries is None:
+        try:
+            from services.experiment_accuracy import read_prediction_experiments
+
+            experiment_entries = read_prediction_experiments(game)
+        except Exception:
+            experiment_entries = []
+    entries = _merged_entries(ledger_entries, experiment_entries)
     graded, info = grade_entries(game, entries, draws=draws, reported=reported, loader=loader)
     last = max(1, min(int(last or 3), 50))
     recent = list(reversed(graded[-last:]))
@@ -170,7 +229,8 @@ def build_accuracy_report(
             "Graded against real draws." if has_real else
             "No served suggestion has been graded yet, so only simulated backtest numbers exist."
         ),
-        "ledger_size": len(entries),
+        "ledger_size": len(ledger_entries),
+        "experiments_size": len(experiment_entries),
         "suggestions": recent,
         "pooled_last": real_recent,
         "pooled_all_time": real_all,
