@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from services.accuracy_history import build_accuracy_history
-from services.accuracy_report import build_accuracy_report
+from services.accuracy_report import build_accuracy_report, build_all_games_accuracy
 from services.accuracy_overview import build_accuracy_overview
 from services.suggestion_ledger import suggestion_ledger
 from utils.validation import _require_game_key
@@ -71,6 +71,22 @@ async def accuracy_history(
         return await asyncio.to_thread(build_accuracy_history, game_key, period)
     except Exception as exc:
         return {"status": "error", "game": game_key, "message": str(exc)}
+
+
+@router.get("/api/accuracy_all_games")
+async def accuracy_all_games():
+    """Process all games at once: which games are Real, which Simulated, why.
+
+    Read-only. Every game (except Quick Draw) is graded from its
+    merged suggestion history — ledger + experiments — against its
+    game record (ingested draws + verified official fallback). A game
+    with no suggestions stays Simulated with a plain reason; that is
+    absence of history, not a grading failure.
+    """
+    try:
+        return await asyncio.to_thread(build_all_games_accuracy)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
 
 
 @router.get("/api/suggestion_ledger")
