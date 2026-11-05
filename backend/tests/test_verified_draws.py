@@ -96,3 +96,19 @@ def test_quickdraw_never_fetches(monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", fake)
     draws, error = verified_draws.official_draws_for_date("quickdraw", date(2026, 11, 3))
     assert draws == [] and error is None and calls == []
+
+
+def test_powerball_row_with_embedded_bonus_splits(monkeypatch):
+    # NY's powerball dataset appends the Powerball to winning_numbers
+    # (no separate column): "01 21 44 50 57 05" must grade as 5 mains +
+    # bonus 05, not be dropped for having one number too many.
+    seen = []
+    row = {"draw_date": "2026-10-21T00:00:00.000",
+           "winning_numbers": "01 21 44 50 57 05", "multiplier": "2"}
+    _stub_urlopen(monkeypatch, [row], seen)
+    draws, error = verified_draws.official_draws_for_date("powerball", date(2026, 10, 21))
+    assert error is None
+    assert len(draws) == 1
+    assert draws[0].primary == [1, 21, 44, 50, 57]
+    assert draws[0].bonus == [5]
+    assert draws[0].draw_date.isoformat() == "2026-10-21"
