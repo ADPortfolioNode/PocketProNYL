@@ -14,6 +14,7 @@ from prediction.config.loader import game_rules_from_config
 from services import accuracy_stats, game_odds
 from services.suggestion_grader import DrawLoader, grade_entries
 from services.suggestion_ledger import SuggestionLedger, suggestion_ledger
+from config import GAME_CONFIGS
 
 SIGNIFICANCE_ALPHA = 0.05
 SMALL_SAMPLE = 30
@@ -250,3 +251,82 @@ def build_accuracy_report(
     except Exception:
         report["model_champion"] = None
     return report
+
+
+def build_all_games_accuracy(*, ledgers_by_game=None, draws_by_game=None,
+                             experiments_by_game=None) -> dict[str, Any]:
+    """Process every game through the merged real-world report, at once.
+
+    One call answers "which games are Real?" instead of opening each
+    game's panel: every game (except Quick Draw) is graded from its
+    merged suggestion history — ledger + experiments — against its
+    game record (ingested draws + verified official fallback, live
+    path). A game is Real as soon as one of its suggestions grades;
+    a game with no history stays Simulated, and the reason says so
+    plainly: no suggestions to grade is not a grading failure. A game
+    whose suggestions exist but grade nothing reports that instead
+    (draws missing for their targets). Per-game errors never fail the
+    whole run.
+    """
+    ledgers_by_game = ledgers_by_game or {}
+    draws_by_game = draws_by_game or {}
+    experiments_by_game = experiments_by_game or {}
+    games: dict[str, Any] = {}
+    for game in sorted(GAME_CONFIGS.keys()):
+        if game == "quickdraw":
+            games[game] = {
+                "game": game,
+                "data_label": "Excluded",
+                "excluded": True,
+                "reason": ("Draws every 4 minutes cannot be pinned by date; "
+                           "same exclusion as the verified-draw fallback."),
+            }
+            continue
+        try:
+            report = build_accuracy_report(
+                game, last=3,
+                ledger=ledgers_by_game.get(game),
+                draws=draws_by_game.get(game),
+                include_backtest=False,
+                experiment_entries=experiments_by_game.get(game))
+            pooled = report["pooled_all_time"]
+            total_history = report["ledger_size"] + report["experiments_size"]
+            if report["data_label"] == "Real":
+                reason = None
+            elif total_history == 0:
+                reason = ("No suggestions served for this game yet: "
+                          "no ledger entries and no experiments to grade.")
+            else:
+                reason = ("Suggestions exist but none graded yet: their "
+                          "target draws are not in the game record and "
+                          "the verified fallback found none.")
+            games[game] = {
+                "game": game,
+                "data_label": report["data_label"],
+                "ledger_size": report["ledger_size"],
+                "experiments_size": report["experiments_size"],
+                "graded": pooled.get("graded", 0),
+                "mean_hits": pooled.get("mean_hits"),
+                "expected_mean_hits_by_chance": pooled.get("expected_mean_hits_by_chance"),
+                "lift_vs_chance": pooled.get("lift_vs_chance"),
+                "p_value_exact": pooled.get("p_value_exact"),
+                "verdict": pooled.get("verdict"),
+                "reason": reason,
+            }
+        except Exception as exc:
+            games[game] = {"game": game, "status": "error", "message": str(exc)}
+    real = sorted(g for g, row in games.items() if row.get("data_label") == "Real")
+    simulated = sorted(g for g, row in games.items() if row.get("data_label") == "Simulated")
+    total_graded = sum(row.get("graded") or 0 for row in games.values())
+    return {
+        "status": "ok",
+        "games": games,
+        "real_games": real,
+        "simulated_games": simulated,
+        "total_graded": total_graded,
+        "note": ("Every game is graded from its merged suggestion history "
+                 "(ledger + experiments) against its game record. A game "
+                 "with no suggestions cannot be Real — there is nothing "
+                 "to grade — so Simulated there means 'serve a suggestion "
+                 "first', not 'grading failed'."),
+    }
