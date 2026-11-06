@@ -52,10 +52,13 @@ GAME_CONFIGS = {
         "primary_min": 1,
         "primary_max": 39,
         "primary_unique": True,
-        "bonus_count": 1,
-        "bonus_min": 1,
-        "bonus_max": 39,
-        "bonus_keys": ["bonus"], # Common key for bonus number
+        # Take 5 is 5-of-39 with NO bonus ball. This was previously
+        # bonus_count 1 (with bonus_min/max 1-39), which made the catalog
+        # claim a bonus ball, inflated the derived outcome space, and made
+        # training-defaults reasoning say "includes 1 bonus ball(s)" — even
+        # though GAME_PREDICTION_FORMATS correctly has bonus_count 0 and
+        # predictor.py already works around the wrong config. Fixed 2026-11-06.
+        "bonus_count": 0,
     },
     "pick3": {
         "primary_count": 3,
