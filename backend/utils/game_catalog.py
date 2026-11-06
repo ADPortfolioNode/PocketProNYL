@@ -214,6 +214,12 @@ def compute_training_defaults_for_game(game: str) -> Dict[str, Any]:
         "auto_tune": bool(auto_tune),
         "validation_size": None,
         "model_strategy": "ensemble",
+        # Overfit gate: same contract value as DEFAULT_TRAINING_CONFIG and
+        # TrainerService.get_training_defaults' fallback (2.0%). This key was
+        # previously missing from the derived dict, so per-game defaults built
+        # from it (via get_game_training_defaults) had no overfit_gap_limit_percent
+        # and test_trainer_sequences failed with KeyError.
+        "overfit_gap_limit_percent": 2.0,
         "optimization_applied": True,
         "reasoning": reasoning,
         "derived_from": {
