@@ -11,7 +11,12 @@ from state.draw_counts import get_all_draw_counts, get_draw_count, set_draw_coun
 
 CHROMA_REST_TIMEOUT = 4.0
 CHROMA_COUNT_WORKERS = 1
-CHROMA_REST_LOCK = threading.Lock()
+# RLock, not Lock: _rest_count holds this lock and calls
+# _refresh_collection_catalog, which acquires it again. With a plain Lock
+# that deadlocks forever on the first count for a game with no collection
+# yet (fresh/empty Chroma) — the worker thread never returns and, on a
+# single-worker server, every later request queues behind it.
+CHROMA_REST_LOCK = threading.RLock()
 
 
 class ChromaClient:
