@@ -27,6 +27,23 @@ const fmtServedAt = (servedAt) => {
   }
 };
 
+// Draw clock-time: the scheduled time of the target draw, shown next to
+// its date/session in the detail view (hour + minute, lottery time).
+const fmtDrawTime = (iso) => {
+  if (!iso) return null;
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return null;
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(d);
+  } catch (e) {
+    return null;
+  }
+};
+
 const rowKey = (s) => s.id || `${s.served_at}-${(s.numbers || []).join('-')}`;
 
 function Balls({ numbers = [], hits = [] }) {
@@ -132,6 +149,7 @@ export function SuggestionDetail({ suggestion, onClose }) {
         <div>
           {targetDate || '—'}
           {targetSession ? <span className="insight-muted"> · {targetSession}</span> : null}
+          {fmtDrawTime(s.target_draw_time) ? <span className="insight-muted"> · {fmtDrawTime(s.target_draw_time)}</span> : null}
         </div>
       </div>
 
