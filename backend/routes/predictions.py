@@ -253,7 +253,18 @@ async def predict_all_games(request: PredictAllRequest):
             game_keys.append(_require_game_key(game))
 
         def _run_predictions():
-            return predictor_service.predict_all_games(game_keys, request.recent_k)
+            from state.predict_jobs import finish_batch, mark_game_done, start_batch
+
+            start_batch(game_keys)
+            try:
+                return predictor_service.predict_all_games(
+                    game_keys,
+                    request.recent_k,
+                    on_progress=lambda game_key, done, total, ok: mark_game_done(game_key, ok=ok),
+                )
+            except Exception:
+                finish_batch("error")
+                raise
 
         results = await asyncio.to_thread(_run_predictions)
         for item in results:
@@ -264,6 +275,10 @@ async def predict_all_games(request: PredictAllRequest):
                 item["prediction"]["ledger_id"] = (entry or {}).get("id")
         failed_count = sum(1 for item in results if item.get("status") == "error")
 
+        from state.predict_jobs import finish_batch
+
+        finish_batch("error" if results and failed_count == len(results) else "done")
+
         return {
             "status": "ok",
             "results": results,
@@ -271,8 +286,14 @@ async def predict_all_games(request: PredictAllRequest):
             "total": len(results),
         }
     except ValueError as e:
+        from state.predict_jobs import finish_batch
+
+        finish_batch("error")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        from state.predict_jobs import finish_batch
+
+        finish_batch("error")
         return {
             "status": "error",
             "message": str(e),
@@ -287,8 +308,16 @@ async def make_prediction(request: PredictionRequest):
     """
     Generate prediction for a specific game using recent history.
     """
+    tracked = False
     try:
         game_key = _require_game_key(request.game)
+        # Track single-game suggestions for the live workflow chart, but
+        # never clobber a batch that is already running.
+        from state.predict_jobs import finish_batch, get_predict_batch, start_batch
+
+        tracked = get_predict_batch().get("status") != "running"
+        if tracked:
+            start_batch([game_key])
         def _run_prediction():
             if (
                 os.environ.get("PREDICTION_ENGINE", "modular").lower() != "legacy"
@@ -321,12 +350,18 @@ async def make_prediction(request: PredictionRequest):
             raise RuntimeError("PredictorService is missing predict_next_draw/predict methods")
 
         result = await asyncio.to_thread(_run_prediction)
+        if tracked:
+            finish_batch("error" if isinstance(result, dict) and result.get("status") == "error" else "done")
         return _normalize_prediction_result(
             game_key, result, request.recent_k, target_draw_date=request.target_draw_date,
         )
     except ValueError as e:
+        if tracked:
+            finish_batch("error")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        if tracked:
+            finish_batch("error")
         return {
             "status": "error",
             "game": request.game,

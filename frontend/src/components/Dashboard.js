@@ -15,6 +15,7 @@ import { RETIRED_LABEL } from './RetiredBadge';
 import IngestionProgressPanel from './IngestionProgressPanel';
 import ExpandableCard from './ExpandableCard';
 import ProgressiveProgressBar from './ProgressiveProgressBar';
+import WorkflowChart from './WorkflowChart';
 import chromaStateManager from '../utils/chromaStateManager';
 import { startPolling } from '../utils/polling';
 import { formatApiError } from '../utils/errorUtils';
@@ -2066,6 +2067,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
                 </div>
               </div>
             )}
+            <WorkflowChart flow="train" game={selectedTrainGame} active={trainStatus === 'in progress'} refreshMs={15000} title="Live training · matplotlib" testId="workflow-chart-train" />
             <div className="d-flex flex-wrap gap-2">
             <button 
               className="btn btn-success" 

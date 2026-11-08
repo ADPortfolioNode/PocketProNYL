@@ -53,6 +53,39 @@ def tuning_chart(game: Optional[str] = None):
     return StreamingResponse(image, media_type="image/png", headers={"Cache-Control": "no-store"})
 
 
+@router.get("/api/workflow_chart")
+def workflow_chart(flow: str = "pipeline", game: Optional[str] = None):
+    """Render one live workflow as a matplotlib PNG.
+
+    flow is pipeline | startup | ingest | train | predict. The frontend
+    refreshes the image every couple of seconds while a flow runs, so the
+    picture is the live state, not a cached one. Every label comes from
+    the same status stores the panels already poll; nothing is invented.
+    """
+    from routes.health import get_ingestion_status
+    from services.workflow_chart import render_workflow_chart
+    from state.ingest_state import get_manual_ingest_state
+    from state.predict_jobs import get_predict_batch
+    from state.train_jobs import list_jobs
+
+    flow_key = str(flow or "pipeline").strip().lower()
+    if flow_key not in {"pipeline", "startup", "ingest", "train", "predict"}:
+        raise HTTPException(status_code=400, detail=f"Unknown workflow: {flow_key}")
+
+    game_key = str(game or "").strip().lower() or None
+    image = BytesIO(
+        render_workflow_chart(
+            flow_key,
+            startup=get_ingestion_status(),
+            jobs=list_jobs(),
+            ingest=get_manual_ingest_state(game_key) if game_key else None,
+            predict=get_predict_batch(),
+            game=game_key,
+        )
+    )
+    return StreamingResponse(image, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
 class ChatRequest(BaseModel):
     text: str = ""
     # Optional: the frontend sends game: null for the all-games scope,
