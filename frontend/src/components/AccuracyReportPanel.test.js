@@ -19,6 +19,7 @@ const report = (overrides = {}) => ({
     {
       id: 'a', status: 'graded', served_at: '2026-10-21T16:30:00+00:00', suggestion_date: '2026-10-21',
       target_draw_date: '2026-10-21', target_draw_session: 'evening',
+      target_draw_time: '2026-10-21T22:30:00-04:00',
       expected_draw_date: '2026-10-21', expected_draw_session: 'evening',
       actual_draw_date: '2026-10-21', actual_draw_session: 'evening', draw_source: 'ingested',
       numbers: [1, 2, 3, 4, 5], actual_numbers: [1, 2, 9, 10, 11], matched_numbers: [1, 2], hits: 2,
@@ -115,6 +116,8 @@ describe('AccuracyReportPanel', () => {
     expect(detail.textContent).toContain('Suggestion date: 2026-10-21');
     expect(detail.textContent).toContain('Target draw (immediate next draw after the suggestion)');
     expect(detail.textContent).toContain('evening');
+    // Target draw clock-time from target_draw_time (22:30 lottery time).
+    expect(detail.textContent).toContain('10:30 PM');
     expect(detail.textContent).toContain('2 hits vs 0.64 expected by chance');
     expect(detail.textContent).toContain('p-value 0.1342');
     expect(detail.textContent).toContain('Match 2 (free Quick Pick)');
@@ -135,6 +138,8 @@ describe('AccuracyReportPanel', () => {
     expect(detail.textContent).toContain('Draw not in yet');
     expect(detail.textContent).toContain('2026-10-22');
     expect(detail.textContent).toContain('No weights recorded for this suggestion');
+    // No target_draw_time on this row, so no draw clock-time is shown.
+    expect(detail.textContent).not.toContain('10:30 PM');
   });
 
   test('close button and clicking the selected row again hide the detail', async () => {

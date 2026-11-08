@@ -89,3 +89,21 @@ def test_explicit_draws_never_fetch():
     graded, info = grade_entries("take5", [entry], draws=[])
     assert graded[0]["status"] == "pending"
     assert info["verified_draws_fetched"] == 0
+
+
+def test_graded_row_carries_stored_target_draw_time():
+    entry = _entry("2026-10-19T15:00:00-04:00", "2026-10-20", "evening",
+                   "2026-10-20T22:30:00-04:00")
+    draws = [_draw([1, 2, 30, 31, 32], date(2026, 10, 21), "evening")]
+    graded, _ = grade_entries("take5", [entry], draws=draws)
+    assert graded[0]["status"] == "graded"
+    assert graded[0]["target_draw_time"] == "2026-10-20T22:30:00-04:00"
+
+
+def test_target_draw_time_falls_back_to_schedule():
+    # No stored time: the scheduled take5 evening draw time (22:30) fills in.
+    entry = _entry("2026-10-19T15:00:00-04:00", "2026-10-20", "evening", None)
+    draws = [_draw([1, 2, 30, 31, 32], date(2026, 10, 21), "evening")]
+    graded, _ = grade_entries("take5", [entry], draws=draws)
+    assert graded[0]["target_draw_time"] is not None
+    assert "22:30" in graded[0]["target_draw_time"]

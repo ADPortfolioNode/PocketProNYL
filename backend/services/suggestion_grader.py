@@ -293,11 +293,17 @@ def _score_against(entry: dict, draw: Draw, base: dict, pmf: list,
 
 def grade_entry(entry: dict, index: dict[str, list[Draw]], rules: GameRules, game: str) -> dict:
     ticket = [int(n) for n in entry.get("primary") or []]
+    # Draw clock-time on EVERY row: the stored target_draw_time when the
+    # ledger has it, else the scheduled time for the target draw from the
+    # draw schedule (the same moment the leakage guard uses). The detail
+    # view shows it next to the target draw date/session.
+    _moment = _target_moment(entry, game)
     base = {
         "id": entry.get("id"),
         "served_at": entry.get("served_at"),
         "target_draw_date": entry.get("target_draw_date"),
         "target_draw_session": entry.get("target_draw_session"),
+        "target_draw_time": _moment.isoformat() if _moment is not None else None,
         "numbers": ticket,
         "bonus_numbers": list(entry.get("bonus") or []),
         "model": entry.get("model"),
