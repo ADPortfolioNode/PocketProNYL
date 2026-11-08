@@ -3,6 +3,7 @@ import axios from 'axios';
 import getApiBase from '../utils/apiBase';
 import { startPolling } from '../utils/polling';
 import ProgressiveProgressBar from './ProgressiveProgressBar';
+import WorkflowChart from './WorkflowChart';
 
 /**
  * IngestionProgressPanel
@@ -126,6 +127,15 @@ export default function IngestionProgressPanel({ game, isActive, onComplete }) {
                 🎰 {game.toUpperCase()} Ingestion
                 <span style={{marginLeft:8,fontSize:12,opacity:0.8}} className="badge bg-secondary ms-2">{streamMode === 'stream' ? 'Stream' : streamMode === 'polling' ? 'Polling' : '—'}</span>
             </h6>
+            <WorkflowChart
+              flow="ingest"
+              game={game}
+              signal={rowsFetched}
+              active={status === 'active'}
+              refreshMs={5000}
+              title="Live ingestion · matplotlib"
+              testId="workflow-chart-ingest"
+            />
 
             {error && (
                 <div className="alert alert-danger ingestion-progress-alert">

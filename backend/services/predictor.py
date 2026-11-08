@@ -809,7 +809,7 @@ class PredictorService:
             "predicted_for_date": target_draw_date.isoformat(), # Added for consistency
         }
 
-    def predict_all_games(self, games, recent_k: int = 10):
+    def predict_all_games(self, games, recent_k: int = 10, on_progress=None):
         normalized = []
         for game in games:
             game_key = str(game or "").strip().lower()
@@ -823,6 +823,11 @@ class PredictorService:
                         "message": result.get("message", "Suggestion failed."),
                         "prediction": None,
                     })
+                    if on_progress is not None:
+                        try:
+                            on_progress(game_key, len(normalized), len(games), False)
+                        except Exception:
+                            pass
                     continue
 
                 normalized.append({
@@ -842,6 +847,11 @@ class PredictorService:
                     "message": str(exc),
                     "prediction": None,
                 })
+            if on_progress is not None:
+                try:
+                    on_progress(game_key, len(normalized), len(games), normalized[-1].get("status") == "success")
+                except Exception:
+                    pass
         return normalized
 
     def predict(self, game: str, recent_k: int = 10, strategy: str = "rf", target_draw_date_str: Optional[str] = None):

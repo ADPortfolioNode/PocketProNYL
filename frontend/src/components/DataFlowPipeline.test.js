@@ -95,6 +95,10 @@ describe('<DataFlowPipeline />', () => {
     });
     expect(el.querySelector('[data-testid="flow-ingest"]').className).toContain('is-done');
     expect(el.textContent).toContain('3 of 9 games loaded');
+    // Live matplotlib chart sits above the stage track.
+    const chart = el.querySelector('[data-testid="workflow-chart-pipeline"]');
+    expect(chart).not.toBeNull();
+    expect(chart.querySelector('img').getAttribute('src')).toContain('/api/workflow_chart?flow=pipeline');
     act(() => root.unmount());
   });
 });

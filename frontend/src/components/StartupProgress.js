@@ -4,6 +4,7 @@ import { getApiBase } from '../utils/apiBase';
 import { analyzeError } from '../utils/errorUtils';
 import { startPolling } from '../utils/polling';
 import CandyStripeProgress from './CandyStripeProgress';
+import WorkflowChart from './WorkflowChart';
 import { deriveStartupView, isBackendDone, isStatusPayload, statusSignature } from '../utils/startupView';
 
 const StartupProgress = ({ onComplete }) => {
@@ -149,6 +150,8 @@ const StartupProgress = ({ onComplete }) => {
                     </p>
                 </div>
             </div>
+
+            <WorkflowChart flow="startup" active={view.mode === 'ingesting'} refreshMs={15000} title="Live startup · matplotlib" testId="workflow-chart-startup" />
 
             <div className="mb-4" data-testid="startup-progress">
                 <h4 className="mb-2">
