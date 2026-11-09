@@ -337,6 +337,18 @@ monitor_startup_with_regression_tests() {
         log_event "SUCCESS" "Build completed in ${build_duration}s"
     fi
     
+    # Re-resolve right before starting services: a port holder can
+    # appear during the build (which takes minutes), and the earlier
+    # resolve is stale by then. resolve_compose_host_ports re-validates
+    # the current values — a free port is kept, a busy one bumps +1.
+    log_event "INFO" "Re-checking host ports before starting services..."
+    if ! resolve_compose_host_ports; then
+        log_event "ERROR" "Failed to resolve host ports"
+        return 1
+    fi
+    assign_resolved_ports
+    log_event "SUCCESS" "Ports re-checked - Frontend:${FRONTEND_HOST_PORT} Backend:${BACKEND_HOST_PORT} Chroma:${CHROMA_HOST_PORT}"
+    
     log_event "INFO" "Starting Chroma service..."
     local chroma_start=$(date +%s)
     if ! compose_cmd up -d chroma 2>&1 | tee -a "$monitor_log"; then
@@ -500,6 +512,18 @@ if [ "${BUILD}" = true ]; then
         exit 1
     fi
 fi
+
+# Re-resolve right before starting services: a port holder can appear
+# during the build (which takes minutes), and the earlier resolve is
+# stale by then. resolve_compose_host_ports re-validates the current
+# values — a free port is kept, a busy one bumps +1 from it.
+echo "Re-checking host ports before starting services..."
+resolve_compose_host_ports || {
+    echo "ERROR: Unable to resolve Docker host ports. Check your environment values." >&2
+    exit 1
+}
+assign_resolved_ports
+echo "Ports re-checked - Frontend:${FRONTEND_HOST_PORT} Backend:${BACKEND_HOST_PORT} Chroma:${CHROMA_HOST_PORT}"
 
 echo "Starting services in dependency order..."
 
