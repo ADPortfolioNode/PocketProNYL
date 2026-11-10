@@ -1493,8 +1493,15 @@ class TrainerService:
                 max_iterations = 12
                 auto_tune = False
             else:
-                n_estimators = min(max(int(defaults["n_estimators"]), 450), 600)
-                max_depth = min(max(int(defaults["max_depth"]), 28), 32)
+                # Small datasets used to jump to 450-600 trees at depth 28-32,
+                # overriding the per-game profile (e.g. pick3/win4: 100 trees,
+                # depth 8) — a forest that big on <=1500 records memorizes
+                # the training rows instead of generalizing. Use the game
+                # profile from training_defaults.py (via get_training_defaults
+                # / get_optimum_config) as-is; the >1500 / >3000 branches
+                # above already cap the larger datasets.
+                n_estimators = int(defaults["n_estimators"])
+                max_depth = int(defaults["max_depth"])
                 max_iterations = defaults["max_iterations"]
                 auto_tune = defaults["auto_tune"]
             return _config_from_mapping(

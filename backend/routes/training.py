@@ -368,8 +368,16 @@ def _post_train_optimize(game_key: str, train_result: dict) -> dict:
     holdout = optimized.get("holdout_accuracy_percent")
     if holdout is not None:
         extra += f" Holdout (unseen draws) accuracy {float(holdout):.1f}%."
-        if optimized.get("overfit_warning"):
-            extra += " Overfit warning: no reliable edge over random on the holdout."
+    if optimized.get("overfit_warning"):
+        # Name the actual reason in words (gap vs no-edge vs no-holdout),
+        # not one blanket sentence: a 2-point gap or a missing holdout is
+        # not "no edge vs random", and a non-significant holdout p-value
+        # is the normal lottery outcome, not evidence of memorization.
+        from prediction.metrics.overfit_gate import overfit_warning_sentence
+
+        sentence = overfit_warning_sentence(optimized)
+        if sentence:
+            extra += f" {sentence}"
     train_result["weight_optimization"] = {
         "status": optimized.get("status") or "ok",
         "held_accuracy_percent": optimized.get("held_accuracy_percent") or optimized.get("accuracy_percent"),
@@ -387,8 +395,14 @@ def _post_train_optimize(game_key: str, train_result: dict) -> dict:
         "holdout_p_value": optimized.get("holdout_p_value"),
         "trials_tested": optimized.get("trials_tested"),
         "overfit_warning": optimized.get("overfit_warning"),
+        "overfit_warning_reasons": optimized.get("overfit_warning_reasons"),
         "overfit_boundary_percent": optimized.get("overfit_boundary_percent"),
         "overfit_boundary_reached": optimized.get("overfit_boundary_reached"),
+        "kept_validation_accuracy_percent": optimized.get("kept_validation_accuracy_percent"),
+        "kept_validation_mean_partial_hits": optimized.get("kept_validation_mean_partial_hits"),
+        "kept_validation_evaluated_draws": optimized.get("kept_validation_evaluated_draws"),
+        "holdout_noise_margin_percent": optimized.get("holdout_noise_margin_percent"),
+        "overfit_gap_significant": optimized.get("overfit_gap_significant"),
     }
     for key in (
         "holdout_accuracy_percent",
@@ -397,6 +411,10 @@ def _post_train_optimize(game_key: str, train_result: dict) -> dict:
         "overfit_boundary_percent",
         "overfit_boundary_reached",
         "overfit_warning",
+        "overfit_warning_reasons",
+        "kept_validation_accuracy_percent",
+        "holdout_noise_margin_percent",
+        "overfit_gap_significant",
     ):
         train_result[key] = optimized.get(key)
     train_result["message"] = (train_result.get("message") or "Training completed.") + extra

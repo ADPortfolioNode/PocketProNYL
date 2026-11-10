@@ -16,6 +16,7 @@ import IngestionProgressPanel from './IngestionProgressPanel';
 import ExpandableCard from './ExpandableCard';
 import ProgressiveProgressBar from './ProgressiveProgressBar';
 import WorkflowChart from './WorkflowChart';
+import TrainingChart from './TrainingChart';
 import chromaStateManager from '../utils/chromaStateManager';
 import { startPolling } from '../utils/polling';
 import { formatApiError } from '../utils/errorUtils';
@@ -66,6 +67,40 @@ function formatAccuracyDelta(value) {
   if (!Number.isFinite(number)) return 'n/a';
   const sign = number > 0 ? '+' : '';
   return `${sign}${number.toFixed(1)} pts`;
+}
+
+// Name the actual overfit reason in words: a validation/holdout gap or a
+// missing holdout is an overfit warning; a holdout that merely did not beat
+// random is the normal lottery outcome and gets its own label, not the
+// warning. Returns { text, title, isNote } or null when there is no warning.
+function overfitBadgeFor(metrics) {
+  if (!metrics || metrics.overfit_warning !== true) return null;
+  const reasons = Array.isArray(metrics.overfit_warning_reasons) ? metrics.overfit_warning_reasons : [];
+  const pValue = Number(metrics.holdout_p_value);
+  if (reasons.length === 1 && reasons[0] === 'holdout_not_significant_vs_random') {
+    return {
+      text: 'No edge vs random',
+      title: `Holdout did not beat random picks at p < 0.05${Number.isFinite(pValue) ? ` (p = ${pValue.toFixed(3)})` : ''} — the usual lottery outcome for a 5–60-draw holdout, not evidence of memorization.`,
+      isNote: true,
+    };
+  }
+  if (reasons.includes('validation_beats_holdout')) {
+    const gap = Number(metrics.overfit_gap_percent);
+    const gapText = Number.isFinite(gap) ? `${gap.toFixed(1)} pp` : 'a wide margin';
+    const margin = metrics.holdout_noise_margin_percent != null
+      ? `; holdout noise margin ${Number(metrics.holdout_noise_margin_percent).toFixed(1)} pp`
+      : '';
+    return {
+      text: 'Overfit warning',
+      title: `Validation (kept weights) beats the holdout by ${gapText} (boundary ${Number(metrics.overfit_boundary_percent ?? 2).toFixed(1)} pp${margin}).`,
+      isNote: false,
+    };
+  }
+  return {
+    text: 'Overfit warning',
+    title: 'No untouched holdout was available, so the score was selected on the draws it is scored on.',
+    isNote: false,
+  };
 }
 
 function TuningTelemetryGraph({ status, selectedGame, apiBase }) {
@@ -157,6 +192,7 @@ function TuningMetricsChart({ status, selectedGame }) {
   const values = [
     ['Holdout (unseen)', hasMatchingMetrics && metrics.holdout_accuracy_percent != null ? Number(metrics.holdout_accuracy_percent) : NaN],
     ['Validation', hasMatchingMetrics && metrics.validation_accuracy_percent != null ? Number(metrics.validation_accuracy_percent) : NaN],
+    ['Kept validation', hasMatchingMetrics && metrics.kept_validation_accuracy_percent != null ? Number(metrics.kept_validation_accuracy_percent) : NaN],
     ['Held accuracy', hasMatchingMetrics ? Number(metrics.held_accuracy_percent ?? metrics.accuracy_percent) : NaN],
     ['This run', hasMatchingMetrics ? Number(metrics.this_run_accuracy_percent ?? metrics.accuracy_percent) : NaN],
     ['Next must beat', hasMatchingMetrics ? Number(metrics.next_run_target_percent) : NaN],
@@ -170,19 +206,19 @@ function TuningMetricsChart({ status, selectedGame }) {
   }
   const overfitGap = Number(metrics.overfit_gap_percent);
   const holdoutP = Number(metrics.holdout_p_value);
-  const showOverfitWarning = hasMatchingMetrics && metrics.overfit_warning === true;
+  const overfitBadge = hasMatchingMetrics ? overfitBadgeFor(metrics) : null;
 
   return (
     <div className="tuning-metrics-chart" aria-label={`Tuning metadata chart for ${game || 'selected game'}`}>
       <div className="tuning-metrics-heading">
         <span>{String(game || 'selected game').toUpperCase()}</span>
         <strong>VALIDATED ACCURACY</strong>
-        {showOverfitWarning && (
+        {overfitBadge && (
           <span
-            className="tuning-overfit-badge"
-            title="Holdout accuracy is not reliably better than random picks, or validation beats the holdout by a wide margin."
+            className={`tuning-overfit-badge${overfitBadge.isNote ? ' is-note' : ''}`}
+            title={overfitBadge.title}
           >
-            Overfit warning
+            {overfitBadge.text}
           </span>
         )}
       </div>
@@ -2058,8 +2094,22 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
                           Validation/holdout gap: {Number(trainTelemetry.metrics.overfit_gap_percent).toFixed(1)} pp
                           {' · '}boundary {Number(trainTelemetry.metrics.overfit_boundary_percent ?? 2).toFixed(1)} pp
                           {trainTelemetry.metrics.overfit_boundary_reached ? ' reached' : ' not reached'}
+                          {trainTelemetry.metrics.holdout_noise_margin_percent != null
+                            ? ` · holdout noise margin ${Number(trainTelemetry.metrics.holdout_noise_margin_percent).toFixed(1)} pp`
+                            : ''}
+                          {trainTelemetry.metrics.overfit_gap_significant === false && trainTelemetry.metrics.overfit_boundary_reached
+                            ? ' · within holdout noise, not overfit'
+                            : ''}
                         </span>
                       )}
+                      {(() => {
+                        const trainBadge = overfitBadgeFor(trainTelemetry.metrics);
+                        return trainBadge ? (
+                          <span className={`tuning-overfit-badge${trainBadge.isNote ? ' is-note' : ''}`} title={trainBadge.title}>
+                            {trainBadge.text}
+                          </span>
+                        ) : null;
+                      })()}
                     </>
                   ) : (
                     <span>Preparing this game’s profile and chronological validation split…</span>
@@ -2068,6 +2118,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
               </div>
             )}
             <WorkflowChart flow="train" game={selectedTrainGame} active={trainStatus === 'in progress'} refreshMs={15000} title="Live training · matplotlib" testId="workflow-chart-train" />
+            <TrainingChart game={selectedTrainGame} active={trainStatus === 'in progress'} refreshMs={15000} title="Training overfit check · matplotlib" testId="training-chart-train" />
             <div className="d-flex flex-wrap gap-2">
             <button 
               className="btn btn-success" 

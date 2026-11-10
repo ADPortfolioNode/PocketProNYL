@@ -120,6 +120,14 @@ HONEST_METRIC_KEYS: tuple[str, ...] = (
     "overfit_gap_percent",
     "overfit_boundary_percent",
     "overfit_boundary_reached",
+    # Kept-weights validation pass (same frozen protocol as the holdout):
+    # accuracy of the weights actually kept, the gap measured against it,
+    # and the holdout's own sampling noise the gap must clear.
+    "kept_validation_accuracy_percent",
+    "kept_validation_mean_partial_hits",
+    "kept_validation_evaluated_draws",
+    "holdout_noise_margin_percent",
+    "overfit_gap_significant",
     "holdout_lift_vs_random",
     "holdout_p_value",
     "holdout_p_value_method",
@@ -185,6 +193,29 @@ def three_way_split(
         max_test_draws=max_test_draws if max_test_draws is not None else getattr(metrics_cfg, "max_test_draws", None),
     )
     return test_start, holdout_start, holdout_size
+
+
+def holdout_noise_margin_percent(holdout_hits: list[int], primary_count: int) -> float | None:
+    """95% sampling margin of the holdout mean accuracy, in percentage points.
+
+    Definition of "the holdout's own noise": per-draw holdout accuracy is
+    ``a_i = hits_i / primary_count``. The holdout mean has standard error
+    ``s / sqrt(n)`` where ``s`` is the sample standard deviation of the
+    ``a_i`` (ddof=1) and ``n`` is the number of holdout draws; the margin is
+    ``1.96 * SE`` (normal approximation, ~95%). A validation-minus-holdout
+    gap smaller than this margin could be produced by holdout sampling noise
+    alone, so it is not called overfit.
+
+    The holdout window is 5-60 draws, so this margin (often several points)
+    dominates the much larger validation window's own noise; that is why the
+    gap must clear the holdout margin specifically, not a pooled one.
+    Returns None when fewer than two holdout draws were scored.
+    """
+    if len(holdout_hits) < 2 or int(primary_count) <= 0:
+        return None
+    accuracies = np.asarray(holdout_hits, dtype=float) / float(primary_count)
+    standard_error = float(np.std(accuracies, ddof=1)) / float(np.sqrt(len(accuracies)))
+    return round(1.96 * standard_error * 100, 2)
 
 
 def random_hits_p_value(
@@ -334,7 +365,9 @@ def walk_forward_backtest(
 
     Extra verification rounds keep iterating until the accuracy floor is reached
     or improvement stalls. The held accuracy floor only moves up: a weaker run is
-    rejected, the learning rate is raised, and status is published between runs.
+    rejected and status is published between runs. The learning rate is NOT
+    raised on a miss — raising it fit the validation window harder and
+    inflated the floor the overfit gap was measured against.
 
     Anti-overfitting (``holdout_draws`` != 0): the history is split into a
     train prefix, a validation window, and a final untouched holdout (the most
@@ -582,11 +615,12 @@ def walk_forward_backtest(
                 ) else best_round_accuracy
                 no_improve_streak = 0
             else:
+                # A round that misses the floor no longer raises the learning
+                # rate. The old bump (up to 0.28) fit the validation window
+                # harder after every miss, which is exactly what inflated the
+                # validation floor the overfit gap was measured against. The
+                # learning rate stays at the trial's setting for the whole run.
                 no_improve_streak += 1
-                if learning_rate_holder is not None:
-                    current_lr = float(learning_rate_holder.get("value") or 0.05)
-                    learning_rate_holder["value"] = min(0.28, max(current_lr * 1.35, current_lr + 0.02))
-                    learning_rate_holder["bumped"] = True
             if best_round_accuracy is None or round_accuracy > best_round_accuracy:
                 best_round_accuracy = round_accuracy
             delta_percent = (
@@ -647,6 +681,32 @@ def walk_forward_backtest(
     selection_extra: dict = {}
     if before_holdout_fn is not None:
         selection_extra = dict(before_holdout_fn(validation_summary) or {})
+
+    # Kept-weights validation pass: re-score the validation window with the
+    # weights that were actually kept, using the same frozen protocol as the
+    # holdout below (one prediction per draw, no per-draw weight updates).
+    # This runs AFTER before_holdout_fn, so the champion/challenger decision
+    # inside it has already committed (adopt) or restored the champion
+    # weights in the store — predict_fn reads the kept weights from the
+    # store on every call, so this pass measures what was kept, not the
+    # discarded round that set the floor.
+    kept_validation_hits: list[int] = []
+    if holdout_start < len(history):
+        for index in range(test_start, holdout_start):
+            try:
+                ticket = predict_fn(history[:index])
+                predicted = ticket.primary if isinstance(ticket, PredictionTicket) else ticket
+            except Exception:
+                continue
+            kept_validation_hits.append(_partial_hits(predicted, history[index].primary))
+    if kept_validation_hits:
+        kept_validation_accuracy_percent = round(
+            float(np.mean(kept_validation_hits)) / primary_count * 100, 2
+        )
+        kept_validation_mean_partial_hits = round(float(np.mean(kept_validation_hits)), 4)
+    else:
+        kept_validation_accuracy_percent = None
+        kept_validation_mean_partial_hits = None
 
     holdout_hits: list[int] = []
     holdout_exact = 0
@@ -714,8 +774,23 @@ def walk_forward_backtest(
         hit_at_1 = round(sum(1 for h in holdout_hits if h >= 1) / holdout_n, 4)
         hit_at_2 = round(sum(1 for h in holdout_hits if h >= 2) / holdout_n, 4)
         sum_mae = round(float(np.mean(holdout_sum_errors)), 4)
-        overfit_gap = round(round(validation_accuracy * 100, 2) - round(holdout_accuracy * 100, 2), 2)
-        if overfit_gap >= OVERFIT_GAP_WARN_PERCENT:
+        # The gap is measured on the kept weights, not the ratcheted best
+        # validation round: validation_accuracy above is still the floor (the
+        # best round, kept for display and trial scoring), but the gap uses
+        # the frozen kept-weights pass. A gap is only called overfit when it
+        # clears BOTH the 2-point boundary AND the holdout's own sampling
+        # noise (see holdout_noise_margin_percent); a gap inside the noise
+        # margin could be produced by the holdout alone.
+        holdout_noise_margin = holdout_noise_margin_percent(holdout_hits, primary_count)
+        if kept_validation_accuracy_percent is not None:
+            overfit_gap = round(kept_validation_accuracy_percent - round(holdout_accuracy * 100, 2), 2)
+        else:
+            overfit_gap = round(round(validation_accuracy * 100, 2) - round(holdout_accuracy * 100, 2), 2)
+        overfit_gap_significant = bool(
+            overfit_gap >= OVERFIT_GAP_WARN_PERCENT
+            and (holdout_noise_margin is None or overfit_gap > holdout_noise_margin)
+        )
+        if overfit_gap_significant:
             warning_reasons.append("validation_beats_holdout")
         if holdout_p is None or holdout_p >= DEFAULT_SIGNIFICANCE_ALPHA:
             warning_reasons.append("holdout_not_significant_vs_random")
@@ -735,6 +810,8 @@ def walk_forward_backtest(
         hit_at_2 = validation_metrics["partial_hit_rate_at_2"]
         sum_mae = validation_metrics["sum_mae"]
         overfit_gap = None
+        holdout_noise_margin = None
+        overfit_gap_significant = False
         warning_reasons.append("no_holdout")
         accuracy_source = "validation"
     baseline_hits = baseline.get("mean_partial_hits", 0.0) or 0.001
@@ -811,10 +888,18 @@ def walk_forward_backtest(
         "validation_accuracy_percent": round(validation_accuracy * 100, 2),
         "validation_metrics": validation_metrics,
         "overfit_gap_percent": overfit_gap,
+        # overfit_boundary_reached is the raw gap >= 2.0pp crossing; the
+        # warning reason (and the gate) additionally require the gap to
+        # clear the holdout noise margin — see overfit_gap_significant.
         "overfit_boundary_percent": OVERFIT_GAP_WARN_PERCENT,
         "overfit_boundary_reached": bool(
             overfit_gap is not None and overfit_gap >= OVERFIT_GAP_WARN_PERCENT
         ),
+        "kept_validation_accuracy_percent": kept_validation_accuracy_percent,
+        "kept_validation_mean_partial_hits": kept_validation_mean_partial_hits,
+        "kept_validation_evaluated_draws": len(kept_validation_hits),
+        "holdout_noise_margin_percent": holdout_noise_margin,
+        "overfit_gap_significant": overfit_gap_significant,
         "trials_tested": rounds_run,
         "overfit_warning": bool(warning_reasons),
         "overfit_warning_reasons": warning_reasons,

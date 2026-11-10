@@ -47,14 +47,51 @@ def test_gap_at_boundary_blocks(monkeypatch):
     assert "validation_beats_holdout" in result["reasons"]
 
 
-def test_nonsignificant_holdout_blocks(monkeypatch):
+def test_nonsignificant_holdout_does_not_block(monkeypatch):
+    # A holdout that does not beat random is the normal lottery outcome
+    # (a 5-60-draw holdout almost always has p >= 0.05), not evidence of
+    # memorization: it stays a warning label, never a promotion block.
     monkeypatch.setenv("OVERFIT_GATE_MODE", "block")
     result = evaluate_overfit_gate(_clean_metrics(holdout_p_value=0.20))
+    assert result["blocked"] is False
+    assert "holdout_not_significant_vs_random" not in result["reasons"]
+
+
+def test_gap_within_holdout_noise_does_not_block(monkeypatch):
+    # The raw gap clears 2.0pp, but it is inside the holdout's own sampling
+    # noise, so it is not a real gap and does not block.
+    monkeypatch.setenv("OVERFIT_GATE_MODE", "block")
+    result = evaluate_overfit_gate(_clean_metrics(
+        overfit_gap_percent=2.5,
+        overfit_boundary_reached=True,
+        overfit_gap_significant=False,
+        holdout_noise_margin_percent=3.0,
+    ))
+    assert result["blocked"] is False
+    assert "validation_beats_holdout" not in result["reasons"]
+
+
+def test_significant_gap_blocks(monkeypatch):
+    monkeypatch.setenv("OVERFIT_GATE_MODE", "block")
+    result = evaluate_overfit_gate(_clean_metrics(
+        overfit_gap_percent=3.0,
+        overfit_boundary_reached=True,
+        overfit_gap_significant=True,
+        holdout_noise_margin_percent=1.5,
+    ))
     assert result["blocked"] is True
-    assert "holdout_not_significant_vs_random" in result["reasons"]
+    assert "validation_beats_holdout" in result["reasons"]
 
 
-def test_no_holdout_blocks(monkeypatch):
+def test_old_record_without_noise_flag_falls_back_to_raw_boundary(monkeypatch):
+    # Records from before the noise-aware gap carry no flag: the gate
+    # keeps the old raw-boundary behavior for them.
+    monkeypatch.setenv("OVERFIT_GATE_MODE", "block")
+    result = evaluate_overfit_gate(
+        _clean_metrics(overfit_gap_percent=2.0, overfit_boundary_reached=True)
+    )
+    assert result["blocked"] is True
+    assert "validation_beats_holdout" in result["reasons"]
     monkeypatch.setenv("OVERFIT_GATE_MODE", "block")
     result = evaluate_overfit_gate(
         _clean_metrics(
@@ -89,7 +126,58 @@ def test_stored_candidate_with_explicit_gap_failure_is_skipped():
     assert stored_candidate_fails_gate(
         {"overfit_boundary_reached": True}
     ) is True
-    assert stored_candidate_fails_gate({"holdout_p_value": 0.40}) is True
+    # A real (noise-cleared) gap fails a stored candidate.
+    assert stored_candidate_fails_gate(
+        {"overfit_gap_percent": 3.0, "overfit_gap_significant": True}
+    ) is True
+
+
+def test_stored_candidate_with_nonsignificant_holdout_is_kept():
+    # A non-significant holdout p-value alone never drops a stored optimum:
+    # it is the normal lottery outcome, and dropping it forced the next
+    # train onto the inflated 450-600-tree fallback.
+    assert stored_candidate_fails_gate({"holdout_p_value": 0.40}) is False
+    assert stored_candidate_fails_gate(
+        {"holdout_p_value": 0.40, "overfit_warning_reasons": ["holdout_not_significant_vs_random"]}
+    ) is False
+    # ... but a real gap still fails it, and a gap inside the holdout noise
+    # does not, even when the raw boundary was reached.
+    assert stored_candidate_fails_gate(
+        {"overfit_gap_percent": 3.0, "overfit_gap_significant": False,
+         "overfit_boundary_reached": True}
+    ) is False
+
+
+def test_warning_sentence_names_the_actual_reason():
+    from prediction.metrics.overfit_gate import (
+        overfit_reason_labels,
+        overfit_warning_sentence,
+    )
+
+    gap_only = {
+        "overfit_warning_reasons": ["validation_beats_holdout"],
+        "overfit_gap_percent": 3.0,
+        "overfit_boundary_percent": 2.0,
+        "holdout_noise_margin_percent": 1.5,
+    }
+    assert overfit_warning_sentence(gap_only) == (
+        "Overfit warning: validation (kept weights) beats the holdout by "
+        "3.0 pp (boundary 2.0 pp; holdout noise margin 1.5 pp)."
+    )
+    no_edge_only = {
+        "overfit_warning_reasons": ["holdout_not_significant_vs_random"],
+        "holdout_p_value": 0.42,
+    }
+    sentence = overfit_warning_sentence(no_edge_only)
+    assert sentence.startswith("Holdout check: ")
+    assert "Overfit warning" not in sentence
+    assert "p = 0.420" in sentence
+    assert "usual lottery outcome" in sentence
+    no_holdout = {"overfit_warning_reasons": ["no_holdout"]}
+    assert overfit_warning_sentence(no_holdout).startswith("Overfit warning: ")
+    assert "no untouched holdout" in overfit_warning_sentence(no_holdout)
+    assert overfit_warning_sentence({"overfit_warning_reasons": []}) is None
+    assert overfit_reason_labels(None) == []
 
 
 def test_stored_candidate_without_holdout_data_passes_through():

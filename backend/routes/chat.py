@@ -53,6 +53,22 @@ def tuning_chart(game: Optional[str] = None):
     return StreamingResponse(image, media_type="image/png", headers={"Cache-Control": "no-store"})
 
 
+@router.get("/api/training_chart")
+def training_chart(game: Optional[str] = None):
+    """Render the training validation/holdout gap as a matplotlib PNG.
+
+    Same data source as /api/tuning_chart (game_tuner.status()): accuracy
+    by validation round, the kept-weights validation score vs the untouched
+    holdout, the gap against the 2-point line, and the warning reason in
+    words. The training panel fetches this next to the workflow chart.
+    """
+    from services.game_tuner import game_tuner
+    from services.training_chart import render_training_chart
+
+    image = BytesIO(render_training_chart(game_tuner.status(), game=game))
+    return StreamingResponse(image, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
 @router.get("/api/workflow_chart")
 def workflow_chart(flow: str = "pipeline", game: Optional[str] = None):
     """Render one live workflow as a matplotlib PNG.
