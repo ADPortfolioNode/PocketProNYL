@@ -189,4 +189,11 @@ body {
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
+/* The "no edge vs random" label is not a warning: a holdout that does not
+   beat random is the normal lottery outcome. Muted cyan, not warn-colored. */
+.tuning-overfit-badge.is-note {
+  border-color: var(--ai-cyan);
+  color: var(--ai-cyan);
+  background: rgba(34, 211, 238, 0.08);
+}
 .tuning-metric-fill.is-holdout { background: var(--ai-violet); }

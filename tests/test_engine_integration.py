@@ -87,9 +87,15 @@ def test_backtest_skips_nn_and_reuses_strategy_outputs():
         assert live.game == "pick3"
         # One collect per scored draw (predict), not a second collect in update_weights.
         # Scored draws: validation run(s), the frozen champion re-score of the same
-        # validation draws (champion/challenger), and the final holdout.
+        # validation draws (champion/challenger), the frozen kept-weights
+        # re-score of those draws (the gap is measured on the kept weights),
+        # and the final holdout.
         champion_draws = result["champion_challenger"]["paired_draws"]
         assert champion_draws == result["evaluated_draws"]
         assert collect_calls["n"] == (
-            result["evaluated_draws"] + champion_draws + result["holdout_evaluated_draws"] + 1
+            result["evaluated_draws"]
+            + champion_draws
+            + result["kept_validation_evaluated_draws"]
+            + result["holdout_evaluated_draws"]
+            + 1
         )

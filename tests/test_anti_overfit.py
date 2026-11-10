@@ -69,6 +69,11 @@ NEW_FIELDS = {
     "holdout_accuracy_percent", "validation_accuracy_percent", "best_round_accuracy_percent",
     "overfit_gap_percent", "holdout_lift_vs_random", "holdout_p_value", "trials_tested",
     "overfit_warning",
+    # Kept-weights gap: the gap is measured on the weights actually kept
+    # (frozen pass), and must clear the holdout's own noise to count.
+    "kept_validation_accuracy_percent", "kept_validation_mean_partial_hits",
+    "kept_validation_evaluated_draws", "holdout_noise_margin_percent",
+    "overfit_gap_significant",
 }
 SMALL_TRIALS = (
     {"learning_rate": 0.05, "rolling_window": 40, "rounds": 2, "patience": 1, "label": "baseline"},
@@ -127,7 +132,7 @@ def test_champion_challenger_requires_beating_noise_with_bonferroni():
 def test_retries_on_random_data_inflate_validation_but_holdout_stays_honest():
     """Max-of-retries is optimistic; the headline (holdout) shows no lift."""
     rules = game_rules_from_config("take5")
-    lifts, p_values, gaps = [], [], []
+    lifts, p_values, gaps, floor_gaps = [], [], [], []
     for seed in range(20):
         history = _random_history("take5", 260, seed=100 + seed)
         state = {"round_rng": random.Random(seed)}
@@ -151,11 +156,18 @@ def test_retries_on_random_data_inflate_validation_but_holdout_stays_honest():
         lifts.append(result["holdout_lift_vs_random"])
         p_values.append(result["holdout_p_value"])
         gaps.append(result["overfit_gap_percent"])
+        floor_gaps.append(
+            result["best_round_accuracy_percent"] - result["holdout_accuracy_percent"]
+        )
 
     assert sum(1 for p in p_values if p >= 0.05) >= 17
     assert abs(sum(lifts) / len(lifts) - 1.0) < 0.12
-    # The legacy number (validation floor = max over 6 retries) is inflated.
-    assert sum(gaps) / len(gaps) > 0.5
+    # The gap is measured on the kept weights (one frozen pass), not the
+    # ratcheted best round, so on random data it is near zero — while the
+    # legacy floor-minus-holdout number (best round, max over 6 retries)
+    # stays inflated.
+    assert abs(sum(gaps) / len(gaps)) < 2.0
+    assert sum(gaps) / len(gaps) < sum(floor_gaps) / len(floor_gaps)
 
 
 def test_tuner_on_random_draws_reports_no_significant_lift(monkeypatch):
@@ -223,8 +235,13 @@ def test_walk_forward_never_passes_holdout_to_selection():
     )
     assert result["split"]["holdout_start"] == 170
     assert max(selection_predict_lengths) < 170
-    # Holdout scored exactly once per draw, walk-forward.
-    assert holdout_predict_lengths == list(range(170, 200))
+    # Holdout scored exactly once per draw, walk-forward. The frozen
+    # kept-weights pass re-scores the validation window (lengths below 170)
+    # after before_holdout, before the holdout loop runs.
+    assert [n for n in holdout_predict_lengths if n >= 170] == list(range(170, 200))
+    assert [n for n in holdout_predict_lengths if n < 170] == list(
+        range(result["split"]["validation_start"], 170)
+    )
     assert result["holdout_evaluated_draws"] == 30
     assert updates
 
@@ -330,6 +347,90 @@ def test_weights_restored_when_challenger_not_significant():
             assert result["weights_committed"] is False
 
 
+def test_gap_is_measured_on_kept_weights_not_the_discarded_floor():
+    """A rejected challenger must not leave its floor in the gap.
+
+    The predictor is perfect while the (mutable) weights are "good" and
+    wrong while they are "bad". Learning flips bad -> good during the
+    validation rounds, so the best round (the floor) is near 100%. The
+    before_holdout hook then restores the "bad" champion weights, as the
+    engine's champion/challenger restore does when a run is rejected. The
+    gap must be measured on the restored weights — small, like the holdout
+    — not on the discarded floor.
+    """
+    rules = game_rules_from_config("pick3")
+    history = draws_from_lists(
+        [[i % 10, (i * 3) % 10, (i * 7) % 10] for i in range(200)], "pick3"
+    )
+    state = {"weights": "bad"}
+
+    def predict_fn(train_hist):
+        actual = history[len(train_hist)]
+        if state["weights"] == "good":
+            return PredictionTicket(game="pick3", primary=list(actual.primary))
+        return PredictionTicket(game="pick3", primary=[9, 9, 9])
+
+    def update_fn(actual, train_hist, rolling):
+        # Learning during validation: the challenger improves the weights.
+        state["weights"] = "good"
+        return {}
+
+    def before_holdout(summary):
+        # Champion/challenger rejects the run: the champion weights come back.
+        state["weights"] = "bad"
+        return {}
+
+    result = walk_forward_backtest(
+        history, rules, predict_fn, min_draws=50, verification_rounds=3,
+        min_verification_rounds=3, improvement_patience=3,
+        update_fn=update_fn, holdout_draws=30, before_holdout_fn=before_holdout,
+    )
+    assert result["validation_accuracy_percent"] > 80  # the discarded floor
+    assert result["kept_validation_accuracy_percent"] < 40  # the kept weights
+    assert result["holdout_accuracy_percent"] < 40
+    assert result["overfit_gap_percent"] == round(
+        result["kept_validation_accuracy_percent"] - result["holdout_accuracy_percent"], 2
+    )
+    # The old floor-based gap would have been ~70pp and fired the warning.
+    assert result["overfit_gap_percent"] < 20
+    assert result["overfit_gap_significant"] is False
+    assert "validation_beats_holdout" not in result["overfit_warning_reasons"]
+
+
+def test_learning_rate_does_not_rise_on_a_missed_floor():
+    """A round that misses the floor must not raise the learning rate."""
+    rules = game_rules_from_config("take5")
+    history = _random_history("take5", 200, seed=11)
+    calls = {"n": 0}
+    window = 57  # validation draws: test_start 113 -> holdout_start 170
+
+    def predict_fn(train_hist):
+        # The first half of the first validation pass is perfect (so round 1
+        # sets a floor near 50%, below the 98% target, and the run continues);
+        # every later pass is a fixed ticket, so rounds 2+ miss the floor.
+        calls["n"] += 1
+        if calls["n"] <= window // 2:
+            actual = history[len(train_hist)]
+            return PredictionTicket(game="take5", primary=list(actual.primary))
+        return PredictionTicket(game="take5", primary=[1, 2, 3, 4, 5])
+
+    holder = {"value": 0.05}
+    result = walk_forward_backtest(
+        history, rules, predict_fn, min_draws=50, verification_rounds=3,
+        min_verification_rounds=3, improvement_patience=3,
+        learning_rate_holder=holder, holdout_draws=30,
+    )
+    assert result["verification_rounds"] == 3
+    assert 40 < result["validation_accuracy_percent"] < 60
+    assert result["round_metrics"][1]["improved"] is False
+    assert result["round_metrics"][2]["improved"] is False
+    assert holder["value"] == 0.05
+    assert all(
+        (round_metric.get("learning_rate") or 0.05) == 0.05
+        for round_metric in result["round_metrics"]
+    )
+
+
 # --------------------------------------------- (c) old keys still there ---
 
 def test_backtest_keeps_legacy_keys_and_adds_honest_fields():
@@ -341,9 +442,16 @@ def test_backtest_keeps_legacy_keys_and_adds_honest_fields():
     assert NEW_FIELDS <= set(result)
     assert result["best_round_accuracy_is_optimistic"] is True
     assert isinstance(result["overfit_warning"], bool)
+    # The gap is measured on the kept weights (frozen pass), not the
+    # validation floor (best round), so it need not equal validation minus
+    # holdout.
+    assert result["kept_validation_accuracy_percent"] is not None
     assert result["overfit_gap_percent"] == round(
-        result["validation_accuracy_percent"] - result["holdout_accuracy_percent"], 2
+        result["kept_validation_accuracy_percent"] - result["holdout_accuracy_percent"], 2
     )
+    assert result["kept_validation_evaluated_draws"] > 0
+    assert result["holdout_noise_margin_percent"] is not None
+    assert isinstance(result["overfit_gap_significant"], bool)
 
 
 def test_legacy_two_way_split_is_flagged_not_silent():
@@ -383,6 +491,59 @@ def test_tuning_status_api_keeps_old_keys(monkeypatch):
     assert NEW_FIELDS <= set(metrics)
     assert set(HONEST_METRIC_KEYS) <= set(metrics)
     assert body["latest_result"]["accuracy_percent"] == metrics["holdout_accuracy_percent"]
+
+
+def test_post_train_message_names_the_actual_reason(monkeypatch):
+    import services.game_tuner as game_tuner_module
+    from routes import training as training_routes
+
+    monkeypatch.setattr(training_routes, "set_job", lambda *args, **kwargs: None)
+
+    def run_case(optimized):
+        monkeypatch.setattr(
+            game_tuner_module.GameTuner, "optimize_game",
+            lambda self, game_key, trials=None: optimized,
+        )
+        return training_routes._post_train_optimize(
+            "take5", {"status": "success", "accuracy": 0.1}
+        )
+
+    base = {
+        "status": "ok",
+        "held_accuracy_percent": 12.0,
+        "accuracy_percent": 12.0,
+        "message": "ok",
+        "assistant": {
+            "previous_score": 10.0, "best_score": 12.0, "best_settings": None,
+            "trials": [], "kept_existing": False,
+        },
+    }
+    no_edge = {
+        **base,
+        "holdout_accuracy_percent": 15.0,
+        "overfit_warning": True,
+        "overfit_warning_reasons": ["holdout_not_significant_vs_random"],
+        "holdout_p_value": 0.42,
+    }
+    out = run_case(no_edge)
+    assert "Holdout check:" in out["message"]
+    assert "Overfit warning" not in out["message"]
+    assert "usual lottery outcome" in out["message"]
+
+    gap = {
+        **base,
+        "holdout_accuracy_percent": 15.0,
+        "overfit_warning": True,
+        "overfit_warning_reasons": ["validation_beats_holdout"],
+        "overfit_gap_percent": 3.0,
+        "overfit_boundary_percent": 2.0,
+        "holdout_noise_margin_percent": 1.5,
+    }
+    out = run_case(gap)
+    assert (
+        "Overfit warning: validation (kept weights) beats the holdout by 3.0 pp"
+        in out["message"]
+    )
 
 
 def test_post_train_weight_optimization_keeps_old_keys(monkeypatch):
