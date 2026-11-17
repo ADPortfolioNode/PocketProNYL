@@ -1,8 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 
 const Header = ({ startupStatus }) => {
   const [showProgress, setShowProgress] = useState(true);
+  const location = useLocation();
+
+  // Top anchor: the page always starts at the top on route change.
+  // The header itself carries id="top" so #top links land here too.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [location.pathname]);
 
   useEffect(() => {
     if (startupStatus?.status === 'completed') {
@@ -26,7 +33,7 @@ const Header = ({ startupStatus }) => {
     : '';
 
   return (
-    <header className="magazine-header">
+    <header id="top" className="magazine-header">
       <div className="magazine-header__inner">
         <a className="magazine-brand" href="/">
           Pocket<span>Pro</span>:NYL

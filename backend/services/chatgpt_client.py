@@ -3,6 +3,7 @@ from openai import OpenAI
 
 from config import settings
 from services.gemini_client import LM_UNAVAILABLE_PREFIX
+from services.llm_common import sanitize_error
 
 
 class ChatGPTClient:
@@ -12,9 +13,15 @@ class ChatGPTClient:
 
     def __init__(self):
         self.api_key = settings.CHAT_GPT_API_KEY or settings.OPENAI_API_KEY
-        self.model_name = "gpt-4o-mini"
+        # Previously hardcoded to gpt-4o-mini; now overridable via
+        # CHATGPT_MODEL in .env (default stays gpt-4o-mini).
+        self.model_name = settings.CHATGPT_MODEL
         self.client = None
         self.init_error = None
+        self.last_error = None
+
+    def _known_keys(self):
+        return [k for k in (self.api_key,) if k]
 
     def is_available(self) -> bool:
         # Attempt to get client to check if it can be initialized without error
@@ -38,8 +45,13 @@ class ChatGPTClient:
     async def generate_text(self, prompt: str) -> str:
         client = self._get_client()
         if not client:
-            error_text = self.init_error or "ChatGPT client initialization failed"
-            return f"{LM_UNAVAILABLE_PREFIX}:api_error:{error_text[:220]}"
+            detail = sanitize_error(
+                self.init_error or "chatgpt: not configured "
+                "(no CHAT_GPT_API_KEY/OPENAI_API_KEY loaded)",
+                self._known_keys())
+            self.last_error = detail
+            kind = ("not_configured" if not self.api_key else "api_error")
+            return f"{LM_UNAVAILABLE_PREFIX}:{kind}:{detail}"
 
         try:
             # The 'create' method is synchronous.
@@ -56,13 +68,15 @@ class ChatGPTClient:
                 )
             )
             text = (response.choices[0].message.content or "").strip()
+            self.last_error = None
             return text
         except Exception as e:
             print(f"Error generating text with ChatGPT: {e}")
-            error_text = str(e)
-            if "429" in error_text or "rate_limit" in error_text.lower() or "quota" in error_text.lower():
-                return f"{LM_UNAVAILABLE_PREFIX}:rate_limited:{error_text[:220]}"
-            return f"{LM_UNAVAILABLE_PREFIX}:api_error:{error_text[:220]}"
+            detail = sanitize_error(str(e), self._known_keys())
+            self.last_error = detail
+            if "429" in detail or "rate_limit" in detail.lower() or "quota" in detail.lower():
+                return f"{LM_UNAVAILABLE_PREFIX}:rate_limited:{detail}"
+            return f"{LM_UNAVAILABLE_PREFIX}:api_error:{detail}"
 
 
 chatgpt_client = ChatGPTClient()

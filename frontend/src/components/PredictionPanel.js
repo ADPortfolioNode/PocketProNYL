@@ -3,6 +3,8 @@ import axios from 'axios';
 import getApiBase from '../utils/apiBase';
 import GamePrediction from './GamePrediction';
 import AllPredictionsPanel from './AllPredictionsPanel';
+import CandyStripeProgress from './CandyStripeProgress';
+import WorkflowChart from './WorkflowChart';
 
 const ALL_GAMES_VALUE = '__all_games__';
 
@@ -146,10 +148,10 @@ export default function PredictionPanel({ games = [], disabled = false }) {
                 </button>
               </div>
 
+              <WorkflowChart flow="predict" active={loadingAll} refreshMs={15000} title="Live suggestions · matplotlib" testId="workflow-chart-predict" />
+
               {loadingAll && (
-                <div className="progress">
-                  <div className="progress-bar progress-bar-striped progress-bar-animated w-100" role="progressbar"></div>
-                </div>
+                <CandyStripeProgress status="in_progress" value={null} detail="Building suggestions for every game…" testId="predict-all-progress" />
               )}
 
               {allError && !loadingAll && (
@@ -159,7 +161,7 @@ export default function PredictionPanel({ games = [], disabled = false }) {
               )}
             </div>
           ) : (
-            selectedGame && <GamePrediction game={selectedGame} />
+            selectedGame && <GamePrediction key={selectedGame} game={selectedGame} />
           )}
 
           {selectedGame === ALL_GAMES_VALUE && allPredictions.length > 0 && (

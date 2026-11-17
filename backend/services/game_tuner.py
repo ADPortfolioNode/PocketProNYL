@@ -11,12 +11,15 @@ from typing import Any
 
 from config import GAME_CONFIGS
 from prediction.engine import LotteryPredictionEngine
+from prediction.metrics.evaluator import HONEST_METRIC_KEYS
 from prediction.state.weight_store import WeightStore
 from services.tuning_assistant import TuningAssistant
 from utils.paths import prediction_state_dir
 
 # Keep iterating past a single walk-forward pass so regressions get another
-# chance to be rejected and accuracy can still climb.
+# chance to be rejected and accuracy can still climb. All of these retries run
+# on the validation window only; the final holdout is scored once afterwards,
+# and learned weights persist only when the champion/challenger test passes.
 RELENTLESS_VERIFICATION_ROUNDS = 6
 RELENTLESS_MIN_ROUNDS = 2
 RELENTLESS_PATIENCE = 2
@@ -50,7 +53,10 @@ class GameTuner:
 
     def status(self) -> dict[str, Any]:
         with self._lock:
-            return dict(self._status)
+            snapshot = dict(self._status)
+            # Callers get their own per-game map, never the live one.
+            snapshot["metrics_by_game"] = dict(snapshot.get("metrics_by_game") or {})
+            return snapshot
 
     def _set_status(self, **values: Any) -> None:
         with self._lock:
@@ -62,7 +68,9 @@ class GameTuner:
             by_game = dict(self._status.get("metrics_by_game") or {})
             by_game[game_key] = metrics
             self._status["metrics_by_game"] = by_game
+            # Legacy "latest game" mirror; tuning_metrics_game says whose it is.
             self._status["tuning_metrics"] = metrics
+            self._status["tuning_metrics_game"] = game_key
             self._status["updated_at"] = time.time()
 
     def _progress_message(self, game_key: str, payload: dict[str, Any], *, round_complete: bool) -> str:
@@ -225,6 +233,7 @@ class GameTuner:
                 rolling_window=int(trial.get("rolling_window") or RELENTLESS_ROLLING_WINDOW),
                 learning_rate=trial.get("learning_rate"),
                 progress_callback=lambda payload: self._on_progress(game_key, payload),
+                bonferroni_comparisons=trial.get("bonferroni_comparisons"),
             )
             weights = WeightStore(str(self.state_dir)).load(game_key)
             result = {
@@ -252,7 +261,12 @@ class GameTuner:
                 "rolling_window": trial.get("rolling_window") or RELENTLESS_ROLLING_WINDOW,
                 "assistant_trial": trial.get("label"),
                 "message": metrics.get("note"),
+                "held_accuracy_percent": metrics.get("held_accuracy_percent"),
+                "lift_vs_random": metrics.get("lift_vs_random"),
+                "split": metrics.get("split"),
             }
+            for key in HONEST_METRIC_KEYS:
+                result[key] = metrics.get(key)
             last_entry = (result.get("suggestion_history") or [])[-1:]
             round_metrics = metrics.get("round_metrics") or []
             last_round = round_metrics[-1] if round_metrics else {}
@@ -290,6 +304,8 @@ class GameTuner:
                 "best_weights": weights.best_weights,
                 "live": False,
             }
+            for key in HONEST_METRIC_KEYS:
+                tuning_metrics[key] = result.get(key)
             game_progress = {
                 "game": game_key,
                 "round": result.get("verification_rounds"),
@@ -306,7 +322,14 @@ class GameTuner:
                 "message": (
                     f"Between runs: {game_key} held {result.get('accuracy_percent')}% "
                     f"after {result.get('verification_rounds')} run(s)"
+                    + (
+                        f" (holdout; validation {result.get('validation_accuracy_percent')}%)"
+                        if result.get("accuracy_source") == "holdout" else ""
+                    )
                 ),
+                "holdout_accuracy_percent": result.get("holdout_accuracy_percent"),
+                "overfit_gap_percent": result.get("overfit_gap_percent"),
+                "overfit_warning": result.get("overfit_warning"),
             }
             self._set_status(
                 current_game=game_key,
@@ -344,6 +367,7 @@ class GameTuner:
             return error_result
 
     def optimize_game(self, game: str, trials: tuple[dict[str, Any], ...] | None = None) -> dict[str, Any]:
+        game = str(game or "").strip().lower()
         assistant = TuningAssistant(
             WeightStore(str(self.state_dir)),
             on_trial=self._on_assistant_trial,
@@ -363,11 +387,15 @@ class GameTuner:
         best = assistant_meta.get("best_settings") or {}
         weights = WeightStore(str(self.state_dir)).load(game)
         with self._lock:
-            current_metrics = dict((self._status.get("metrics_by_game") or {}).get(game) or self._status.get("tuning_metrics") or {})
+            # Only this game's metrics. Falling back to the global "latest" mirror
+            # copied another game's history/weights into this game's entry.
+            current_metrics = dict((self._status.get("metrics_by_game") or {}).get(game) or {})
         current_metrics.update({
             "accuracy_percent": result.get("accuracy_percent"),
             "rolling_accuracy_percent": result.get("rolling_accuracy_percent"),
             "best_round_accuracy_percent": result.get("best_round_accuracy_percent"),
+            "held_accuracy_percent": result.get("held_accuracy_percent", result.get("accuracy_percent")),
+            **{key: result.get(key) for key in HONEST_METRIC_KEYS if key in result},
             "assistant_trials": assistant_meta.get("trials") or [],
             "best_settings": best,
             "weights": weights.weights,

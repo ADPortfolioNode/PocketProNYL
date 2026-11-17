@@ -1,9 +1,10 @@
-"""PocketPro:NYL FastAPI bootstrap."""
+"""PocketProNYGames FastAPI bootstrap."""
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from routes import health, games, models, chroma, ingestion, predictions, training, experiments, chat
+from routes import accuracy, chain, patterns, roi
 from middleware.rate_limit import rate_limit_middleware
 from middleware.auth import api_key_auth_middleware
 from state.ingestion_worker import start_background_ingestion
@@ -28,7 +29,7 @@ async def lifespan(app: FastAPI):
     import asyncio
     import os
 
-    print("PocketPro:NYL backend starting up...", flush=True)
+    print("PocketProNYGames backend starting up...", flush=True)
     # Mark ready first so /api/health responds even if ingest/LM work is slow.
     health.APP_IS_READY = True
     install_capped_fetch(ingest_service)
@@ -39,7 +40,7 @@ async def lifespan(app: FastAPI):
     else:
         print("SKIP_STARTUP_INGEST=1 — background ingest not started", flush=True)
     yield
-    print("PocketPro:NYL backend shutting down...", flush=True)
+    print("PocketProNYGames backend shutting down...", flush=True)
 
 
 app = FastAPI(lifespan=lifespan)
@@ -74,6 +75,10 @@ app.include_router(predictions.router)
 app.include_router(training.router)
 app.include_router(experiments.router)
 app.include_router(chat.router)
+app.include_router(accuracy.router)
+app.include_router(chain.router)
+app.include_router(patterns.router)
+app.include_router(roi.router)
 
 if __name__ == "__main__":
     import uvicorn

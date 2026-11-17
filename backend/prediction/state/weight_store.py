@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 
@@ -21,23 +22,33 @@ class WeightStore:
         self.base_dir = Path(base_dir or _default_state_dir())
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
+    @staticmethod
+    def _key(game: str) -> str:
+        """One file per game: normalize case/whitespace and refuse path tricks."""
+        key = str(game or "").strip().lower()
+        if not key or not re.fullmatch(r"[a-z0-9_]+", key):
+            raise ValueError(f"Invalid game key for weight store: {game!r}")
+        return key
+
     def _path(self, game: str) -> Path:
-        return self.base_dir / f"{game}_weights.json"
+        return self.base_dir / f"{self._key(game)}_weights.json"
 
     def load(self, game: str, initial_weights: dict[str, float] | None = None) -> WeightState:
+        game = self._key(game)
         path = self._path(game)
         if path.exists():
             with open(path, encoding="utf-8") as handle:
                 data = json.load(handle)
+            # Copy everything: never hand out the caller's (or a cached config's) dict.
             return WeightState(
                 game=game,
-                weights=data.get("weights", initial_weights or {}),
-                best_weights=data.get("best_weights", {}),
+                weights=dict(data["weights"] or {}) if "weights" in data else dict(initial_weights or {}),
+                best_weights=dict(data.get("best_weights") or {}),
                 best_validation_accuracy=data.get("best_validation_accuracy"),
                 best_validation_at=float(data.get("best_validation_at", 0)),
                 updated_at=float(data.get("updated_at", 0)),
                 last_draw_id=data.get("last_draw_id"),
-                history=data.get("history", []),
+                history=list(data.get("history") or []),
             )
 
         weights = dict(initial_weights or {})

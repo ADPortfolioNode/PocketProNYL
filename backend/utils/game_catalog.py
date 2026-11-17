@@ -1,5 +1,5 @@
 """
-Dynamic game catalog for PocketPro:NYL.
+Dynamic game catalog for PocketProNYGames.
 
 Builds the API-facing game list from GAME_CONFIGS / titles / schedules /
 prediction formats, enriched with live (or cached) draw counts and
@@ -214,6 +214,12 @@ def compute_training_defaults_for_game(game: str) -> Dict[str, Any]:
         "auto_tune": bool(auto_tune),
         "validation_size": None,
         "model_strategy": "ensemble",
+        # Overfit gate: same contract value as DEFAULT_TRAINING_CONFIG and
+        # TrainerService.get_training_defaults' fallback (2.0%). This key was
+        # previously missing from the derived dict, so per-game defaults built
+        # from it (via get_game_training_defaults) had no overfit_gap_limit_percent
+        # and test_trainer_sequences failed with KeyError.
+        "overfit_gap_limit_percent": 2.0,
         "optimization_applied": True,
         "reasoning": reasoning,
         "derived_from": {
@@ -258,7 +264,13 @@ def build_game_entry(game: str, draw_count: int = 0) -> Dict[str, Any]:
     title = GAME_TITLES.get(game, game)
     fmt = suggestion_format_for_game(game)
     schedule = deepcopy(GAME_PREDICTION_SCHEDULES.get(game) or {})
-    training = compute_training_defaults_for_game(game)
+    from utils.training_defaults import get_optimum_config
+
+    # App-wide consistency: catalog training_defaults is the same
+    # per-game optimum config every other view uses, not the raw
+    # rule-derived values (Powerball: derived 0.94/depth 22/380 vs
+    # optimum 0.92/depth 12/180).
+    training = get_optimum_config(game)
     endpoints = list(DATASET_ENDPOINTS.get(game) or [])
     resources = _build_resources(endpoints)
     return {
@@ -277,6 +289,9 @@ def build_game_entry(game: str, draw_count: int = 0) -> Dict[str, Any]:
         "ready_for_training": int(draw_count or 0) >= 50,
         "ready_for_suggestions": int(draw_count or 0) >= 20,
         "training_defaults": training,
+        "retired": bool(rules.get("retired")),
+        "retired_date": rules.get("retired_date"),
+        "status_label": "Retired: history only" if rules.get("retired") else None,
     }
 
 
@@ -293,6 +308,7 @@ def get_game_catalog(*, refresh_counts: bool = False) -> Dict[str, Any]:
         "games": game_keys,
         "titles": {game: GAME_TITLES.get(game, game) for game in game_keys},
         "catalog": catalog,
+        "retired_games": [item["key"] for item in catalog if item["retired"]],
         "total_games": len(game_keys),
         "populated_games": sum(1 for item in catalog if item["has_draws"]),
     }

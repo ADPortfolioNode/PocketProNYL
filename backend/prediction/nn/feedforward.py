@@ -12,10 +12,15 @@ from prediction.nn.base import NNBackend
 class FeedforwardNN(NNBackend):
     """Flatten last lookback draws and predict next draw vector."""
 
-    def __init__(self, lookback: int = 30, hidden_layers: list[int] | None = None, max_iter: int = 200):
+    def __init__(self, lookback: int = 30, hidden_layers: list[int] | None = None, max_iter: int = 200,
+                 alpha: float = 1e-3, patience: int = 10, validation_fraction: float = 0.15):
         self.lookback = lookback
         self.hidden_layers = hidden_layers or [64, 32]
         self.max_iter = max_iter
+        self.alpha = float(alpha)  # L2 penalty
+        self.patience = int(patience)
+        self.validation_fraction = float(validation_fraction)
+        self.best_epoch: int | None = None
         self._model: MLPRegressor | None = None
         self._fitted = False
 
@@ -62,9 +67,31 @@ class FeedforwardNN(NNBackend):
         self._model = MLPRegressor(
             hidden_layer_sizes=tuple(self.hidden_layers),
             max_iter=self.max_iter,
+            alpha=self.alpha,
             random_state=42,
         )
-        self._model.fit(X, y)
+        n_val = int(len(X) * self.validation_fraction)
+        if n_val < 5 or len(X) - n_val < 10:
+            self._model.fit(X, y)
+            self._fitted = True
+            return
+        # Early stopping on the most recent rows (time-ordered, never shuffled):
+        # sklearn's built-in early_stopping uses a random split, which leaks the future.
+        X_tr, y_tr, X_va, y_va = X[:-n_val], y[:-n_val], X[-n_val:], y[-n_val:]
+        best_loss, best_state, best_epoch, stale = float("inf"), None, 0, 0
+        for epoch in range(1, self.max_iter + 1):
+            self._model.partial_fit(X_tr, y_tr)
+            loss = float(np.mean((self._model.predict(X_va) - y_va) ** 2))
+            if loss < best_loss - 1e-9:
+                best_loss, best_epoch, stale = loss, epoch, 0
+                best_state = ([c.copy() for c in self._model.coefs_], [b.copy() for b in self._model.intercepts_])
+            else:
+                stale += 1
+                if stale >= self.patience:
+                    break
+        if best_state is not None:
+            self._model.coefs_, self._model.intercepts_ = best_state
+        self.best_epoch = best_epoch
         self._fitted = True
 
     def predict_scores(self, history: list[Draw], rules: GameRules) -> list[float]:

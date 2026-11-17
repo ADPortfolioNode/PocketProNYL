@@ -110,6 +110,12 @@ export default function TrainingOptimizationPanel({ selectedGame, apiBase }) {
             <label>Window Size:</label>
             <span className="param-value">{optimized_defaults.window_size}</span>
           </div>
+          <div className="param-item">
+            <label>Overfit boundary:</label>
+            <span className="param-value">
+              {Number(optimized_defaults.overfit_gap_limit_percent ?? 2).toFixed(1)} pp
+            </span>
+          </div>
         </div>
 
         <div className="param-group">

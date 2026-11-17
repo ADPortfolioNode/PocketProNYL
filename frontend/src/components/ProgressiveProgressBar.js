@@ -1,4 +1,5 @@
 import React from 'react';
+import CandyStripeProgress from './CandyStripeProgress';
 
 /**
  * ProgressiveProgressBar Component
@@ -18,7 +19,7 @@ export default function ProgressiveProgressBar({
   showMetadata = true,
   rate = null, // items per second
   startTime = null, // timestamp when started
-  colorScheme = 'primary' // primary, success, warning, danger
+  colorScheme = 'primary' // primary, success, warning, danger (label colour)
 }) {
   const percentage = total > 0 ? Math.round((current / total) * 100) : 0;
   const clampedPercentage = Math.max(0, Math.min(percentage, 100));
@@ -50,16 +51,6 @@ export default function ProgressiveProgressBar({
     return Math.round(r).toLocaleString();
   };
 
-  // Determine color based on status
-  const getBarColor = () => {
-    switch (status) {
-      case 'completed': return 'bg-success';
-      case 'error': return 'bg-danger';
-      case 'active': return `bg-${colorScheme}`;
-      default: return 'bg-secondary';
-    }
-  };
-
   const getStatusIcon = () => {
     switch (status) {
       case 'completed': return '✓';
@@ -81,17 +72,14 @@ export default function ProgressiveProgressBar({
         </span>
       </div>
 
-      {/* Progress Bar */}
-      <div className="progressive-progress-track">
-        <progress
-          className={`progressive-progress-native ${getBarColor()} ${status === 'active' ? 'is-active' : ''}`}
-          value={clampedPercentage}
-          max="100"
-        />
-        {clampedPercentage > 15 && (
-          <span className="progressive-progress-overlay">{clampedPercentage}%</span>
-        )}
-      </div>
+      {/* Progress Bar: candy stripes while active, indeterminate sweep at 0% */}
+      <CandyStripeProgress
+        status={status === 'active' ? 'in_progress' : status === 'completed' ? 'complete' : status === 'error' ? 'error' : 'idle'}
+        value={clampedPercentage}
+        showPercent={false}
+        error={status === 'error' ? `${label} failed.` : null}
+        testId="progressive-progress"
+      />
 
       {/* Metadata */}
       {showMetadata && (

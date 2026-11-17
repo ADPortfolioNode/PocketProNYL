@@ -1,0 +1,16 @@
+# Run the images published by .github/workflows/docker-build-push.yml instead of building.
+#   docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull
+#   docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d
+# Do not pass --build with this file. Tags: latest (main), sha-<7 chars>, the full
+# commit SHA, a branch name (feat/* and cleanup/* pushes) or a v* tag.
+# Private packages need: docker login ghcr.io -u ADPortfolioNode (PAT with read:packages).
+# Ports, env and named volumes (backend_data, chroma_data) come from docker-compose.yml.
+
+services:
+  backend:
+    image: ${POCKETPRO_NYL_REGISTRY:-ghcr.io/adportfolionode}/pocketpro-nyl-backend:${POCKETPRO_NYL_VERSION:-latest}
+    pull_policy: always
+
+  frontend:
+    image: ${POCKETPRO_NYL_REGISTRY:-ghcr.io/adportfolionode}/pocketpro-nyl-frontend:${POCKETPRO_NYL_VERSION:-latest}
+    pull_policy: always

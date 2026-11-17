@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions
-title PocketProNYL - Stopping
+title PocketProNYGames - Stopping
 
 cd /d "%~dp0"
 if not exist "docker-compose.yml" (
@@ -11,7 +11,7 @@ if not exist "docker-compose.yml" (
 
 echo.
 echo ============================================================
-echo   PocketProNYL - Stopping
+echo   PocketProNYGames - Stopping
 echo ============================================================
 echo.
 
@@ -28,7 +28,7 @@ if errorlevel 1 (
     goto :done
 )
 
-echo [STOP] Shutting down PocketProNYL containers ...
+echo [STOP] Shutting down PocketProNYGames containers ...
 docker compose down --timeout 30
 if errorlevel 1 (
     echo [ERROR] docker compose down failed.
@@ -37,7 +37,7 @@ if errorlevel 1 (
 
 :done
 echo.
-echo [OK] PocketProNYL has been stopped.
+echo [OK] PocketProNYGames has been stopped.
 echo      Data is saved in Docker volumes.
 echo.
 pause

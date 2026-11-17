@@ -63,3 +63,33 @@
   border-radius: 8px;
 }
 .app-disclaimer p { margin: 0; }
+
+.training-live-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 1rem;
+  margin-top: 0.65rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid rgba(110, 168, 254, 0.35);
+  border-radius: 0.5rem;
+  color: rgba(255, 255, 255, 0.82);
+  background: rgba(5, 11, 26, 0.55);
+  font-size: 0.85rem;
+}
+
+.training-live-status strong {
+  color: #8ad7ff;
+}
+
+.training-live-status > span {
+  flex-basis: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .training-live-status,
+  .candy-progress-in-progress .candy-progress-fill,
+  .candy-progress-indeterminate .candy-progress-fill {
+    animation: none !important;
+    transition: none !important;
+  }
+}

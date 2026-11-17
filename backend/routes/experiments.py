@@ -3,10 +3,12 @@ Experiments API routes.
 """
 import asyncio
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Query
 from experiments.store import ExperimentStore
+from services.experiment_accuracy import build_experiment_accuracy
 from utils.timestamps import normalize_experiment_record
 from utils.paths import experiments_file
+from utils.validation import _require_game_key
 
 
 router = APIRouter()
@@ -38,3 +40,27 @@ async def get_experiments(limit: int = 100):
             "status": "error",
             "message": str(e)
         }
+
+
+@router.get("/api/experiment_accuracy")
+async def experiment_accuracy(
+    game: str = Query(...),
+    last: int = Query(3, ge=1, le=50),
+):
+    """Grade a game's past experiment suggestions against real draws.
+
+    Bridges Experiments to ground truth: each prediction experiment is
+    graded against the immediate draw after it was served (ingested draws,
+    plus verified official draws for missing dates). See the bias_note in
+    the response: the live experiments file keeps only top-accuracy
+    records, so this is a rich diagnostic, not the unbiased verdict —
+    that one lives in /api/accuracy_report (the append-only ledger).
+    """
+    try:
+        game_key = _require_game_key(game)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    try:
+        return await asyncio.to_thread(build_experiment_accuracy, game_key, last)
+    except Exception as exc:
+        return {"status": "error", "game": game_key, "message": str(exc)}

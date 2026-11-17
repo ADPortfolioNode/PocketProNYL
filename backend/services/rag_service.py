@@ -67,6 +67,7 @@ class RAGService:
         # Step 4: Generate response with configured LM client
         active_lm_client = lm_client or self.gemini_client
         selected_provider = None
+        lm_error = None
         if hasattr(active_lm_client, "generate_with_provider"):
             lm_result = await active_lm_client.generate_with_provider(
                 augmented_prompt,
@@ -74,21 +75,34 @@ class RAGService:
             )
             response_text = lm_result.get("response", "")
             selected_provider = lm_result.get("provider")
+            lm_error = lm_result.get("error")
         else:
             response_text = await active_lm_client.generate_text(augmented_prompt)
-        
+
+        # Step 5 (last rung, auto mode only): if every LM rung failed,
+        # answer from retrieved text instead of returning the sentinel
+        # or a generic apology. _build_local_fallback_response was
+        # previously defined but never called anywhere.
+        from services.gemini_client import LM_UNAVAILABLE_PREFIX
+        if isinstance(response_text, str) and response_text.startswith(
+                LM_UNAVAILABLE_PREFIX) and (lm_provider or "auto") == "auto":
+            response_text = self._build_local_fallback_response(
+                user_query, retrieved_docs)
+            selected_provider = "retrieved_text"
+
         return {
             "response": response_text,
             "sources": retrieved_docs,
             "context_count": len(retrieved_docs),
             "game": game,
             "lm_provider": selected_provider,
+            "lm_error": lm_error,
         }
 
     def _build_local_fallback_response(self, user_query: str, documents: list) -> str:
         if not documents:
             return (
-                "Gemini is currently unavailable, but the app is running. "
+                "All language-model providers are currently unavailable, but the app is running. "
                 "I could not find relevant context records for your query in ChromaDB yet. "
                 "Try a more specific request (for example: 'show latest take5 winning numbers')."
             )
@@ -117,11 +131,11 @@ class RAGService:
         games_text = ", ".join(game.upper() for game in unique_games) if unique_games else "the available games"
 
         return (
-            "Gemini is currently unavailable, so this answer is generated from local ChromaDB context only.\n\n"
+            "All language-model providers are currently unavailable, so this answer is generated from local ChromaDB context only.\n\n"
             f"Query: {user_query}\n"
             f"Relevant games: {games_text}\n"
             f"Top context records:\n{context_preview}\n\n"
-            "You can continue using ingestion, training, suggestions, and diagnostics while Gemini reconnects."
+            "You can continue using ingestion, training, suggestions, and diagnostics while the providers reconnect."
         )
 
     def retrieve_context(

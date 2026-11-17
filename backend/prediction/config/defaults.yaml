@@ -21,6 +21,11 @@ metrics:
   target_accuracy: 0.98
   verification_rounds: 1
   max_test_draws: 80
+  # Final untouched holdout of the most recent draws, scored once and never
+  # used for selection. null = auto min(max_holdout_draws, ~holdout_fraction).
+  holdout_draws: null
+  holdout_fraction: 0.15
+  max_holdout_draws: 60
 
 strategies:
   hot_cold:

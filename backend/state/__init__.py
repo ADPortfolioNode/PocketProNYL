@@ -1,1 +1,1 @@
-# State management for PocketPro:NYL backend
+# State management for PocketProNYGames backend

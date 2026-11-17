@@ -21,6 +21,11 @@ class IngestRequest(BaseModel):
     force: bool = False
 
 
+class RepairRequest(BaseModel):
+    game: Optional[str] = None  # None / "all" = every configured game
+    dry_run: bool = True  # report only unless the caller opts in to deletes
+
+
 def _fast_complete_populated_game(game_key: str) -> dict | None:
     """Return an immediate completed payload when data exists and force is off."""
     if os.getenv("INGEST_FAST_COMPLETE_POPULATED", "1") == "0":
@@ -51,6 +56,25 @@ def _fast_complete_populated_game(game_key: str) -> dict | None:
         "total_rows": existing_draws,
         "added": 0,
     }
+
+
+@router.post("/api/repair_game_data")
+async def repair_game_data(request: RepairRequest):
+    """Remove rows from a game's store that belong to another game or fail its rules."""
+    import asyncio
+    from services.data_repair import repair_all_games, repair_game_collection
+
+    try:
+        if not request.game or str(request.game).strip().lower() in ("all", "*"):
+            results = await asyncio.to_thread(repair_all_games, dry_run=request.dry_run)
+        else:
+            game_key = _require_game_key(request.game)
+            results = [await asyncio.to_thread(repair_game_collection, game_key, dry_run=request.dry_run)]
+        return {"status": "ok", "dry_run": request.dry_run, "results": results}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        return {"status": "error", "message": str(e), "results": []}
 
 
 @router.post("/api/ingest")

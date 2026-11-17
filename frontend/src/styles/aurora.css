@@ -174,3 +174,26 @@ body {
   .magazine-overlay::after { animation: none; }
   .magazine-app .btn-primary:hover:not(:disabled) { transform: none; }
 }
+
+/* Anti-overfit badge on the tuning chart: shown when holdout shows no real edge. */
+.tuning-overfit-badge {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--ai-warn);
+  border-radius: 999px;
+  color: var(--ai-warn);
+  background: rgba(251, 113, 133, 0.1);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+/* The "no edge vs random" label is not a warning: a holdout that does not
+   beat random is the normal lottery outcome. Muted cyan, not warn-colored. */
+.tuning-overfit-badge.is-note {
+  border-color: var(--ai-cyan);
+  color: var(--ai-cyan);
+  background: rgba(34, 211, 238, 0.08);
+}
+.tuning-metric-fill.is-holdout { background: var(--ai-violet); }

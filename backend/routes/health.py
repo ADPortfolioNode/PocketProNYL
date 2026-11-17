@@ -158,8 +158,41 @@ def get_ingestion_status():
     else:
         percent_complete = max(0.0, min(100.0, ((completed_count + row_frac) / total) * 100.0))
 
+    # Real phase of the active ingest (waiting on Chroma, fetching, embedding, ...).
+    from state.ingest_phase import active_phase, phase_snapshot
+
+    now = time.time()
+    for game, state in game_statuses.items():
+        snap = phase_snapshot(game, now)
+        if snap:
+            state.update(snap)
+    phase_game, phase = (current_game, phase_snapshot(current_game, now)) if current_game else (None, None)
+    if not phase or phase.get("phase") in ("done", "error"):
+        alt_game, alt_phase = active_phase(now)
+        if alt_phase:
+            phase_game, phase = alt_game, alt_phase
+    phase = phase or {}
+    if phase and phase.get("phase") not in ("done", "error") and overall_status in ("pending", "ready", "completed"):
+        overall_status = "ingesting"
+        current_game = current_game or phase_game
+    stalled = bool(phase.get("stalled")) and overall_status == "ingesting"
+
     return {
         "status": overall_status,
+        "phase_game": phase_game,
+        "phase": phase.get("phase"),
+        "phase_label": phase.get("phase_label"),
+        "phase_detail": phase.get("phase_detail"),
+        "phase_rows_done": phase.get("phase_rows_done"),
+        "phase_rows_total": phase.get("phase_rows_total"),
+        "phase_age_s": phase.get("phase_age_s"),
+        "stall_timeout_s": phase.get("stall_timeout_s"),
+        "stalled": stalled,
+        "stall_message": (
+            f"{phase.get('phase_label') or 'Ingest'} for {phase_game} made no progress for "
+            f"{int(phase.get('phase_age_s') or 0)}s (limit {int(phase.get('stall_timeout_s') or 0)}s). "
+            "Check that Chroma is running and the backend can reach data.ny.gov, then retry."
+        ) if stalled else None,
         "progress": progress_val,
         "percent_complete": round(percent_complete, 1),
         "total": len(all_games),
@@ -206,7 +239,8 @@ def trigger_startup_init(request: StartupInitRequest):
 
     ss = get_startup_state() or {}
     if str(ss.get("status") or "").lower() == "ingesting" and not request.force:
-        return {"status": "already_running", "message": "Ingestion already in progress."}
+        if not get_ingestion_status().get("stalled"):
+            return {"status": "already_running", "message": "Ingestion already in progress."}
 
     games_to_ingest = list(GAME_CONFIGS.keys())
     skipped: list[dict] = []
@@ -235,6 +269,13 @@ def trigger_startup_init(request: StartupInitRequest):
             (get_startup_state() or {}).get("games", {}).get(game_key, {}).get("status") or ""
         ).lower()
         existing_draws = int(live_counts.get(game_key, 0) or 0)
+        from state.ingest_phase import clear_phase, phase_snapshot
+
+        stalled_snap = phase_snapshot(game_key)
+        if stalled_snap and (stalled_snap.get("stalled") or stalled_snap.get("phase") == "error"):
+            # Retry after a real stall or failure: forget the stuck phase and requeue.
+            clear_phase(game_key)
+            existing_status = ""
 
         if not request.force and existing_draws > 0:
             try:

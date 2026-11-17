@@ -47,7 +47,9 @@ class PredictionAdapter:
 
         format_spec = GAME_PREDICTION_FORMATS.get(game, {}) or {}
         rules = game_rules_from_config(game)
-        main_count = int(rules.primary_count or format_spec.get("main_count", len(primary)))
+        # The suggestion format is the ticket the player fills in (Pick 10 = 10 of 80),
+        # while GAME_CONFIGS.primary_count is the draw size (Pick 10 draws 20).
+        main_count = int(format_spec.get("main_count") or rules.primary_count or len(primary))
         bonus_count = int(format_spec.get("bonus_count", 0))
         main_min = int(format_spec.get("main_min", 0))
         main_max = int(format_spec.get("main_max", 99))
@@ -121,6 +123,7 @@ class PredictionAdapter:
             return {"dataset_hash": None, "record_count": 0}
 
     def predict_next_draw(self, game: str, recent_k: int = 10) -> dict:
+        game = str(game or "").strip().lower()
         if game not in GAME_CONFIGS:
             return {"status": "error", "message": f"Game '{game}' has no modular prediction config."}
 
@@ -129,6 +132,9 @@ class PredictionAdapter:
             ticket = self.engine.predict(game, history=history)
         except Exception as exc:
             return {"status": "error", "message": str(exc)}
+        if str(getattr(ticket, "game", game) or game).lower() != game:
+            return {"status": "error", "message": f"Engine returned a ticket for '{ticket.game}', not '{game}'."}
+        model_strategy, model_champion = self._apply_chain_champion(game, history, ticket)
 
         prediction_dt = self._current_prediction_datetime()
         session_draw_count = self._get_session_draw_count(game, prediction_dt)
@@ -152,18 +158,46 @@ class PredictionAdapter:
             "formatted_prediction": formatted,
             "predicted_main_numbers": formatted["main_numbers"],
             "predicted_bonus_numbers": formatted["bonus_numbers"],
-            "prediction_session": [session_item] * max(1, session_draw_count),
+            # Independent copies: one shared dict repeated N times aliases every session.
+            "prediction_session": [
+                {**session_item, "draw_index": index + 1}
+                for index in range(max(1, session_draw_count))
+            ],
             "session_draw_count": max(1, session_draw_count),
             "prediction_date": prediction_dt.date().isoformat(),
             "prediction_weekday": prediction_dt.strftime("%A"),
             "prediction_timezone": self.prediction_timezone,
-            "model_strategy": "ensemble",
+            "model_strategy": model_strategy,
+            "model_champion": model_champion,
             "blend_weight": None,
             "strategy_weights": ticket.weights_used,
             "strategy_contributions": ticket.strategy_contributions,
             "metrics": ticket.metrics,
             "engine": "modular",
         }
+
+    def _apply_chain_champion(self, game: str, history, ticket) -> tuple[str, str]:
+        """Swap in the chained-ensemble ticket only when an evaluation promoted it.
+
+        Promotion requires beating the incumbent on validation (Bonferroni) and
+        on the untouched holdout; otherwise the incumbent ticket is served as is.
+        """
+        try:
+            from prediction.chain import champion_store
+            from prediction.chain.chained import ChainVariant, live_chained_ticket
+            from prediction.chain.posterior import BetaPosterior
+
+            champion, variant = champion_store.current_champion(game)
+            if champion != champion_store.CHAINED or not variant:
+                return "ensemble", champion_store.INCUMBENT
+            carried = BetaPosterior.from_dict(champion_store.load(game).get("posterior"))
+            chained = live_chained_ticket(self.engine, game, history, ChainVariant.from_dict(variant), carried)
+            if chained.get("primary"):
+                ticket.primary = list(chained["primary"])
+                return "chained_ensemble", champion_store.CHAINED
+        except Exception:
+            pass
+        return "ensemble", "incumbent"
 
     def _load_ready_payload(self, game: str) -> dict:
         path = self._ready_marker(game)
@@ -182,6 +216,7 @@ class PredictionAdapter:
         *,
         refresh_only: bool = False,
         baseline_accuracy: float | None = None,
+        progress_callback=None,
     ) -> dict:
         """Run walk-forward backtest and persist readiness marker."""
         if game not in GAME_CONFIGS:
@@ -231,7 +266,7 @@ class PredictionAdapter:
             }
 
         try:
-            metrics = self.engine.backtest(game)
+            metrics = self.engine.backtest(game, progress_callback=progress_callback)
         except Exception as exc:
             return {"status": "error", "message": str(exc)}
 

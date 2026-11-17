@@ -1,16 +1,22 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { resolveTuningMetrics } from '../utils/tuningView';
 import axios from 'axios';
 import getApiBase from '../utils/apiBase';
 import PredictionPanel from './PredictionPanel';
+import RoiPanel from './RoiPanel';
+import PatternSearchPanel from './PatternSearchPanel';
 import ChatPanelRAG from './ChatPanelRAG';
 import WorkflowSummary from './WorkflowSummary';
 import ExperimentsPanel from './ExperimentsPanel';
 import GameSummaryPanel from './GameSummaryPanel';
 import ChromaStatusPanel from './ChromaStatusPanel';
 import GameSelector from './GameSelector';
+import { RETIRED_LABEL } from './RetiredBadge';
 import IngestionProgressPanel from './IngestionProgressPanel';
 import ExpandableCard from './ExpandableCard';
 import ProgressiveProgressBar from './ProgressiveProgressBar';
+import WorkflowChart from './WorkflowChart';
+import TrainingChart from './TrainingChart';
 import chromaStateManager from '../utils/chromaStateManager';
 import { startPolling } from '../utils/polling';
 import { formatApiError } from '../utils/errorUtils';
@@ -63,9 +69,43 @@ function formatAccuracyDelta(value) {
   return `${sign}${number.toFixed(1)} pts`;
 }
 
+// Name the actual overfit reason in words: a validation/holdout gap or a
+// missing holdout is an overfit warning; a holdout that merely did not beat
+// random is the normal lottery outcome and gets its own label, not the
+// warning. Returns { text, title, isNote } or null when there is no warning.
+function overfitBadgeFor(metrics) {
+  if (!metrics || metrics.overfit_warning !== true) return null;
+  const reasons = Array.isArray(metrics.overfit_warning_reasons) ? metrics.overfit_warning_reasons : [];
+  const pValue = Number(metrics.holdout_p_value);
+  if (reasons.length === 1 && reasons[0] === 'holdout_not_significant_vs_random') {
+    return {
+      text: 'No edge vs random',
+      title: `Holdout did not beat random picks at p < 0.05${Number.isFinite(pValue) ? ` (p = ${pValue.toFixed(3)})` : ''} — the usual lottery outcome for a 5–60-draw holdout, not evidence of memorization.`,
+      isNote: true,
+    };
+  }
+  if (reasons.includes('validation_beats_holdout')) {
+    const gap = Number(metrics.overfit_gap_percent);
+    const gapText = Number.isFinite(gap) ? `${gap.toFixed(1)} pp` : 'a wide margin';
+    const margin = metrics.holdout_noise_margin_percent != null
+      ? `; holdout noise margin ${Number(metrics.holdout_noise_margin_percent).toFixed(1)} pp`
+      : '';
+    return {
+      text: 'Overfit warning',
+      title: `Validation (kept weights) beats the holdout by ${gapText} (boundary ${Number(metrics.overfit_boundary_percent ?? 2).toFixed(1)} pp${margin}).`,
+      isNote: false,
+    };
+  }
+  return {
+    text: 'Overfit warning',
+    title: 'No untouched holdout was available, so the score was selected on the draws it is scored on.',
+    isNote: false,
+  };
+}
+
 function TuningTelemetryGraph({ status, selectedGame, apiBase }) {
   const game = resolveTuningViewGame(status, selectedGame);
-  const metrics = (game && status?.metrics_by_game?.[game]) || status?.tuning_metrics || {};
+  const metrics = resolveTuningMetrics(status, game, selectedGame);
   const updatedAt = Number(status?.updated_at || 0);
   const params = new URLSearchParams();
   if (game) params.set('game', game);
@@ -92,7 +132,7 @@ function TuningTelemetryGraph({ status, selectedGame, apiBase }) {
 
 function TuningRunProgress({ status, selectedGame }) {
   const game = resolveTuningViewGame(status, selectedGame);
-  const metrics = (game && status?.metrics_by_game?.[game]) || status?.tuning_metrics || {};
+  const metrics = resolveTuningMetrics(status, game, selectedGame);
   const runs = (metrics.run_history || status?.run_history || []).filter((run) => (
     !game || run.game === game || selectedGame === ALL_GAMES_VALUE
   ));
@@ -143,17 +183,20 @@ function TuningRunProgress({ status, selectedGame }) {
 function TuningMetricsChart({ status, selectedGame }) {
   const latestGame = status?.latest_result?.game || status?.current_game;
   const game = resolveTuningViewGame(status, selectedGame);
-  const metrics = (game && status?.metrics_by_game?.[game]) || status?.tuning_metrics || {};
+  const metrics = resolveTuningMetrics(status, game, selectedGame);
   const hasMatchingMetrics = Boolean(game && status?.metrics_by_game?.[game])
     || !latestGame
     || selectedGame === ALL_GAMES_VALUE
     || latestGame === selectedGame;
   const weights = hasMatchingMetrics ? (metrics.best_weights || metrics.weights || {}) : {};
   const values = [
+    ['Holdout (unseen)', hasMatchingMetrics && metrics.holdout_accuracy_percent != null ? Number(metrics.holdout_accuracy_percent) : NaN],
+    ['Validation', hasMatchingMetrics && metrics.validation_accuracy_percent != null ? Number(metrics.validation_accuracy_percent) : NaN],
+    ['Kept validation', hasMatchingMetrics && metrics.kept_validation_accuracy_percent != null ? Number(metrics.kept_validation_accuracy_percent) : NaN],
     ['Held accuracy', hasMatchingMetrics ? Number(metrics.held_accuracy_percent ?? metrics.accuracy_percent) : NaN],
     ['This run', hasMatchingMetrics ? Number(metrics.this_run_accuracy_percent ?? metrics.accuracy_percent) : NaN],
     ['Next must beat', hasMatchingMetrics ? Number(metrics.next_run_target_percent) : NaN],
-    ['Best run', hasMatchingMetrics ? Number(metrics.best_round_accuracy_percent) : NaN],
+    ['Best run (optimistic)', hasMatchingMetrics ? Number(metrics.best_round_accuracy_percent) : NaN],
     ['Rolling (held)', hasMatchingMetrics ? Number(metrics.highest_rolling_accuracy_percent ?? metrics.rolling_accuracy_percent) : NaN],
     ['Target floor', hasMatchingMetrics ? Number(metrics.target_accuracy_percent) : NaN],
   ].filter(([, value]) => Number.isFinite(value));
@@ -161,19 +204,30 @@ function TuningMetricsChart({ status, selectedGame }) {
   if (!values.length) {
     return <div className="tuning-metrics-empty">Run tuning to chart this game's validated accuracy floor.</div>;
   }
+  const overfitGap = Number(metrics.overfit_gap_percent);
+  const holdoutP = Number(metrics.holdout_p_value);
+  const overfitBadge = hasMatchingMetrics ? overfitBadgeFor(metrics) : null;
 
   return (
     <div className="tuning-metrics-chart" aria-label={`Tuning metadata chart for ${game || 'selected game'}`}>
       <div className="tuning-metrics-heading">
         <span>{String(game || 'selected game').toUpperCase()}</span>
         <strong>VALIDATED ACCURACY</strong>
+        {overfitBadge && (
+          <span
+            className={`tuning-overfit-badge${overfitBadge.isNote ? ' is-note' : ''}`}
+            title={overfitBadge.title}
+          >
+            {overfitBadge.text}
+          </span>
+        )}
       </div>
       <div className="tuning-metrics-bars">
         {values.map(([label, value]) => (
           <div className="tuning-metric-row" key={label}>
             <span>{label}</span>
             <div className="tuning-metric-track">
-              <span className={`tuning-metric-fill ${label === 'Target floor' ? 'is-target' : ''} ${label.toLowerCase().includes('rolling') ? 'is-rolling' : ''}`} style={{ width: `${Math.max(0, Math.min(value, 100))}%` }} />
+              <span className={`tuning-metric-fill ${label === 'Target floor' ? 'is-target' : ''} ${label.toLowerCase().includes('rolling') ? 'is-rolling' : ''} ${label.startsWith('Holdout') ? 'is-holdout' : ''}`} style={{ width: `${Math.max(0, Math.min(value, 100))}%` }} />
             </div>
             <strong>{value.toFixed(1)}%</strong>
           </div>
@@ -182,6 +236,12 @@ function TuningMetricsChart({ status, selectedGame }) {
       <div className="tuning-metrics-meta">
         <span>Random baseline: {hasMatchingMetrics && Number.isFinite(Number(metrics.random_baseline?.mean_partial_hits)) ? Number(metrics.random_baseline.mean_partial_hits).toFixed(2) : 'n/a'} hits</span>
         <span>Lift: {hasMatchingMetrics && Number.isFinite(Number(metrics.lift_vs_random)) ? `${Number(metrics.lift_vs_random).toFixed(2)}x` : 'n/a'}</span>
+        {hasMatchingMetrics && metrics.overfit_gap_percent != null && Number.isFinite(overfitGap) && (
+          <span>Overfit gap: {formatAccuracyDelta(overfitGap)}</span>
+        )}
+        {hasMatchingMetrics && metrics.holdout_p_value != null && Number.isFinite(holdoutP) && (
+          <span>Holdout p: {holdoutP.toFixed(3)}</span>
+        )}
         <span>Batches: {hasMatchingMetrics ? (metrics.suggestion_history_count ?? 'n/a') : 'n/a'}</span>
         <span>Regressions blocked: {hasMatchingMetrics ? (metrics.regression_count ?? 'n/a') : 'n/a'}</span>
       </div>
@@ -204,7 +264,7 @@ function TuningMetricsChart({ status, selectedGame }) {
 function TuningValidationLedger({ status, selectedGame }) {
   const latestGame = status?.latest_result?.game || status?.current_game;
   const game = resolveTuningViewGame(status, selectedGame);
-  const metrics = (game && status?.metrics_by_game?.[game]) || status?.tuning_metrics || {};
+  const metrics = resolveTuningMetrics(status, game, selectedGame);
   const hasMatchingHistory = Boolean(game && status?.metrics_by_game?.[game])
     || !latestGame
     || selectedGame === ALL_GAMES_VALUE
@@ -287,6 +347,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
   const [trainErrorMessage, setTrainErrorMessage] = useState('');
   const [trainProgress, setTrainProgress] = useState(0);
   const [trainStartTime, setTrainStartTime] = useState(null);
+  const [trainTelemetry, setTrainTelemetry] = useState(null);
   const [games, setGames] = useState([]);
   const [gameTitles, setGameTitles] = useState({});
   const [gameCatalog, setGameCatalog] = useState([]);
@@ -301,6 +362,11 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
   const [selectedTrainingExperimentId, setSelectedTrainingExperimentId] = useState('');
   const [expandedCard, setExpandedCard] = useState('chat');
   const [chatIsActive, setChatIsActive] = useState(false);
+  // Ingest -> chat link: the latest completed ingest, so the Concierge
+  // card can offer a prefilled question about it. This persists after
+  // the ingest card auto-collapses, unlike a button inside that card.
+  const [lastIngest, setLastIngest] = useState(null);
+  const [chatPrefill, setChatPrefill] = useState(null);
   const [tuningStatus, setTuningStatus] = useState({
     status: 'idle',
     game: null,
@@ -870,6 +936,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
     if (progress.status === 'completed') {
       setIngestStatus('completed');
       setIngestErrorMessage('');
+      setLastIngest({ game: selectedGame, at: Date.now() });
       setTimeout(() => setExpandedCard(null), 2000); // Auto-collapse after 2s
     } else if (progress.status === 'error') {
       setIngestStatus('error');
@@ -1052,10 +1119,9 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
     setTrainPhase('fit');
     setTrainErrorMessage('');
     setTrainProgress(0);
+    setTrainTelemetry(null);
     setTrainStartTime(Date.now());
     setExpandedCard('train');
-    
-    const interval = setInterval(() => setTrainProgress(p => Math.min(p + 5, 95)), 2000);
     try {
       const response = { data: await runTrainingJob(
         axios,
@@ -1066,6 +1132,15 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
         }),
         {
           onStatus: (job) => {
+            const metrics = job?.training_metrics;
+            if (metrics) {
+              setTrainTelemetry({
+                game: job.game || selectedTrainGame,
+                message: job.message,
+                metrics,
+              });
+              setTrainProgress((current) => Math.max(current, Number(job.progress) || 0));
+            }
             if (String(job?.phase || '').toLowerCase() === 'optimize_weights') {
               setTrainPhase('optimize_weights');
               setTrainProgress((p) => Math.max(p, 96));
@@ -1073,11 +1148,15 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
           },
         },
       ) };
-      clearInterval(interval); // Clear interval regardless of outcome
       setTrainProgress(100);
       if (isTrainSuccessStatus(response?.data?.status)) {
         setTrainStatus('completed');
         setTrainPhase('completed');
+        setTrainTelemetry({
+          game: selectedTrainGame,
+          message: response.data.message,
+          metrics: response.data,
+        });
         setTrainErrorMessage('');
         setSummaryRefreshKey((prev) => prev + 1);
         // Refresh experiments
@@ -1121,7 +1200,6 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
         alert(`Training failed: ${response.data.error || response.data.message}`);
       }
     } catch (e) {
-      clearInterval(interval);
       setTrainStatus('error');
       setTrainPhase('error');
       setTrainProgress(0);
@@ -1157,9 +1235,9 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
     setTrainPhase('fit');
     setTrainErrorMessage('');
     setTrainProgress(0);
+    setTrainTelemetry(null);
     setTrainStartTime(Date.now());
     setExpandedCard('train');
-    const interval = setInterval(() => setTrainProgress((p) => Math.min(p + 2, 95)), 2500);
     try {
       const sample = buildTrainRequestBody(gamesWithDraws[0], {
         ...trainParams,
@@ -1169,6 +1247,16 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
       const response = {
         data: await runTrainAllJobs(axios, API_BASE, { ...allBody, games: gamesWithDraws }, {
           onStatus: (job) => {
+            const activeJob = (job?.jobs || []).find((item) => item?.training_metrics)
+              || (job?.jobs || []).find((item) => ['running', 'queued'].includes(String(item?.status || '').toLowerCase()));
+            if (activeJob?.training_metrics) {
+              setTrainTelemetry({
+                game: activeJob.game,
+                message: activeJob.message,
+                metrics: activeJob.training_metrics,
+              });
+              setTrainProgress((current) => Math.max(current, Number(activeJob.progress) || 0));
+            }
             if (String(job?.phase || '').toLowerCase() === 'optimize_weights') {
               setTrainPhase('optimize_weights');
               setTrainProgress((p) => Math.max(p, 96));
@@ -1176,11 +1264,15 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
           },
         }),
       };
-      clearInterval(interval);
       setTrainProgress(100);
       if (isTrainSuccessStatus(response?.data?.status)) {
         setTrainStatus('completed');
         setTrainPhase('completed');
+        setTrainTelemetry({
+          game: 'all games',
+          message: response.data.message,
+          metrics: response.data,
+        });
         setTrainErrorMessage('');
         setSummaryRefreshKey((prev) => prev + 1);
         try {
@@ -1200,7 +1292,6 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
         alert(`Train all failed: ${response.data.error || response.data.message}`);
       }
     } catch (e) {
-      clearInterval(interval);
       setTrainStatus('error');
       setTrainPhase('error');
       setTrainProgress(0);
@@ -1235,9 +1326,21 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
     [games, trainDataByGame],
   );
 
+  // Retired games (e.g. Cash4Life) stay listed for history, with a label.
+  const retiredByGame = useMemo(() => {
+    const map = {};
+    (gameCatalog || []).forEach((entry) => {
+      const key = entry && (entry.key || entry.id);
+      if (key && entry.retired) map[key] = entry.retired_date || true;
+    });
+    return map;
+  }, [gameCatalog]);
+
   const formatTrainGameOptionLabel = useCallback((game) => {
     const data = trainDataByGame[game];
-    const title = gameTitles[game] || game;
+    const title = retiredByGame[game]
+      ? `${gameTitles[game] || game} · ${RETIRED_LABEL}`
+      : (gameTitles[game] || game);
     const draws = Number(gameContents[game] || 0);
     const base = draws > 0 ? `${title} (${draws.toLocaleString()} draws)` : title;
     if (!data) return base;
@@ -1248,15 +1351,17 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
     }
     if (data.status === 'current') return `${base} — up to date`;
     return base;
-  }, [trainDataByGame, gameTitles, gameContents]);
+  }, [trainDataByGame, gameTitles, gameContents, retiredByGame]);
 
   const gameSelectorOptions = useMemo(
     () => games.map((game) => ({
       id: game,
       name: gameTitles[game] || game,
       draw_count: Number(gameContents[game] || 0),
+      retired: Boolean(retiredByGame[game]),
+      retired_date: typeof retiredByGame[game] === 'string' ? retiredByGame[game] : undefined,
     })),
-    [games, gameTitles, gameContents]
+    [games, gameTitles, gameContents, retiredByGame]
   );
 
   const getGameColorScheme = (gameName) => {
@@ -1420,10 +1525,34 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
             <p className="mb-3 text-muted">
               Ask about draws, training, or errors. Toggle RAG for Chroma-grounded answers.
             </p>
+            {lastIngest && (
+              <div className="chat-ingest-note">
+                <span>
+                  Latest ingest complete
+                  {lastIngest.game && lastIngest.game !== ALL_GAMES_VALUE
+                    ? ` for ${String(lastIngest.game).toUpperCase()}`
+                    : ' for all games'}
+                  .
+                </span>
+                <button
+                  type="button"
+                  className="chat-ingest-btn"
+                  onClick={() => setChatPrefill({
+                    at: Date.now(),
+                    text: lastIngest.game && lastIngest.game !== ALL_GAMES_VALUE
+                      ? `What changed for ${String(lastIngest.game).toUpperCase()} after the latest ingest, and what's hot lately?`
+                      : "What changed after the latest ingest, and what's hot lately?",
+                  })}
+                >
+                  Ask about the latest ingest
+                </button>
+              </div>
+            )}
             <ChatPanelRAG
               game={selectedGame}
               isExpanded={expandedCard === 'chat' || chatIsActive}
               onActivityChange={setChatIsActive}
+              prefill={chatPrefill}
             />
           </ExpandableCard>
         </div>
@@ -1434,7 +1563,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
       <section className="hero-split">
         <div className="hero-copy">
           <p className="magazine-badge">New York Lottery workspace</p>
-          <h1>PocketPro:NYL Concierge</h1>
+          <h1>PocketProNYGames Concierge</h1>
           <p className="lead">
             Ask about Take 5, Pick 3, Powerball, Mega Millions, and the rest of the NYL slate. RAG grounds answers in ingested draw history.
           </p>
@@ -1925,19 +2054,71 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
               </div>
             </div>
 
-            {trainStatus === 'in progress' && (
+            {(trainStatus === 'in progress' || trainStatus === 'completed') && (
               <div className="mb-3">
                 <ProgressiveProgressBar
                   current={trainProgress}
                   total={100}
-                  status="active"
+                  status={trainStatus === 'completed' ? 'completed' : 'active'}
                   label={trainPhase === 'optimize_weights' ? 'Verify + rebalance weights' : 'Training Progress'}
-                  showMetadata={true}
+                  showMetadata={trainStatus === 'in progress'}
                   startTime={trainStartTime}
                   colorScheme="success"
                 />
+                <div className="training-live-status" aria-live="polite">
+                  {trainTelemetry ? (
+                    <>
+                      <strong>{String(trainTelemetry.game || selectedTrainGame || '').toUpperCase()}</strong>
+                      <span>{trainTelemetry.message || 'Evaluating chronological validation draws.'}</span>
+                      <span>
+                        Round {trainTelemetry.metrics.round || 0}/{trainTelemetry.metrics.max_rounds || '?'}
+                        {' · '}
+                        {trainTelemetry.metrics.evaluated || 0} validation draw(s)
+                      </span>
+                      {trainStatus === 'in progress' && trainTelemetry.metrics.accuracy_percent != null && (
+                        <span>
+                          Provisional validation score: {Number(trainTelemetry.metrics.accuracy_percent).toFixed(1)}%
+                          {' · '}final holdout score is measured separately
+                        </span>
+                      )}
+                      {trainStatus === 'completed' && trainTelemetry.metrics.validation_accuracy_percent != null && (
+                        <span>
+                          Validation: {Number(trainTelemetry.metrics.validation_accuracy_percent).toFixed(1)}%
+                          {trainTelemetry.metrics.holdout_accuracy_percent != null
+                            ? ` · untouched holdout: ${Number(trainTelemetry.metrics.holdout_accuracy_percent).toFixed(1)}%`
+                            : ' · no untouched holdout was available'}
+                        </span>
+                      )}
+                      {trainTelemetry.metrics.overfit_gap_percent != null && (
+                        <span>
+                          Validation/holdout gap: {Number(trainTelemetry.metrics.overfit_gap_percent).toFixed(1)} pp
+                          {' · '}boundary {Number(trainTelemetry.metrics.overfit_boundary_percent ?? 2).toFixed(1)} pp
+                          {trainTelemetry.metrics.overfit_boundary_reached ? ' reached' : ' not reached'}
+                          {trainTelemetry.metrics.holdout_noise_margin_percent != null
+                            ? ` · holdout noise margin ${Number(trainTelemetry.metrics.holdout_noise_margin_percent).toFixed(1)} pp`
+                            : ''}
+                          {trainTelemetry.metrics.overfit_gap_significant === false && trainTelemetry.metrics.overfit_boundary_reached
+                            ? ' · within holdout noise, not overfit'
+                            : ''}
+                        </span>
+                      )}
+                      {(() => {
+                        const trainBadge = overfitBadgeFor(trainTelemetry.metrics);
+                        return trainBadge ? (
+                          <span className={`tuning-overfit-badge${trainBadge.isNote ? ' is-note' : ''}`} title={trainBadge.title}>
+                            {trainBadge.text}
+                          </span>
+                        ) : null;
+                      })()}
+                    </>
+                  ) : (
+                    <span>Preparing this game’s profile and chronological validation split…</span>
+                  )}
+                </div>
               </div>
             )}
+            <WorkflowChart flow="train" game={selectedTrainGame} active={trainStatus === 'in progress'} refreshMs={15000} title="Live training · matplotlib" testId="workflow-chart-train" />
+            <TrainingChart game={selectedTrainGame} active={trainStatus === 'in progress'} refreshMs={15000} title="Training overfit check · matplotlib" testId="training-chart-train" />
             <div className="d-flex flex-wrap gap-2">
             <button 
               className="btn btn-success" 
@@ -2068,6 +2249,21 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
           </ExpandableCard>
         </div>
 
+        {/* Odds, ROI and model check */}
+        <div id="section-roi" className={getFocusColClass('roi')}>
+          <ExpandableCard
+            title="Odds, ROI & Model Check"
+            cardKey="roi"
+            focusedCard={expandedCard}
+            neonBorder={true}
+            metadata={{ 'Note': 'Picks cannot change draw odds' }}
+            onToggle={handleCardFocus('roi')}
+          >
+            <RoiPanel games={games} />
+            {games.length > 0 && <PatternSearchPanel games={games} />}
+          </ExpandableCard>
+        </div>
+
         {/* Game Summary */}
         <div id="section-games" className={getFocusColClass('games')}>
           <ExpandableCard
@@ -2095,7 +2291,7 @@ export default function Dashboard({ startupStatus = { status: 'unknown', progres
             focusedCard={expandedCard}
             neonBorder={true}
             metadata={{
-              'Host': 'pocketpro_nyl_chroma',
+              'Host': 'pocketpro_nygames_chroma',
               'Port': '8000'
             }}
             onToggle={handleCardFocus('chroma')}

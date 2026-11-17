@@ -1,0 +1,92 @@
+/* Live matplotlib workflow chart: step boxes + active-step meta, refreshed in real time. */
+
+.workflow-chart {
+  margin: 0 0 1rem;
+  padding: 0.85rem 0.9rem 0.9rem;
+  border-radius: 14px;
+  background: #10182b;
+  border: 1px solid rgba(138, 160, 200, 0.18);
+  overflow: hidden;
+}
+
+.workflow-chart__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.55rem;
+}
+
+.workflow-chart__title {
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #22d3ee;
+}
+
+.workflow-chart__live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(138, 160, 200, 0.3);
+  color: #8aa0c8;
+}
+
+.workflow-chart__live i {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: #8aa0c8;
+}
+
+.workflow-chart__live.is-live {
+  color: #22d3ee;
+  border-color: rgba(34, 211, 238, 0.45);
+}
+
+.workflow-chart__live.is-live i {
+  background: #22d3ee;
+  animation: wc-ping 1.6s ease-out infinite;
+}
+
+/* thin sweep under the header: visible motion while a flow runs */
+.workflow-chart__sweep {
+  display: block;
+  height: 2px;
+  border-radius: 2px;
+  margin-bottom: 0.6rem;
+  background: linear-gradient(90deg, rgba(34, 211, 238, 0.15), rgba(167, 139, 250, 0.15));
+}
+
+.workflow-chart.is-live .workflow-chart__sweep {
+  background: linear-gradient(90deg, #22d3ee, #a78bfa, #22d3ee);
+  background-size: 200% 100%;
+  animation: wc-sweep 2.2s linear infinite;
+}
+
+.workflow-chart img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 10px;
+}
+
+@keyframes wc-ping {
+  0% { box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.6); }
+  100% { box-shadow: 0 0 0 8px rgba(34, 211, 238, 0); }
+}
+
+@keyframes wc-sweep {
+  0% { background-position: 0% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workflow-chart__live.is-live i,
+  .workflow-chart.is-live .workflow-chart__sweep {
+    animation: none !important;
+  }
+}

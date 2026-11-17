@@ -7,7 +7,7 @@ Start with the [project README](../README.md) for install and daily use.
 | Folder | Contents |
 |--------|----------|
 | [architecture/](architecture/) | System design, diagrams, cleanup reports |
-| [deployment/](deployment/) | Production, Docker Hub, Vercel, public distribution |
+| [deployment/](deployment/) | Production, Docker/GHCR, Docker Hub, public distribution |
 | [guides/](guides/) | Quick start, operations, troubleshooting, optimization |
 | [testing/](testing/) | Test plans and verification reports |
 | [status/](status/) | Milestone and completion summaries |

@@ -1,8 +1,8 @@
-# Use pre-loaded pocketpro-nyl-local images (no GHCR pull, no local build).
-# Pair with docker-compose.distribution.yml and .env.client.example # PocketPro:NYL Project
+# Use pre-loaded PocketProNYGames-local images (no GHCR pull, no local build).
+# Pair with docker-compose.distribution.yml and .env.client.example
 #
 #   docker compose -f docker-compose.distribution.yml -f docker-compose.distribution.offline.yml -f docker-compose.direct.yml up -d
-# PocketPro:NYL Project
+# PocketProNYGames
 services:
   backend:
     image: ${POCKETPRO_NYL_REGISTRY:-pocketpro-nyl-local}/pocketpro-nyl-backend:${POCKETPRO_NYL_VERSION:-latest}

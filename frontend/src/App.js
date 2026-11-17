@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import Dashboard from './components/Dashboard';
 import StartupProgress from './components/StartupProgress';
@@ -22,6 +22,14 @@ export default function App() {
   const handleStartupComplete = () => {
     setStartupComplete(true);
   };
+
+  // Top anchor: when the startup gate lifts and the Dashboard renders,
+  // the page starts at the top (the header carries id="top").
+  useEffect(() => {
+    if (startupComplete) {
+      window.scrollTo(0, 0);
+    }
+  }, [startupComplete]);
 
   return (
     <div className="magazine-app">

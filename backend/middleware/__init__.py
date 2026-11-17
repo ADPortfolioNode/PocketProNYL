@@ -1,1 +1,1 @@
-# Middleware for PocketPro:NYL backend
+# Middleware for PocketProNYGames backend

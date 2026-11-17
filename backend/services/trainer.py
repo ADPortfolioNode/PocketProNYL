@@ -2,6 +2,7 @@ import json
 import os
 import re
 import logging
+import threading
 import time
 import numpy as np
 import joblib
@@ -35,8 +36,28 @@ from utils.game_data_parser import (
 warnings.filterwarnings("ignore", category=ConvergenceWarning, module="sklearn")
 
 
+# Training knobs that train() rewrites per game (optimal config, memory caps).
+_PER_RUN_KNOBS = (
+    "target_accuracy", "max_train_attempts", "blend_step", "train_size", "n_estimators",
+    "max_depth", "random_state", "data_limit", "window_size", "auto_tune",
+)
+
+
+def _parse_max_features(raw):
+    """'sqrt' / 'log2' / a fraction like '0.5' / '1.0' (all features)."""
+    text = str(raw or "").strip().lower()
+    if text in ("sqrt", "log2"):
+        return text
+    try:
+        value = float(text)
+    except ValueError:
+        return "sqrt"
+    return 1.0 if value >= 1.0 or value <= 0 else value
+
+
 class TrainerService:
     def __init__(self):
+        self._train_lock = threading.RLock()
         self.models_dir = models_dir()
         os.makedirs(self.models_dir, exist_ok=True)
         defaults = self.get_training_defaults()
@@ -50,6 +71,10 @@ class TrainerService:
         self.data_limit = int(os.environ.get("TRAIN_DATA_LIMIT", defaults["data_limit"]))
         self.window_size = int(os.environ.get("TRAIN_WINDOW_SIZE", defaults["window_size"]))
         self.auto_tune = str(os.environ.get("TRAIN_AUTO_TUNE", "1")).lower() not in ("0", "false", "no")
+        # Regularization for the random forest (tree equivalent of L2/shrinkage):
+        # larger leaves, feature subsampling, and no depth growth across retry attempts.
+        self.min_samples_leaf = max(1, int(os.environ.get("TRAIN_MIN_SAMPLES_LEAF", "5")))
+        self.max_features = _parse_max_features(os.environ.get("TRAIN_MAX_FEATURES", "sqrt"))
 
     @staticmethod
     def get_training_defaults(game: str | None = None):
@@ -57,10 +82,11 @@ class TrainerService:
         try:
             from utils.training_defaults import (
                 get_base_training_defaults,
-                get_game_training_defaults,
+                get_optimum_config,
             )
             if game:
-                defaults = get_game_training_defaults(game)
+                # Canonical app-wide optimum config for this game.
+                defaults = get_optimum_config(game)
             else:
                 defaults = get_base_training_defaults()
             # Strip UI-only fields from trainer runtime knobs
@@ -77,6 +103,7 @@ class TrainerService:
                     "data_limit",
                     "window_size",
                     "auto_tune",
+                    "overfit_gap_limit_percent",
                 )
                 if key in defaults
             }
@@ -92,6 +119,7 @@ class TrainerService:
                 "data_limit": 0,
                 "window_size": 3,
                 "auto_tune": True,
+                "overfit_gap_limit_percent": 2.0,
             }
 
     @staticmethod
@@ -263,14 +291,19 @@ class TrainerService:
         return metadatas
 
     def _extract_winning_sequences(self, metadatas, game: str):
+        from utils.game_validation import validate_game_record
+
         sequences = []
         game_key = str(game or "").lower()
         for meta in metadatas or []:
             if not isinstance(meta, dict):
                 continue
+            # Never train one game on another game's rows.
+            if game_key and not validate_game_record(game_key, meta, strict=False)[0]:
+                continue
 
-            numbers = _extract_record_sequence(meta, game)
-            if numbers: # Use the imported utility function
+            numbers = extract_record_sequence_util(meta, game)
+            if numbers:
                 sequences.append(numbers)
 
         return sequences
@@ -389,15 +422,19 @@ class TrainerService:
             estimators_cap = 300
             depth_cap = 20
         n_estimators = min(base_estimators + ((attempt - 1) * 20), estimators_cap)
-        max_depth = min(base_depth + max(0, attempt - 1), depth_cap)
+        # Retries vary the seed and ensemble size only; depth no longer grows per
+        # attempt (growing it just fit the validation window harder).
+        max_depth = min(base_depth, depth_cap)
         n_jobs = self._rf_n_jobs(len(X_train), n_estimators)
+        min_leaf = int(getattr(self, "min_samples_leaf", 5) or 1)
         model = RandomForestRegressor(
             n_estimators=n_estimators,
             random_state=int(self.random_state or 42) + attempt,
             n_jobs=n_jobs,
             max_depth=max_depth,
-            min_samples_split=max(2, 4 - (attempt // 6)),
-            min_samples_leaf=1,
+            min_samples_split=max(4, 2 * min_leaf),
+            min_samples_leaf=min_leaf,
+            max_features=getattr(self, "max_features", "sqrt"),
         )
         model.fit(X_train, y_train)
 
@@ -838,7 +875,7 @@ class TrainerService:
             training_target=training_target,
         )
 
-    def train_model(self, game: str):
+    def train_model(self, game: str, progress_callback=None):
         if self._uses_modular_engine():
             from services.prediction_adapter import prediction_adapter
 
@@ -848,6 +885,7 @@ class TrainerService:
                 game,
                 refresh_only=refresh_only,
                 baseline_accuracy=baseline,
+                progress_callback=progress_callback,
             )
 
         from .chroma_client import chroma_client
@@ -1295,7 +1333,28 @@ class TrainerService:
             "best_training_params": best_training_params,
         }
 
-    def train(
+    def train(self, game: str, *args, progress_callback=None, **kwargs):
+        """Train one game with its own knobs, then restore the shared defaults.
+
+        The module-level ``trainer_service`` is shared by every game. Per-game
+        optimal configs and memory caps used to stay on it after a run, so e.g.
+        a ``data_limit`` cap from Take 5 silently applied to the next game.
+        Runs are serialized so concurrent games cannot read each other's knobs.
+        """
+        with self._train_lock:
+            saved = {name: getattr(self, name) for name in _PER_RUN_KNOBS if hasattr(self, name)}
+            try:
+                return self._train_game(
+                    game,
+                    *args,
+                    progress_callback=progress_callback,
+                    **kwargs,
+                )
+            finally:
+                for name, value in saved.items():
+                    setattr(self, name, value)
+
+    def _train_game(
         self,
         game: str,
         target_accuracy: float = None,
@@ -1308,6 +1367,7 @@ class TrainerService:
         data_limit: int = None,
         window_size: int = None,
         auto_tune: bool = None,
+        progress_callback=None,
     ):
         """Backward-compatible alias used by API routes and tooling."""
         import logging
@@ -1385,6 +1445,11 @@ class TrainerService:
                     or mapping.get("max_train_attempts")
                 ),
                 "model_strategy": stored_params.get("model_strategy") or mapping.get("model_strategy"),
+                "overfit_gap_percent": _coerce_float(mapping.get("overfit_gap_percent")),
+                "overfit_boundary_reached": bool(mapping.get("overfit_boundary_reached")),
+                "overfit_warning_reasons": mapping.get("overfit_warning_reasons") or [],
+                "holdout_p_value": _coerce_float(mapping.get("holdout_p_value")),
+                "holdout_accuracy_percent": _coerce_float(mapping.get("holdout_accuracy_percent")),
                 "blend_weight": _coerce_float(stored_params.get("blend_weight") or mapping.get("blend_weight")),
                 "data_limit": _coerce_int(stored_params.get("data_limit") or mapping.get("data_limit")),
                 "training_params": stored_params,
@@ -1415,7 +1480,7 @@ class TrainerService:
                 return 0
 
         def _precision_first_defaults(record_count: int) -> dict:
-            defaults = self.get_training_defaults()
+            defaults = self.get_training_defaults(game_key)
             baseline = self._load_stored_baseline(game_key)
             if record_count > 3000:
                 n_estimators = 120
@@ -1428,8 +1493,15 @@ class TrainerService:
                 max_iterations = 12
                 auto_tune = False
             else:
-                n_estimators = min(max(int(defaults["n_estimators"]), 450), 600)
-                max_depth = min(max(int(defaults["max_depth"]), 28), 32)
+                # Small datasets used to jump to 450-600 trees at depth 28-32,
+                # overriding the per-game profile (e.g. pick3/win4: 100 trees,
+                # depth 8) — a forest that big on <=1500 records memorizes
+                # the training rows instead of generalizing. Use the game
+                # profile from training_defaults.py (via get_training_defaults
+                # / get_optimum_config) as-is; the >1500 / >3000 branches
+                # above already cap the larger datasets.
+                n_estimators = int(defaults["n_estimators"])
+                max_depth = int(defaults["max_depth"])
                 max_iterations = defaults["max_iterations"]
                 auto_tune = defaults["auto_tune"]
             return _config_from_mapping(
@@ -1533,6 +1605,27 @@ class TrainerService:
                         )
                     finally:
                         gc.collect()
+
+            if candidates:
+                try:
+                    from prediction.metrics.overfit_gate import (
+                        stored_candidate_fails_gate,
+                    )
+
+                    passing = [
+                        item
+                        for item in candidates
+                        if not stored_candidate_fails_gate(item)
+                    ]
+                    if len(passing) < len(candidates):
+                        logger.info(
+                            "Skipped %s gate-failing stored optimum candidate(s) for %s",
+                            len(candidates) - len(passing),
+                            game_key,
+                        )
+                    candidates = passing
+                except Exception:
+                    pass
 
             if not candidates:
                 fallback = _precision_first_defaults(record_count)
@@ -1870,7 +1963,7 @@ class TrainerService:
             )
 
             existing_leaderboard = _load_existing_leaderboard()
-            result = self.train_model(game_key)
+            result = self.train_model(game_key, progress_callback=progress_callback)
 
             if self._uses_modular_engine() and str(result.get("status", "")).lower() == "success":
                 result = self._enrich_modular_train_result(result, record_before=record_baseline)

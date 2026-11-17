@@ -1,4 +1,11 @@
-app = "mensa-backend"
+# Fly.io template for the PocketPro:NYL backend only (alternative to render.yaml).
+# The backend needs a Chroma server: run chromadb/chroma:0.5.3 as a second Fly app
+# named pocketpro-nyl-chroma with a volume on /chroma/chroma.
+# The Dockerfile expects ./backend as build context:
+#   fly volumes create nyl_data --size 20 --region iad -a pocketpro-nyl-backend
+#   fly secrets set GEMINI_API_KEY=... OPENAI_API_KEY=... -a pocketpro-nyl-backend
+#   fly deploy backend --config fly.toml
+app = "pocketpro-nyl-backend"
 primary_region = "iad"
 
 [build]
@@ -6,24 +13,29 @@ primary_region = "iad"
 
 [env]
   DATA_DIR = "/data"
-  CHROMA_HOST = "mensa_chroma"
+  PREDICTION_ENGINE = "modular"
+  PREDICTION_STATE_DIR = "/data/prediction"
+  CHROMA_SDK_ENABLED = "1"
+  CHROMA_HOST = "pocketpro-nyl-chroma.internal"
   CHROMA_PORT = "8000"
+  AUTH_MODE = "off"
 
-[[services]]
+[http_service]
   internal_port = 5000
-  protocol = "tcp"
-  [services.concurrency]
-    type = "connections"
-    hard_limit = 100
-  [[services.ports]]
-    handlers = ["http"]
-    port = 80
+  force_https = true
+  auto_stop_machines = "off"
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/api/health"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "90s"
+
+[[vm]]
+  memory = "2gb"
 
 [[mounts]]
-  source = "mensa_data"
+  source = "nyl_data"
   destination = "/data"
-
-# Instructions:
-# 1) Create volume: `fly volumes create mensa_data --size 20 --region iad`
-# 2) Set secrets: `fly secrets set GEMINI_API_KEY=... OPENAI_API_KEY=...`
-# 3) Deploy: `fly deploy --config fly.toml`

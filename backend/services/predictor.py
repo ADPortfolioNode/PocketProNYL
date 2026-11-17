@@ -408,6 +408,15 @@ class PredictorService:
         if not all_metadatas:
             return {"status": "error", "message": "No historical data available for this game."}
 
+        # Drop rows that belong to another game (wrong dataset / numbers that do not fit).
+        from utils.game_validation import validate_game_record
+
+        all_metadatas = [
+            meta for meta in all_metadatas
+            if validate_game_record(game_key, meta, strict=False)[0]
+        ]
+        if not all_metadatas:
+            return {"status": "error", "message": "No historical data available for this game."}
         sorted_metadatas = TrainerService()._sort_metadatas_chronologically(all_metadatas)
         
         history_for_strategy: List[Draw] = []
@@ -800,7 +809,7 @@ class PredictorService:
             "predicted_for_date": target_draw_date.isoformat(), # Added for consistency
         }
 
-    def predict_all_games(self, games, recent_k: int = 10):
+    def predict_all_games(self, games, recent_k: int = 10, on_progress=None):
         normalized = []
         for game in games:
             game_key = str(game or "").strip().lower()
@@ -814,6 +823,11 @@ class PredictorService:
                         "message": result.get("message", "Suggestion failed."),
                         "prediction": None,
                     })
+                    if on_progress is not None:
+                        try:
+                            on_progress(game_key, len(normalized), len(games), False)
+                        except Exception:
+                            pass
                     continue
 
                 normalized.append({
@@ -833,6 +847,11 @@ class PredictorService:
                     "message": str(exc),
                     "prediction": None,
                 })
+            if on_progress is not None:
+                try:
+                    on_progress(game_key, len(normalized), len(games), normalized[-1].get("status") == "success")
+                except Exception:
+                    pass
         return normalized
 
     def predict(self, game: str, recent_k: int = 10, strategy: str = "rf", target_draw_date_str: Optional[str] = None):

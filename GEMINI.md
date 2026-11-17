@@ -1,8 +1,8 @@
-# PocketPro:NYL
+# PocketProNYGames
 
 NY Lottery ingest → train → suggest. React + nginx frontend, FastAPI/Hypercorn backend, ChromaDB.
 
-**This is not Mensa and not the Concierge monorepo.** UI strings, titles, containers, and logs must say PocketPro:NYL / `pocketpro_nyl_*`. If the user talks about port 8002, Redis/Celery, or `E:\2024 RESET\concierge`, stop and ask which repo.
+**This is not Mensa and not the Concierge monorepo.** UI strings, titles, containers, and logs must say PocketProNYGames / `pocketpro_nygames_*`. If the user talks about port 8002, Redis/Celery, or `E:\2024 RESET\concierge`, stop and ask which repo.
 
 Repo: `E:\2024 RESET\PocketProNYL`
 GitHub: `ADPortfolioNode/PocketProNYL` (work on `main` unless asked otherwise)
@@ -27,10 +27,10 @@ Always bind `DOCKER_BIND_HOST=0.0.0.0`. Browse/test with `127.0.0.1`, not `local
 
 UI talks to nginx `/api` on the **frontend** port. Direct backend is optional.
 
-`REACT_APP_API_BASE=` must stay empty. `CHROMA_HOST=pocketpro_nyl_chroma`.
+`REACT_APP_API_BASE=` must stay empty. `CHROMA_HOST=pocketpro_nygames_chroma`.
 
 Before telling the user a URL, run:
-`docker ps --filter name=pocketpro_nyl --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"`
+`docker ps --filter name=pocketpro_nygames --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"`
 
 ## Hard rules (this repo has already been burned)
 
@@ -46,7 +46,7 @@ Before telling the user a URL, run:
 
 ## Branding
 
-Visible names: **PocketPro:NYL**. Tab title in `frontend/public/index.html`. Concierge copy in `ChatPanelRAG.js`. Do not reintroduce "Mensa Project" in UI.
+Visible names: **PocketProNYGames**. Tab title in `frontend/public/index.html`. Concierge copy in `ChatPanelRAG.js`. Do not reintroduce "Mensa Project" in UI.
 
 ## Chat & UI Design Guidelines
 

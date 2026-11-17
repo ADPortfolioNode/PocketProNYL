@@ -1,8 +1,10 @@
-# PocketPro:NYL Optimized Deployment Guide
+# PocketProNYGames Optimized Deployment Guide
+
+> **Deploying or updating?** Start with [DEPLOY.md](DEPLOY.md): Windows Docker quickstart, GHCR images, env vars, backups, Render and smoke URLs. This file covers the architecture.
 
 ## Overview
 
-This guide explains the optimized architecture and deployment workflow for PocketPro:NYL with industry-standard practices for consistency, reliability, and maintainability.
+This guide explains the optimized architecture and deployment workflow for PocketProNYGames with industry-standard practices for consistency, reliability, and maintainability.
 
 ## Architecture Improvements
 

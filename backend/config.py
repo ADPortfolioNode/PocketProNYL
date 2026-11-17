@@ -5,19 +5,33 @@ class Settings(BaseSettings):
     """
     Centralized configuration for the application.
     """
-    PROJECT_NAME: str = "PocketPro:NYL Project"
+    PROJECT_NAME: str = "PocketProNYGames"
     
     # OpenAI
     OPENAI_API_KEY: str | None = None
     CHAT_GPT_API_KEY: str | None = None
+    CHATGPT_MODEL: str = "gpt-4o-mini"
     GEMINI_API_KEY: str | None = None
-    GEMINI_MODEL: str = "gemini-1.5-flash"
+    # Stale gemini-1.5-flash default replaced with gemini-3.8-flash; a
+    # GEMINI_MODEL line in .env still overrides this default.
+    GEMINI_MODEL: str = "gemini-3.8-flash"
+    # xAI Grok -- NOT Groq. GROK_* must never be merged with GROQ_* below.
     GROK_API_KEY: str | None = None
     GROK_API_BASE: str = "https://api.x.ai/v1"
     GROK_MODEL: str = "grok-3-mini-beta"
+    # Groq (OpenAI-compatible endpoint, requests-based, no new deps).
+    # Distinct from xAI Grok above: different vendor, base, and model.
+    GROQ_API_KEY: str | None = None
+    GROQ_API_BASE: str = "https://api.groq.com/openai/v1"
+    GROQ_MODEL: str = "openai/gpt-oss-20b"
+    # Local Ollama -- only used when OLLAMA_ENABLED is truthy. The
+    # default base reaches Ollama on the Docker host from a container.
+    OLLAMA_ENABLED: bool = False
+    OLLAMA_API_BASE: str = "http://host.docker.internal:11434/v1"
+    OLLAMA_MODEL: str = "llama3.1:8b"
     
     # ChromaDB
-    CHROMA_HOST: str = "pocketpro_nyl_chroma" # Ensure consistent naming
+    CHROMA_HOST: str = "pocketpro_nygames_chroma" # Ensure consistent naming
     CHROMA_PORT: int = 8000
 
     # Production: comma-separated origins, e.g. https://mensa.example.com
@@ -38,10 +52,13 @@ GAME_CONFIGS = {
         "primary_min": 1,
         "primary_max": 39,
         "primary_unique": True,
-        "bonus_count": 1,
-        "bonus_min": 1,
-        "bonus_max": 39,
-        "bonus_keys": ["bonus"], # Common key for bonus number
+        # Take 5 is 5-of-39 with NO bonus ball. This was previously
+        # bonus_count 1 (with bonus_min/max 1-39), which made the catalog
+        # claim a bonus ball, inflated the derived outcome space, and made
+        # training-defaults reasoning say "includes 1 bonus ball(s)" — even
+        # though GAME_PREDICTION_FORMATS correctly has bonus_count 0 and
+        # predictor.py already works around the wrong config. Fixed 2026-11-06.
+        "bonus_count": 0,
     },
     "pick3": {
         "primary_count": 3,
@@ -68,7 +85,9 @@ GAME_CONFIGS = {
         "primary_unique": True,
         "bonus_count": 1,
         "bonus_min": 1,
-        "bonus_max": 25,
+        # Mega Ball matrix 1-24 since the April 8, 2025 redesign (old draws up
+        # to 25 still validate via HISTORICAL_RANGE_OVERRIDES).
+        "bonus_max": 24,
         "bonus_keys": ["mega_ball", "megaball"],
     },
     "pick10": {
@@ -87,6 +106,9 @@ GAME_CONFIGS = {
         "bonus_min": 1,
         "bonus_max": 4,
         "bonus_keys": ["cash_ball", "cashball"],
+        # Final Cash4Life draw was Feb 21, 2026: history only.
+        "retired": True,
+        "retired_date": "2026-02-21",
     },
     "quickdraw": {
         "primary_count": 20,
@@ -210,7 +232,7 @@ GAME_PREDICTION_FORMATS = {
         "main_max": 70,
         "bonus_count": 1,
         "bonus_min": 1,
-        "bonus_max": 25,
+        "bonus_max": 24,
         "unique_main": True,
         "sort_main": True,
         "main_label": "White Balls",
@@ -350,8 +372,13 @@ GAME_PREDICTION_SCHEDULES = {
         "draw_sessions": ["midday", "evening"],
         "weekday_draws": {},
     },
-    "millionaireforlife": {"daily_draws": 0, "weekday_draws": {0: 1, 2: 1, 5: 1}},
+    # Nightly draw at 11:15 pm ET.
+    "millionaireforlife": {"daily_draws": 1, "draw_times": ["23:15"], "weekday_draws": {}},
 }
+
+
+def is_game_retired(game_key: str | None) -> bool:
+    return bool((GAME_CONFIGS.get(str(game_key or "")) or {}).get("retired"))
 
 
 def _normalize_game_token(value: str | None) -> str:

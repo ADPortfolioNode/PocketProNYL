@@ -112,3 +112,13 @@ export function formatSuggestionStatusLine(payload) {
 
   return 'Suggestion finished with no numbers for the current schedule.';
 }
+function normalizeGameKey(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+// True when a suggestion payload belongs to `game` (or names no game at all).
+export function isPredictionForGame(payload, game) {
+  if (!payload || typeof payload !== 'object') return false;
+  if (!payload.game || !game) return true;
+  return normalizeGameKey(payload.game) === normalizeGameKey(game);
+}

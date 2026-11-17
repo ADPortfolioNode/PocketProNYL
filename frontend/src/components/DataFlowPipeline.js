@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import getApiBase from '../utils/apiBase';
 import { getFlowActivity, subscribeFlowActivity } from '../utils/flowActivity';
+import WorkflowChart from './WorkflowChart';
 import '../styles/dataflow.css';
 
 const ACTIVE_WORDS = ['ingesting', 'running', 'queued', 'fetching', 'in progress', 'in_progress', 'training', 'tuning', 'started'];
@@ -144,6 +145,8 @@ export default function DataFlowPipeline({ pollMs = 5000, idlePollMs = 15000 }) 
           {online ? (anyActive ? 'Processing' : 'Idle') : 'Backend offline'}
         </span>
       </header>
+
+      <WorkflowChart flow="pipeline" active={anyActive} refreshMs={15000} title="Live workflow · matplotlib" testId="workflow-chart-pipeline" />
 
       <ol className="dataflow__track">
         {STAGE_META.map((meta, i) => {

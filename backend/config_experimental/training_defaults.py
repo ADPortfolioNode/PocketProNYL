@@ -11,6 +11,7 @@ from utils.training_defaults import (  # noqa: F401
     game_training_optimizer,
     get_base_training_defaults,
     get_game_training_defaults,
+    get_optimum_config,
 )
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "game_training_optimizer",
     "get_base_training_defaults",
     "get_game_training_defaults",
+    "get_optimum_config",
 ]

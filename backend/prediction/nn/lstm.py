@@ -64,12 +64,22 @@ class LSTMBackend(NNBackend):
             self._fitted = False
             return
         X, y = data
+        l2 = tf.keras.regularizers.l2(1e-4)
         model = tf.keras.Sequential([
-            tf.keras.layers.LSTM(32, input_shape=(self.lookback, rules.primary_count)),
-            tf.keras.layers.Dense(rules.primary_count),
+            tf.keras.layers.LSTM(32, input_shape=(self.lookback, rules.primary_count),
+                                 kernel_regularizer=l2, recurrent_regularizer=l2),
+            tf.keras.layers.Dense(rules.primary_count, kernel_regularizer=l2),
         ])
         model.compile(optimizer="adam", loss="mse")
-        model.fit(X, y, epochs=self.epochs, verbose=0)
+        # Keras validation_split takes the LAST rows (time-ordered), so early stopping
+        # never trains on draws after the ones it validates on.
+        callbacks = []
+        fit_kwargs = {}
+        if len(X) >= 40:
+            callbacks.append(tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=2,
+                                                              restore_best_weights=True))
+            fit_kwargs = {"validation_split": 0.15, "shuffle": False}
+        model.fit(X, y, epochs=self.epochs, verbose=0, callbacks=callbacks, **fit_kwargs)
         self._model = model
         self._fitted = True
 

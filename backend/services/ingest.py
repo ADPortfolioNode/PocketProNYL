@@ -3,7 +3,7 @@ import hashlib
 import time
 import os
 import re
-import signal
+import threading
 from datetime import datetime
 from functools import wraps
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
@@ -14,26 +14,32 @@ class TimeoutError(Exception):
     """Raised when an operation exceeds the time limit."""
     pass
 
-def timeout_handler(signum, frame):
-    raise TimeoutError("Operation timed out")
-
 def with_timeout(seconds):
-    """Decorator to add a timeout to a function (Unix/Linux only, will pass on Windows)."""
+    """Decorator: raise TimeoutError if the call takes longer than ``seconds``.
+
+    Thread based, so it works on Windows too (the old SIGALRM version silently
+    did nothing there). The worker thread is a daemon; a call that overruns is
+    abandoned, not killed, so wrap only calls that are safe to abandon.
+    """
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            # On Windows, signal.SIGALRM is not available; just run normally
-            if not hasattr(signal, 'SIGALRM'):
-                return func(*args, **kwargs)
-            
-            old_handler = signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(seconds)
-            try:
-                result = func(*args, **kwargs)
-            finally:
-                signal.alarm(0)  # Cancel alarm
-                signal.signal(signal.SIGALRM, old_handler)
-            return result
+            outcome: dict = {}
+
+            def _run():
+                try:
+                    outcome["value"] = func(*args, **kwargs)
+                except BaseException as exc:  # re-raised in the caller's thread
+                    outcome["error"] = exc
+
+            worker = threading.Thread(target=_run, daemon=True, name=f"timeout:{func.__name__}")
+            worker.start()
+            worker.join(seconds)
+            if worker.is_alive():
+                raise TimeoutError(f"{func.__name__} timed out after {seconds}s")
+            if "error" in outcome:
+                raise outcome["error"]
+            return outcome.get("value")
         return wrapper
     return decorator
 
@@ -41,7 +47,14 @@ def with_timeout(seconds):
 from fastapi import HTTPException
 from config import GAME_CONFIGS, DATASET_ENDPOINTS, GAME_TITLES, GAME_ALIASES, resolve_game_key
 from routes.chroma_repository import chroma_repository # Import the repository
+from utils.game_validation import (
+    allowed_dataset_ids,
+    dataset_id_from_url,
+    tag_rows_with_source,
+    validate_game_record,
+)
 from utils.paths import ingestion_cache_dir
+from state.ingest_phase import report_phase
 
 from utils.game_data_parser import (
     _parse_pick3_digits as parse_pick3_digits_util,
@@ -64,15 +77,23 @@ class IngestService:
         # Otherwise, use the general INGEST_BATCH_SIZE
         self.batch_size = int(os.getenv("INGEST_STARTUP_BATCH_SIZE", "500")) if os.getenv("INGEST_STARTUP_PARALLEL", "0") == "1" else int(os.getenv("INGEST_BATCH_SIZE", "4000"))
         self.use_upsert = os.getenv("INGEST_USE_UPSERT", "1") != "0"
+        # Catalog discovery is a recovery path for games with NO configured dataset.
+        # It must never add datasets to a configured game: a catalog search for
+        # "new york Take 5 lottery" also returns Cash 4 Life and NY Lotto, which is
+        # how other games' draws were stored and trained as Take 5.
         self.enable_catalog_fallback = os.getenv("INGEST_ENABLE_CATALOG_FALLBACK", "1") == "1"
         self.fallback_on_empty = os.getenv("INGEST_FALLBACK_ON_EMPTY", "1") == "1"
-        self.max_catalog_candidates = int(os.getenv("INGEST_MAX_CATALOG_CANDIDATES", "3")) # PocketPro:NYL Project
+        self.max_catalog_candidates = int(os.getenv("INGEST_MAX_CATALOG_CANDIDATES", "3")) # PocketProNYGames project
         self.max_id_preload = int(os.getenv("INGEST_MAX_ID_PRELOAD", "5000")) # Lowered from 15000 to prevent OOM on large collections
         self.skip_fetch_threshold = int(os.getenv("INGEST_SKIP_FETCH_THRESHOLD", "50000"))
         self.batch_max_retries = int(os.getenv("INGEST_BATCH_MAX_RETRIES", "2"))
         self.progress_interval_s = float(os.getenv("INGEST_PROGRESS_INTERVAL_S", "0.5"))
+        self.upsert_chunk = max(1, int(os.getenv("INGEST_UPSERT_CHUNK", "200")))
         self.socrata_catalog_url = os.getenv("SOCRATA_CATALOG_URL", "https://api.us.socrata.com/api/catalog/v1")
         self.socrata_domain = os.getenv("SOCRATA_DOMAIN", "data.ny.gov")
+        self._catalog_titles: dict[str, str] = {}
+        self.auto_repair = os.getenv("INGEST_AUTO_REPAIR", "1") != "0"
+        self.repair_max_rows = int(os.getenv("INGEST_REPAIR_MAX_ROWS", "100000"))
         self.game_search_hints = {
             key: f"new york {GAME_TITLES.get(key, key)} lottery"
             for key in DATASET_ENDPOINTS.keys()
@@ -183,6 +204,7 @@ class IngestService:
                 continue
             seen.add(endpoint)
             deduped_endpoints.append(endpoint)
+            self._catalog_titles[endpoint] = str(title or "")
             print(f"  ↳ Catalog candidate for {game}: {title} -> {endpoint}")
 
             if len(deduped_endpoints) >= self.max_catalog_candidates:
@@ -191,27 +213,33 @@ class IngestService:
         return deduped_endpoints
 
     def _resolve_game_endpoints(self, game: str):
-        configured = DATASET_ENDPOINTS.get(game, [])
+        configured = list(DATASET_ENDPOINTS.get(game, []) or [])
 
-        # Fast path: use known configured datasets by default.
-        # Catalog fallback is opt-in and primarily for recovery when configured endpoints are missing.
-        if configured and not self.enable_catalog_fallback:
+        # Configured datasets are authoritative. Never merge catalog hits into them.
+        if configured:
             return configured
 
-        catalog_candidates = self._fetch_catalog_endpoints(game)
+        if not self.enable_catalog_fallback:
+            return []
 
-        if configured and not catalog_candidates:
-            return configured
-
-        ordered = []
-        seen = set()
-        for endpoint in configured + catalog_candidates:
-            if endpoint in seen:
+        # Recovery only: keep catalog datasets whose title names this game and
+        # no other configured game.
+        own_title = self._normalize_text(GAME_TITLES.get(game, game)).replace(" ", "")
+        safe = []
+        for endpoint in self._fetch_catalog_endpoints(game):
+            dataset_id = dataset_id_from_url(endpoint)
+            owned_elsewhere = any(
+                dataset_id and dataset_id in allowed_dataset_ids(other)
+                for other in DATASET_ENDPOINTS.keys()
+                if other != game
+            )
+            title = self._catalog_titles.get(endpoint, "")
+            compact = self._normalize_text(title).replace(" ", "")
+            if owned_elsewhere or not own_title or own_title not in compact:
+                print(f"  ↳ Rejected catalog candidate for {game}: {title or endpoint}")
                 continue
-            seen.add(endpoint)
-            ordered.append(endpoint)
-
-        return ordered
+            safe.append(endpoint)
+        return safe
 
     def _pick3_digit_string(self, raw_value) -> str | None:
         # Store comma-separated digits so history parsers do not treat "123" as 123.
@@ -224,7 +252,14 @@ class IngestService:
             return None
         return ",".join(digits[-4:])
 
-    def _process_api_row(self, row_dict: dict, game: str, column_names: list[str], existing_ids: set[str]) -> list[tuple[str, dict, str]]:
+    def _process_api_row(
+        self,
+        row_dict: dict,
+        game: str,
+        column_names: list[str],
+        existing_ids: set[str],
+        rejected: dict[str, int] | None = None,
+    ) -> list[tuple[str, dict, str]]:
         """
         Process a single row from the API, normalize it, and prepare for ChromaDB.
         This method was restored to fix a regression where it was missing.
@@ -241,6 +276,12 @@ class IngestService:
         
         records_to_add = []
         for record_id, record_meta in normalized_records:
+            ok, reason = validate_game_record(game, record_meta, strict=True)
+            if not ok:
+                # Per-call counter (never instance state): games ingest in parallel threads.
+                if rejected is not None:
+                    rejected[reason] = rejected.get(reason, 0) + 1
+                continue
             if record_id in existing_ids:
                 continue
             doc_text = json.dumps(record_meta, sort_keys=True)
@@ -336,106 +377,19 @@ class IngestService:
         progress_callback=None,
         total_estimated_game_rows: int = 0,
     ) -> tuple[list[dict], list[str]]:
+        """Fetch a game's rows, paged and capped at INGEST_MAX_ROWS_PER_GAME.
+
+        Delegates to ``services.socrata_fetch.fetch_rows_capped`` (the same code
+        main.py installs at startup), so the row cap applies on every path; the
+        old loop downloaded whole rows.json dumps (Quick Draw: 1.7M+ rows).
         """
-        Fetches all rows from a list of paginated API endpoints.
-        Returns a tuple of (all_rows, column_names).
-        """
-        socrata_page_size = self.batch_size # Use batch_size as page size for Socrata API
-        all_fetched_rows = []
-        _current_column_names: list[str] = []
-        last_progress_at = 0.0
+        from services.socrata_fetch import fetch_rows_capped
 
-        def _emit_progress(rows_fetched: int, total_rows: int):
-            nonlocal last_progress_at
-            if not progress_callback:
-                return
-            now = time.time()
-            if (rows_fetched >= total_rows or now - last_progress_at >= self.progress_interval_s):
-                progress_callback(rows_fetched, total_rows)
-                last_progress_at = now
-
-        for endpoint_idx, endpoint in enumerate(endpoints):
-            endpoint_last_error = None
-            parsed_url = urlparse(endpoint)
-            base_query_params = parse_qs(parsed_url.query)
-            filtered_query_items = []
-            for key, values in base_query_params.items():
-                if key.lower() == 'accesstype' and any(v.lower() == 'download' for v in values):
-                    continue
-                for value in values:
-                    filtered_query_items.append((key, value))
-
-            print(f"[{game.upper()}] Endpoint {endpoint_idx + 1}/{len(endpoints)}: {endpoint}")
-
-            current_offset = 0
-            while True:
-                paginated_query_params = parse_qs(urlencode(filtered_query_items, doseq=True), keep_blank_values=True)
-                paginated_query_params['$limit'] = [socrata_page_size]
-                paginated_query_params['$offset'] = [current_offset]
-                new_query = urlencode(paginated_query_params, doseq=True)
-                paginated_endpoint = urlunparse(parsed_url._replace(query=new_query))
-                
-                for attempt in range(self.max_retries):
-                    page_success: bool = False
-                    response = None
-                    data = None
-                    try:
-                        print(f"  Fetching from {paginated_endpoint} (attempt {attempt + 1}/{self.max_retries})...")
-                        response = requests.get(paginated_endpoint, timeout=self.request_timeout)
-                        response.raise_for_status()
-                        data = response.json()
-                        page_success = True
-                        break
-                    except requests.Timeout:
-                        endpoint_last_error = f"Request timeout after {self.request_timeout}s for {paginated_endpoint}"
-                        print(f"  ⚠ {endpoint_last_error}")
-                        if attempt < self.max_retries - 1:
-                            time.sleep(self.retry_delay * (2 ** attempt))
-                        else:
-                            break
-                    except requests.RequestException as req_error:
-                        endpoint_last_error = f"Request error: {str(req_error)} for {paginated_endpoint}"
-                        print(f"  ⚠ {endpoint_last_error}")
-                        if hasattr(req_error, 'response') and req_error.response is not None:
-                            print(f"  Response status: {req_error.response.status_code}")
-                            print(f"  Response preview: {req_error.response.text[:200]}")
-                        if attempt < self.max_retries - 1:
-                            time.sleep(self.retry_delay * (2 ** attempt))
-                            continue
-                        else:
-                            break
-                    except ValueError as json_error:
-                        endpoint_last_error = f"Invalid JSON response: {str(json_error)} for {paginated_endpoint}"
-                        print(f"  ⚠ {endpoint_last_error}")
-                        if response:
-                            print(f"  Response preview: {response.text[:200]}") 
-                        break
-                    except Exception as unexpected_error:
-                        endpoint_last_error = f"Unexpected error: {str(unexpected_error)} for {paginated_endpoint}"
-                        print(f"  ✗ {endpoint_last_error}")
-                        import traceback
-                        traceback.print_exc()
-                        break
-
-                if not page_success:
-                    print(f"  ✗ Failed to fetch page at offset {current_offset} from {endpoint}: {endpoint_last_error}")
-                    break
-
-                fetched_rows, extracted_columns = extract_rows_and_columns_util(data)
-
-                if not _current_column_names and extracted_columns:
-                    _current_column_names = extracted_columns
-                    print(f"  ✓ Extracted {len(_current_column_names)} column names from payload")
-
-                if not fetched_rows:
-                    print(f"  ✓ No more data from {paginated_endpoint} (offset {current_offset})")
-                    break
-                
-                all_fetched_rows.extend(fetched_rows)
-                _emit_progress(len(all_fetched_rows), total_estimated_game_rows)
-                current_offset += len(fetched_rows)
-
-        return all_fetched_rows, _current_column_names
+        return fetch_rows_capped(
+            self, game, endpoints,
+            progress_callback=progress_callback,
+            total_estimated_game_rows=total_estimated_game_rows,
+        )
 
     def _process_rows_from_file(
         self,
@@ -445,6 +399,7 @@ class IngestService:
         existing_ids: set[str],
         column_names: list[str],
         progress_callback=None,
+        rejected: dict[str, int] | None = None,
     ) -> tuple[int, int]:
         """Processes a list of rows from a file and upserts them into ChromaDB."""
         chroma_batch_size = self.batch_size
@@ -474,7 +429,7 @@ class IngestService:
                     row = converted[0]
                 if not isinstance(row, dict):
                     continue
-                processed_records = self._process_api_row(row, game, column_names, existing_ids)
+                processed_records = self._process_api_row(row, game, column_names, existing_ids, rejected)
                 for record_id, record_meta, doc_text in processed_records:
                     chroma_ids.append(record_id)
                     chroma_metadatas.append(record_meta)
@@ -486,7 +441,16 @@ class IngestService:
             batch_stored = False
             for batch_attempt in range(self.batch_max_retries):
                 try:
-                    collection.upsert(documents=chroma_documents, metadatas=chroma_metadatas, ids=chroma_ids)
+                    # Embedding runs inside upsert (CPU). Smaller chunks keep the
+                    # reported progress moving instead of one long silent call.
+                    for start in range(0, len(chroma_ids), self.upsert_chunk):
+                        stop = start + self.upsert_chunk
+                        collection.upsert(documents=chroma_documents[start:stop],
+                                          metadatas=chroma_metadatas[start:stop], ids=chroma_ids[start:stop])
+                        report_phase(game, "embedding_and_writing",
+                                     detail=f"{total_rows_processed_in_run + min(stop, len(chroma_ids)):,} rows written",
+                                     rows_done=total_rows_processed_in_run + min(stop, len(chroma_ids)),
+                                     rows_total=len(all_rows))
                     existing_ids.update(chroma_ids)
                     rows_added += len(chroma_ids)
                     batch_stored = True
@@ -546,6 +510,45 @@ class IngestService:
 
         collection_name = game_key
         try:
+            result = self._fetch_and_sync(game_key, collection_name, progress_callback, force)
+        except Exception as exc:
+            report_phase(game_key, "error", detail=str(exc)[:300])
+            raise
+        # New draws -> debounced background rerun of this game's pattern scan.
+        from services.pattern_scheduler import notify_ingest
+
+        notify_ingest(game_key, result)
+        return result
+
+    def _warm_embedding_model(self, game_key: str, collection) -> None:
+        """Load (and on first run download) Chroma's default embedding model, visibly.
+
+        Draw collections use Chroma's default all-MiniLM ONNX embedding because the
+        RAG chat runs semantic ``query_texts`` searches over them. The first upsert
+        would otherwise download ~80 MB silently.
+        """
+        try:
+            from chromadb.api.models.Collection import Collection as _ChromaCollection
+        except Exception:  # pragma: no cover
+            return
+        if not isinstance(collection, _ChromaCollection):
+            return  # test doubles / custom stores embed nothing
+        report_phase(game_key, "loading_embedding_model",
+                     detail="First run downloads the all-MiniLM ONNX model (~80 MB); later runs reuse it.")
+        try:
+            chroma_repository.default_ef(["warmup"])
+        except Exception as exc:
+            print(f"  ⚠ Embedding model warm-up failed ({exc}); the first write will retry it.")
+
+    def _fetch_and_sync(self, game_key: str, collection_name: str, progress_callback, force: bool) -> dict:
+        user_callback = progress_callback
+
+        def progress_callback(rows_done, rows_total):  # noqa: F811 - wraps the caller's callback
+            if user_callback:
+                user_callback(rows_done, rows_total)
+
+        report_phase(game_key, "waiting_on_chroma", detail="Opening this game's Chroma collection")
+        try:
             collection = chroma_repository.get_or_create_collection(collection_name)
             print(f"✓ Connected to collection '{collection_name}'")
         except Exception as conn_error:
@@ -575,9 +578,12 @@ class IngestService:
                 raise ValueError(f"No endpoints found for game '{game_key}'.")
 
             total_estimated_game_rows = 0
+            report_phase(game_key, "counting_rows")
             for ep in endpoints:
                 try:
-                    parsed_url = urlparse(ep)
+                    from services.socrata_fetch import pageable_endpoint
+
+                    parsed_url = urlparse(pageable_endpoint(ep))  # views ignore $select; resources count
                     query_params = parse_qs(parsed_url.query)
                     query_params.pop('accessType', None)
                     query_params['$select'] = ['count(*)']
@@ -597,17 +603,29 @@ class IngestService:
                 except Exception as e:
                     print(f"  ⚠ Could not get total row count for an endpoint: {e}.")
             
+            from services.socrata_fetch import max_rows_for
+
+            row_cap = max_rows_for(game_key)
             if total_estimated_game_rows == 0:
-                print(f"  ⚠ Using fallback total of 100000 for progress reporting.")
-                total_estimated_game_rows = 100000
+                print(f"  ⚠ Using the row cap ({row_cap}) as the progress total.")
+                total_estimated_game_rows = row_cap
+            # The fetch never keeps more than the cap, so progress never promises more.
+            total_estimated_game_rows = min(total_estimated_game_rows, row_cap)
 
             if progress_callback:
                 progress_callback(0, total_estimated_game_rows)
+            report_phase(game_key, "fetching", detail=f"0 of ~{total_estimated_game_rows:,} rows",
+                         rows_done=0, rows_total=total_estimated_game_rows)
+
+            def fetch_progress(rows_done, rows_total):
+                report_phase(game_key, "fetching", detail=f"{rows_done:,} of ~{rows_total:,} rows",
+                             rows_done=rows_done, rows_total=rows_total)
+                progress_callback(rows_done, rows_total)
 
             all_rows, column_names = self._fetch_all_rows_from_api(
                 game=game_key,
                 endpoints=endpoints,
-                progress_callback=progress_callback,
+                progress_callback=fetch_progress,
                 total_estimated_game_rows=total_estimated_game_rows
             )
 
@@ -659,6 +677,10 @@ class IngestService:
                 else:
                     print(f"  ↳ Skipping ID preload ({existing_count} > {self.max_id_preload}); upsert dedupe only")
 
+        rejected: dict[str, int] = {}
+        self._warm_embedding_model(game_key, collection)
+        report_phase(game_key, "embedding_and_writing", detail=f"0 of {len(all_rows):,} rows written",
+                     rows_done=0, rows_total=len(all_rows))
         total_rows_processed, total_rows_added = self._process_rows_from_file(
             game=game_key,
             all_rows=all_rows,
@@ -666,10 +688,41 @@ class IngestService:
             existing_ids=existing_ids,
             column_names=column_names,
             progress_callback=progress_callback,
+            rejected=rejected,
         )
+        rejected_total = sum(rejected.values())
+        if rejected_total:
+            print(
+                f"⚠ [{game_key.upper()}] Rejected {rejected_total} row(s) that do not fit "
+                f"{game_key} (wrong dataset or invalid numbers): {dict(sorted(rejected.items()))}"
+            )
+
+        # Remove rows a previous (unvalidated) ingest stored in this game's collection.
+        repair_summary = None
+        if self.auto_repair:
+            report_phase(game_key, "repairing")
+            try:
+                from services.data_repair import repair_game_collection
+
+                repair_summary = repair_game_collection(
+                    game_key, max_rows=self.repair_max_rows, collection=collection
+                )
+            except Exception as repair_error:
+                print(f"⚠ [{game_key.upper()}] Repair step skipped: {repair_error}")
+                repair_summary = {"status": "error", "message": str(repair_error)}
+            if isinstance(repair_summary, dict) and int(repair_summary.get("removed") or 0) > 0:
+                try:
+                    existing_count = max(0, existing_count - int(repair_summary.get("removed") or 0))
+                except Exception:
+                    pass
 
         # --- Finalization ---
         final_total = max(existing_count + total_rows_added, existing_count, total_rows_processed)
+        if isinstance(repair_summary, dict) and repair_summary.get("status") == "ok":
+            try:
+                final_total = int(collection.count() or 0)
+            except Exception:
+                pass
         try:
             from state.draw_counts import update_draw_count
             update_draw_count(collection_name, final_total)
@@ -677,6 +730,8 @@ class IngestService:
             pass
         if progress_callback:
             progress_callback(final_total, final_total)
+        report_phase(game_key, "done", detail=f"{final_total:,} draws stored", rows_done=final_total,
+                     rows_total=final_total)
 
         net_added = max(final_total - existing_count, 0)
         
@@ -701,12 +756,18 @@ class IngestService:
             except Exception as hook_error:
                 print(f"⚠ [{game_key.upper()}] Weight update hook skipped: {hook_error}")
 
-        return self._build_success_result(
+        result = self._build_success_result(
             existing_count=existing_count,
             total_rows_processed=total_rows_processed,
             total_rows_added=total_rows_added,
             final_total=final_total,
             force=force,
         )
+        # Additive fields only; existing keys are unchanged.
+        result["rejected"] = rejected_total
+        result["rejected_reasons"] = dict(sorted(rejected.items()))
+        if repair_summary is not None:
+            result["repair"] = repair_summary
+        return result
 
 ingest_service = IngestService()

@@ -53,11 +53,33 @@ def _prefetch_existing_counts(games: list[str]) -> dict[str, int]:
     return counts
 
 
+def _repair_existing_game(game: str, existing_draws: int) -> int:
+    """Drop rows an older, unvalidated ingest stored under the wrong game.
+
+    Idempotent and bounded (INGEST_REPAIR_MAX_ROWS); disable with STARTUP_REPAIR=0.
+    Returns the draw count after repair.
+    """
+    if os.getenv("STARTUP_REPAIR", "1") == "0":
+        return existing_draws
+    try:
+        from services.data_repair import repair_game_collection
+
+        summary = repair_game_collection(
+            game, max_rows=int(os.getenv("INGEST_REPAIR_MAX_ROWS", "100000"))
+        )
+        if summary.get("status") == "ok" and int(summary.get("removed") or 0) > 0:
+            return max(0, int(summary.get("kept") or 0))
+    except Exception as exc:
+        print(f"⚠ [STARTUP] Repair skipped for {game}: {exc}")
+    return existing_draws
+
+
 def _ingest_single_game(game: str, game_index: int, total_games: int, existing_draws: int):
     """Ingest one configured game and update startup state."""
     try:
         if existing_draws > 0:
             print(f"⏭ [STARTUP] Skipping {game} — {existing_draws} draws already in Chroma")
+            existing_draws = _repair_existing_game(game, existing_draws)
             with _startup_state_lock:
                 set_game_status(game, "completed")
                 update_startup_state(

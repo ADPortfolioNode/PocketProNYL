@@ -269,7 +269,7 @@ All game rules are defined in `backend/config.py`:
 
 ### Production
 - Docker Compose for container orchestration
-- Vercel for frontend deployment (optional)
+- Prebuilt GHCR images (`docker-compose.ghcr.yml`, see `DEPLOY.md`)
 - Health checks for service reliability
 - Background ingestion for fast startup
 

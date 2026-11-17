@@ -5,7 +5,15 @@ host_port_in_use() {
     local port="$1"
 
     if command -v docker >/dev/null 2>&1; then
-        if docker ps --format '{{.Ports}}' 2>/dev/null | grep -qE "(0\\.0\\.0\\.0|127\\.0\\.0\\.1|:::|\\[::\\]):${port}->"; then
+        # `docker ps -a` (not just `docker ps`): a created-but-not-running
+        # container still holds its published port mapping, and Docker's
+        # allocator refuses the bind even though nothing listens on it.
+        # `docker ps -a` includes running containers too, so one call
+        # covers both. The `:${port}->` match is host-side only (the
+        # container port is followed by /tcp, not ->), so any host IP
+        # counts — including a LAN-IP binding like
+        # 192.168.1.5:5001->5000/tcp.
+        if docker ps -a --format '{{.Ports}}' 2>/dev/null | grep -qE ":${port}->"; then
             return 0
         fi
     fi
@@ -57,7 +65,23 @@ resolve_compose_host_port() {
     local preferred="$2"
     local current="${!var_name:-}"
 
+    # A preset value is honoured only when it is actually free. When it
+    # is busy we bump +1 from it instead of trusting it blindly — a
+    # preset BACKEND_HOST_PORT=5003 used to sail straight into a
+    # "Bind for 0.0.0.0:5003 failed: port is already allocated" failure
+    # because this function returned early without checking it.
     if [ -n "${current}" ]; then
+        if ! host_port_in_use "${current}"; then
+            export "${var_name}=${current}"
+            return 0
+        fi
+        local free_port
+        if ! free_port=$(find_free_host_port "${current}" 20); then
+            echo "ERROR: Could not find a free host port near ${current} for ${var_name}." >&2
+            return 1
+        fi
+        export "${var_name}=${free_port}"
+        echo "Host port ${current} is busy; using ${free_port} for ${var_name}." >&2
         return 0
     fi
 

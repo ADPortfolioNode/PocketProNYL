@@ -116,6 +116,31 @@ class ExperimentStore:
             # Recover from a truncated/corrupt write so predictions can still save.
             return []
 
+    def list_history(self) -> List[Dict[str, Any]]:
+        """Evicted experiments, oldest first. Never pruned, never edited."""
+        try:
+            from utils.paths import experiments_history_file
+
+            path = experiments_history_file()
+        except Exception:
+            return []
+        records: List[Dict[str, Any]] = []
+        try:
+            with open(path, "r") as f:
+                for raw in f:
+                    raw = raw.strip()
+                    if not raw:
+                        continue
+                    try:
+                        record = json.loads(raw)
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+                    if isinstance(record, dict):
+                        records.append(record)
+        except OSError:
+            return []
+        return records
+
     @staticmethod
     def _json_default(value: Any):
         """Serialize numpy scalars and other common non-JSON types."""
@@ -131,6 +156,21 @@ class ExperimentStore:
     def save_experiment(self, experiment_data: Dict[str, Any]):
         experiments = self.list_experiments()
         experiments.append(experiment_data)
-        experiments = prune_experiments(experiments)
+        pruned = prune_experiments(experiments)
+        # Archive what the prune evicts instead of deleting it: the live
+        # file stays at 3 per game, but past suggestions by date survive
+        # for accuracy grading. Archiving must never break serving.
+        try:
+            evicted = [item for item in experiments if item not in pruned]
+            if evicted:
+                from utils.paths import experiments_history_file
+
+                path = experiments_history_file()
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "a") as f:
+                    for item in evicted:
+                        f.write(json.dumps(item, default=self._json_default) + "\n")
+        except Exception:
+            pass
         with open(self.store_path, "w") as f:
-            json.dump(experiments, f, indent=2, default=self._json_default)
+            json.dump(pruned, f, indent=2, default=self._json_default)

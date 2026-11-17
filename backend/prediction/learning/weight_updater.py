@@ -11,8 +11,12 @@ from prediction.state.weight_store import WeightStore
 
 _IMPROVEMENT_EPS = 1e-12
 _REGRESSION_MARGIN = 0.01
-_MAX_LEARNING_RATE = 0.45
-_RECENT_WINDOW = 8
+# Tamed for live use: small, accumulated increments, never a jump.
+# A single draw must not rewrite the blend (the old 0.18 temperature on
+# squared hit rates was effectively winner-take-all on one draw), and the
+# mix never exceeds 0.25 no matter how many recent promotions landed.
+_MAX_LEARNING_RATE = 0.25
+_RECENT_WINDOW = 20
 
 
 class WeightUpdater:
@@ -24,14 +28,14 @@ class WeightUpdater:
     def _adaptive_mix(self, state: WeightState, learning_rate: float, min_weight: float) -> float:
         """Larger mix when recent promotions land; smaller mix after regressions."""
         recent = state.history[-6:]
-        mix = min(max(float(learning_rate) * 2.4, 0.08), 0.55)
+        mix = min(max(float(learning_rate) * 2.4, 0.05), 0.25)
         if recent:
             regressions = sum(1 for item in recent if item.get("regressed"))
             promotions = sum(1 for item in recent if item.get("promoted"))
             if promotions >= 2 and regressions == 0:
-                mix = min(0.65, mix * 1.25)
+                mix = min(0.25, mix * 1.25)
             elif regressions >= 2:
-                mix = max(0.08, mix * (0.75 ** min(regressions - 1, 3)))
+                mix = max(0.05, mix * (0.75 ** min(regressions - 1, 3)))
         return min(max(mix, float(min_weight)), _MAX_LEARNING_RATE)
 
     def _normalize(self, weights: dict[str, float], min_weight: float) -> dict[str, float]:
@@ -63,7 +67,7 @@ class WeightUpdater:
         if not scores:
             return {}
         peak = max(scores.values())
-        temperature = 0.18
+        temperature = 0.5
         weighted: dict[str, float] = {}
         for name, score in scores.items():
             # Square the hit rate so a plugin that matched 2/5 beats one that matched 0.

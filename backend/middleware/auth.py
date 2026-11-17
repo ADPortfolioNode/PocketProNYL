@@ -1,5 +1,5 @@
 """
-Optional API-key access control for PocketPro:NYL.
+Optional API-key access control for PocketProNYGames.
 
 OFF BY DEFAULT: with AUTH_MODE unset (or "off") every request passes through
 unchanged, so local Docker / .bat starts behave exactly as before.

@@ -1,17 +1,5 @@
 {
-  "version": 2,
-  "name": "mensa-project-frontend",
-  "builds": [
-    {
-      "src": "frontend/package.json",
-      "use": "@vercel/static-build",
-      "config": { "distDir": "frontend/build" }
-    }
-  ],
-  "routes": [
-    { "src": "^/(.*)$", "dest": "/index.html" }
-  ],
-  "env": {
-    "REACT_APP_API_BASE": "@backend_url"
+  "git": {
+    "deploymentEnabled": false
   }
 }

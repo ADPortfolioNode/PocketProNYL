@@ -6,6 +6,9 @@ ARG REQUIREMENTS_FILE=requirements.txt
 ARG SKIP_ONNX=1
 COPY ${REQUIREMENTS_FILE} requirements.txt
 
+# The pip cache lives in a BuildKit cache mount, never in an image layer, so
+# --no-cache-dir would only slow rebuilds without shrinking the image.
+# hadolint ignore=DL3042
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip --default-timeout=300 --retries 5 install -r requirements.txt \
     && python -c "from hypercorn.config import Config; print('hypercorn ok')"

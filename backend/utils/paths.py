@@ -1,5 +1,5 @@
 """
-Central storage paths for PocketPro:NYL.
+Central storage paths for PocketProNYGames.
 
 Every module resolves its on-disk locations through these helpers so one
 environment variable moves all state. Defaults match the Docker volume layout
@@ -30,6 +30,13 @@ def experiments_dir() -> str:
 
 def experiments_file() -> str:
     return os.path.join(experiments_dir(), "experiments.json")
+
+
+def experiments_history_file() -> str:
+    # Append-only archive of experiments evicted by the 3-per-game prune.
+    # The live file stays small; history is where past suggestions by date
+    # survive for accuracy grading.
+    return os.path.join(experiments_dir(), "experiments_history.jsonl")
 
 
 def ingestion_cache_dir() -> str:
