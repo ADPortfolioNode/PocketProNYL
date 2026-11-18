@@ -6,8 +6,6 @@ import { installAuthFetch } from './utils/authFetch';
 import { installFlowActivity } from './utils/flowActivity';
 import './index.css';
 import 'bootstrap/dist/css/bootstrap.min.css';
-import './styles/starTrek.css';
-import './styles/magazine.css';
 
 installAuthFetch();
 installFlowActivity();

@@ -8,8 +8,7 @@ import Disclaimer from './components/Disclaimer';
 import { useStartupStatusPoll } from './hooks/useStartupStatusPoll';
 import './styles/modern.css';
 import './App.css';
-import './styles/magazine.css';
-import './styles/aurora.css';
+import './styles/theme.css';
 
 export default function App() {
   const [startupComplete, setStartupComplete] = useState(false);
